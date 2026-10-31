@@ -50,6 +50,8 @@ export interface MealCardProps {
   onAddPhoto: (entry: MealEntry) => void;
   onRemovePhoto: (photo: MealPhoto) => void;
   onOpenPhoto: (photo: MealPhoto) => void;
+  /** A photograph of this meal is being saved (spinner tile in the gallery). */
+  uploadingPhoto?: boolean;
   isDark: boolean;
 }
 
@@ -257,12 +259,13 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             <PhotoGallery
               photos={photos}
               colors={colors}
+              uploading={props.uploadingPhoto === true}
               onOpen={props.onOpenPhoto}
               onRemove={props.onRemovePhoto}
             />
             <View style={styles.actions}>
               <View style={styles.actionRow}>
-                <IconButton label={t('Photo_Add')} glyph="📷" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3} colors={colors} />
+                <IconButton label={t('Photo_Add')} glyph="📷" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
                 <IconButton label={t('Common_Edit')} glyph="✏️" onPress={startEdit} colors={colors} />
                 <IconButton label={t('Meal_Clear')} glyph="🗑" onPress={() => props.onClear(meal)} disabled={empty} tint={colors.missed} colors={colors} />
                 <IconButton label={t('Meal_MarkMissed')} glyph="✕" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed} tint={colors.missed} colors={colors} />

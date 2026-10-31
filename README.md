@@ -213,9 +213,8 @@ src/
   services/   bootstrap, meal tracking facade, reminders (expo-notifications
               triggers), connectivity, device id
   ui/         theme (single source, system appearance), app context, shell
-              components (busy overlay, dialogs), pull-to-refresh hook
-              (usePullToRefresh), screens: Dashboard, Calendar, Statistics,
-              Templates, Settings
+              components (busy overlay, dialogs), screens: Dashboard, Calendar,
+              Statistics, Templates, Settings
 ```
 
 ## Why Expo Go can run this app
@@ -254,11 +253,12 @@ Every module above was verified against Expo SDK 58's
 3. **Calendar / Statistics / Templates / Settings** tabs along the bottom;
    Settings → *Export data* writes a `.dtbackup` you can restore on Windows.
 
-Synchronization has no permanent banner: uploads and downloads happen silently in
-the background (after a save, on start-up, when the app returns to the front and
-on reconnection). Pull any list down to run a cycle on demand — the standard
-spinner appears while it runs — or use **Settings → Synchronization → Synchronize
-now**, where the last successful synchronization is shown as well.
+Synchronization has no banner and no gesture: uploads and downloads happen silently
+in the background (after a save, on start-up, when the app returns to the front, on
+reconnection), and every tab reloads itself when it comes to the front or when a
+background cycle brought new records. A manual cycle is available from
+**Settings → Synchronization → Synchronize now**, where the last successful
+synchronization is shown as well.
 
 ## Requirements & limits for scanning
 

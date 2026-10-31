@@ -6,16 +6,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
-import { EntityType, MealStatus } from '../../domain/enums';
+import { EntityType, MealStatus, SyncTrigger } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { formatDate, addDays, forDay } from '../../domain/analytics';
 import { isFutureMeal } from '../../domain/rules/completionRules';
@@ -33,7 +33,7 @@ import {
   saveMeal,
 } from '../../services/mealTracking';
 import { useApp } from '../appContext';
-import { subscribeDataChange } from '../../cloud/syncEngine';
+import { runCycle, subscribeDataChange } from '../../cloud/syncEngine';
 import { journalDelete } from '../../cloud/journal';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { MealCard } from '../components/MealCard';
@@ -43,7 +43,6 @@ import { PhotoViewer } from '../components/PhotoViewer';
 const Bar = BarButton;
 
 import { t, tFmt, formatLongDate } from '../strings';
-import { usePullToRefresh } from '../usePullToRefresh';
 import { fonts, metrics, themeColors, typeScale, type ThemeColors } from '../theme';
 
 export function DashboardScreen({
@@ -64,6 +63,8 @@ export function DashboardScreen({
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
   const [saveAllTick, setSaveAllTick] = useState(0);
   const [openEditors, setOpenEditors] = useState<string[]>([]);
+  /** Meal whose photograph is being prepared/saved right now (spinner tile). */
+  const [uploadingMealId, setUploadingMealId] = useState<string | null>(null);
   const batchRef = useRef({ remaining: 0, saved: 0, total: 0 });
   const { width } = useWindowDimensions();
   const now = new Date();
@@ -87,13 +88,13 @@ export function DashboardScreen({
     setPhotosByMeal(byMeal);
   }, [app.profile, date]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Pull the day down to synchronize and refresh it (the visible counterpart of
-  // the silent background cycles).
-  const { refreshing, onRefresh } = usePullToRefresh(reload);
+  // The day is reloaded whenever the tab comes to the front (and on mount, and
+  // when the date changes), so a background cycle's imports are already there.
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
 
   // A background cycle that imported the other device's records refreshes the
   // visible day, so a card never keeps a stale snapshot that a later save would
@@ -194,6 +195,9 @@ export function DashboardScreen({
   };
 
   const handleAddPhoto = (entry: MealEntry): void => {
+    if (uploadingMealId !== null) {
+      return;
+    }
     const existing = (photosByMeal[entry.id] ?? []).length;
     if (existing >= 3) {
       setStatus(t('Photo_LimitReached'));
@@ -210,19 +214,32 @@ export function DashboardScreen({
       if (response.canceled || response.assets === null) {
         return;
       }
-      for (const asset of response.assets) {
-        const result = await addPhotoToMeal(
-          entry.id,
-          asset.uri ?? '',
-          asset.fileName ?? 'photo.jpg',
-          accountId,
-        );
-        if (!result.ok && result.code !== undefined) {
-          setStatus(localizedCode(result.code));
+      // Reading, hashing and thumbnailing a photograph takes a moment on a
+      // phone, so the card shows a spinner tile while it is being saved.
+      setUploadingMealId(entry.id);
+      try {
+        for (const asset of response.assets) {
+          const result = await addPhotoToMeal(
+            entry.id,
+            asset.uri ?? '',
+            asset.fileName ?? 'photo.jpg',
+            accountId,
+          );
+          if (!result.ok && result.code !== undefined) {
+            setStatus(localizedCode(result.code));
+          }
         }
+        app.notifyChanged();
+        await reload();
+        // Signed in: pushing the photograph to the account is the slow part, so
+        // the spinner tile stays until one cycle finished. A failure is retried
+        // by the regular background triggers.
+        if (accountId !== null) {
+          await runCycle({ trigger: SyncTrigger.LocalChange });
+        }
+      } finally {
+        setUploadingMealId(null);
       }
-      app.notifyChanged();
-      await reload();
     })();
   };
 
@@ -354,16 +371,7 @@ export function DashboardScreen({
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
-          progressBackgroundColor={colors.cardFill}
-        />
-      }>
+      contentContainerStyle={styles.content}>
       {/* header - part of the page, not a card: long date title,
           Previous / Today / Next, progress line, three state counters, day
           actions and the status caption (spec 8.2). */}
@@ -452,6 +460,7 @@ export function DashboardScreen({
                 onAddPhoto={handleAddPhoto}
                 onRemovePhoto={handleRemovePhoto}
                 onOpenPhoto={setViewerPhoto}
+                uploadingPhoto={uploadingMealId === meal.id}
               />
             </View>
           );

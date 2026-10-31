@@ -16,7 +16,8 @@
 // legibly, so that detail lives in the list under the grid instead.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { DayProgress, addDays, formatDate, forDay, parseDate } from '../../domain/analytics';
 import { MealStatus } from '../../domain/enums';
@@ -35,7 +36,6 @@ import {
   cardShadow,
 } from '../theme';
 import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t, tFmt } from '../strings';
-import { usePullToRefresh } from '../usePullToRefresh';
 
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
@@ -78,12 +78,13 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
     setProgressByDate(progress);
   }, [app.profile, month]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Pull the month down to synchronize and redraw the day colours.
-  const { refreshing, onRefresh } = usePullToRefresh(reload);
+  // The month is reloaded whenever the tab comes to the front (and on mount),
+  // so a background cycle's imports are on screen without a pull gesture.
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
 
   // A background cycle that imported another device's records redraws the
   // month too, so a tab left open never shows a stale colour.
@@ -152,16 +153,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
-          progressBackgroundColor={colors.surface}
-        />
-      }>
+      contentContainerStyle={styles.content}>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
         {/* Month header: the arrows hug both edges and the month sits centered
             between them, iOS-calendar style. */}

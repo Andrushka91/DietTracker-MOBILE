@@ -9,7 +9,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -30,8 +29,13 @@ import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
-import { usePullToRefresh } from '../usePullToRefresh';
 import { formatMegabytes, t, tFmt } from '../strings';
+
+/**
+ * RN-only wording while the account card runs the Google flow (the Windows
+ * resource table has no matching key yet).
+ */
+const SIGNING_IN = 'Signing in…';
 
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
@@ -47,6 +51,8 @@ export function SettingsScreen(): React.JSX.Element {
   const [integrityText, setIntegrityText] = useState<string | null>(null);
   /** True while the explicit "Synchronize now" cycle runs (inline spinner). */
   const [syncing, setSyncing] = useState(false);
+  /** 'in' / 'out' while the Google flow runs - the card shows a small spinner. */
+  const [accountBusy, setAccountBusy] = useState<'in' | 'out' | null>(null);
 
   const refreshFacts = useCallback(async () => {
     setDbPath(await databasePath());
@@ -238,59 +244,81 @@ export function SettingsScreen(): React.JSX.Element {
       onCancel: () => setDialog(null),
       onConfirm: async () => {
         setDialog(null);
-        const result = await app.signOut(false);
-        if (!result.ok) {
-          // Pending-changes refusal: offer the explicit discard path.
-          setDialog({
-            title: t('Account_SignOutPendingTitle'),
-            message: `${t('Account_SignOutPendingDetail').replace('{0}', String(result.pending ?? 0))}\n\n${t('Account_SignOutPendingMessage')}`,
-            cancelText: t('Common_No'),
-            confirmText: t('Account_SignOut'),
-            destructive: true,
-            onCancel: () => {
-              setDialog(null);
-              app.showStatus(t('Account_SignOutPendingKept'));
-            },
-            onConfirm: async () => {
-              setDialog(null);
-              await app.signOut(true);
-              app.showStatus(t('Account_SignOutDiscarded'));
-            },
-          });
-        } else {
-          app.showStatus(t('Account_SignedOut'));
+        setAccountBusy('out');
+        try {
+          const result = await app.signOut(false);
+          if (!result.ok) {
+            // Pending-changes refusal: offer the explicit discard path.
+            setDialog({
+              title: t('Account_SignOutPendingTitle'),
+              message: `${t('Account_SignOutPendingDetail').replace('{0}', String(result.pending ?? 0))}\n\n${t('Account_SignOutPendingMessage')}`,
+              cancelText: t('Common_No'),
+              confirmText: t('Account_SignOut'),
+              destructive: true,
+              onCancel: () => {
+                setDialog(null);
+                app.showStatus(t('Account_SignOutPendingKept'));
+              },
+              onConfirm: async () => {
+                setDialog(null);
+                setAccountBusy('out');
+                try {
+                  await app.signOut(true);
+                  app.showStatus(t('Account_SignOutDiscarded'));
+                } finally {
+                  setAccountBusy(null);
+                }
+              },
+            });
+          } else {
+            app.showStatus(t('Account_SignedOut'));
+          }
+        } finally {
+          setAccountBusy(null);
         }
       },
     });
   };
 
+  /**
+   * Plain Google sign-in: the button turns into a small spinner while the
+   * picker and the account connection run. No modal, no confirmation wall.
+   */
+  const signIn = async (): Promise<void> => {
+    if (accountBusy !== null) {
+      return;
+    }
+    setAccountBusy('in');
+    try {
+      const result = await app.signInWithConsent(true);
+      if (!result.ok) {
+        app.showStatus(t(result.error ?? 'Auth_Unknown'));
+        return;
+      }
+      app.showStatus(t('Account_SignedIn'));
+      await refreshFacts();
+    } finally {
+      setAccountBusy(null);
+    }
+  };
+
   const prefs = app.preferences;
   const cardStyle = [styles.card, cardShadow, { backgroundColor: colors.cardFill }];
 
-  // Pull the page down to synchronize and re-read the storage / quota facts.
-  const { refreshing, onRefresh } = usePullToRefresh(async () => {
-    await refreshFacts();
-    await app.refreshSyncState();
-  });
-
-  // The spinner belongs to the status row: it is shown while an explicit cycle
-  // runs and while the engine still has changes queued for upload.
-  const busySyncing =
-    syncing || app.syncState === SyncState.Syncing || app.syncState === SyncState.PendingChanges;
+  // Background cycles never repaint this line: it keeps showing the last
+  // successful synchronization and only changes for an explicit run or when
+  // something needs attention (offline, sign in again, error).
+  const shownSyncState =
+    syncing
+      ? SyncState.Syncing
+      : app.syncState === SyncState.Syncing || app.syncState === SyncState.PendingChanges
+        ? SyncState.Synced
+        : app.syncState;
 
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
-          progressBackgroundColor={colors.cardFill}
-        />
-      }>
+      contentContainerStyle={styles.content}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
       {!app.signedIn && (
         <View style={cardStyle}>
@@ -329,20 +357,28 @@ export function SettingsScreen(): React.JSX.Element {
         </View>
         {app.signedIn ? (
           <View style={styles.inlineRow}>
-            <BarButton label={t('Account_SignOut')} danger onPress={confirmSignOut} colors={colors} />
+            <BarButton
+              label={t('Account_SignOut')}
+              danger
+              disabled={accountBusy !== null}
+              onPress={confirmSignOut}
+              colors={colors}
+            />
+            {accountBusy === 'out' && (
+              <ActivityIndicator size="small" color={colors.accent} />
+            )}
+          </View>
+        ) : accountBusy === 'in' ? (
+          <View style={styles.inlineRow}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={[styles.body, { color: colors.textSecondary }]}>{SIGNING_IN}</Text>
           </View>
         ) : (
           <View style={styles.inlineRow}>
-            <BarButton
-              label={t('Account_Google')}
-              accent
-              onPress={() => void app.signInWithConsent(true)}
-              colors={colors}
-            />
+            <BarButton label={t('Account_Google')} accent onPress={() => void signIn()} colors={colors} />
           </View>
         )}
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Account_CloudSaveHint')}</Text>
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Account_ConsentText')}</Text>
       </View>
 
       {/* 3. General card */}
@@ -360,15 +396,12 @@ export function SettingsScreen(): React.JSX.Element {
       {/* 4. Synchronization card */}
       <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Sync')}</Text>
       <View style={cardStyle}>
-        {/* One calm status row: a small spinner while a cycle runs, the last
-            successful synchronization otherwise. No "pending changes" alarm -
-            the engine retries on its own and the user has nothing to do. */}
-        <View style={styles.syncRow}>
-          {busySyncing && <ActivityIndicator size="small" color={colors.accent} />}
-          <Text style={[styles.body, { color: colors.textSecondary, flex: 1 }]}>
-            {syncStateLabel(busySyncing ? SyncState.Syncing : app.syncState, app.lastSyncSuccess)}
-          </Text>
-        </View>
+        {/* One calm line: the last successful synchronization, or the state of
+            the explicit cycle. No spinner and no "pending changes" alarm - the
+            engine retries on its own and the user has nothing to do. */}
+        <Text style={[styles.body, { color: colors.textSecondary }]}>
+          {syncStateLabel(shownSyncState, app.lastSyncSuccess)}
+        </Text>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_SyncFrequencyHint')}</Text>
         {/* iOS segmented control for the two cadences (same preference writes). */}
         <Segmented
@@ -453,9 +486,9 @@ function syncStateLabel(state: SyncState, lastSuccess: string | null): string {
       return t('Sync_Syncing');
     case SyncState.PendingChanges:
       // Changes waiting for the upload are the engine's own business: the card
-      // keeps saying "Synchronizing" with its spinner instead of raising a
-      // "pending changes" alarm the user cannot act on.
-      return t('Sync_Syncing');
+      // keeps showing the last successful synchronization instead of raising a
+      // "pending changes" alarm (or a spinner) the user cannot act on.
+      return lastSuccess !== null ? tFmt('Sync_LastSuccess', lastSuccess) : t('Sync_Never');
     case SyncState.Offline:
       return t('Sync_Offline');
     case SyncState.Paused:
@@ -519,10 +552,8 @@ const styles = StyleSheet.create({
   avatarGlyph: { fontSize: 30 },
   avatarImage: { width: '100%', height: '100%', borderRadius: metrics.radiusSmall },
   toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
-  /** Status line of the synchronization card: spinner + one sentence. */
-  syncRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   /** Buttons that keep their natural width instead of stretching the card. */
-  inlineRow: { flexDirection: 'row', flexWrap: 'wrap' },
+  inlineRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   /**
    * Compact action grid: exactly two buttons per row on a phone width. A third
    * action starts a new row at the same half width instead of stretching over

@@ -216,33 +216,26 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
 
   const signInWithConsent = useCallback(
     async (consent: boolean): Promise<SignInResult> => {
-      setBusy('signingIn');
-      try {
-        const result = await signInWithGoogle({ consentGranted: consent });
-        await applyAccount();
-        await reloadPreferences();
-        return result;
-      } finally {
-        setBusy(null);
-      }
+      // No blocking modal here: the Settings account card runs its own small
+      // spinner around this call, so the page stays visible while the Google
+      // picker and the first (background) download do their work.
+      const result = await signInWithGoogle({ consentGranted: consent });
+      await applyAccount();
+      await reloadPreferences();
+      return result;
     },
-    [applyAccount, reloadPreferences, setBusy],
+    [applyAccount, reloadPreferences],
   );
 
   const signOut = useCallback(
     async (discardChanges: boolean): Promise<SignOutResult> => {
-      setBusy('signingOut');
-      try {
-        const result = await signOutGoogle({ discardChanges });
-        if (result.ok) {
-          await boot();
-        }
-        return result;
-      } finally {
-        setBusy(null);
+      const result = await signOutGoogle({ discardChanges });
+      if (result.ok) {
+        await boot();
       }
+      return result;
     },
-    [boot, setBusy],
+    [boot],
   );
 
   const notifyChanged = useCallback(() => notifyLocalChange(), []);

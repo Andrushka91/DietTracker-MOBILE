@@ -37,7 +37,7 @@ export interface SignInResult {
   ok: boolean;
   /** Localized failure code (Auth_* / Account_*) when ok = false. */
   error?: string;
-  /** True when the account connected but data could not be loaded yet. */
+  /** True while the account's dataset is still being pulled in the background. */
   pendingData?: boolean;
   downloaded?: number;
   adopted?: number;
@@ -175,23 +175,17 @@ export async function signInWithGoogle(options: {
   // Adopt everything the cloud has never seen (spec 1.2 - first sign-in).
   const adopted = await pushAllLocalRecords();
 
-  // Pull this account's dataset at once; offline never blocks first use
-  // (spec 8.1: "offline must never block first use").
-  try {
-    const cycle = await runCycle({ trigger: SyncTrigger.PostSignIn });
-    if (cycle.error === 'Auth_sync_offline') {
-      return { ok: true, pendingData: true, adopted, downloaded: 0 };
-    }
-    return {
-      ok: true,
-      adopted,
-      downloaded: cycle.downloaded,
-      failed: cycle.failed + (cycle.error === undefined ? 0 : 1),
-      conflicts: cycle.conflicts,
-    };
-  } catch {
-    return { ok: true, pendingData: true, adopted, downloaded: 0 };
-  }
+  // Pull this account's dataset at once - but not on the user's clock. On a
+  // populated account the first download touches every meal document and every
+  // photograph, which kept the "Sign in" spinner on screen for a minute. The
+  // account is connected immediately and the pull runs in the background; the
+  // screens refill themselves as the records land (subscribeDataChange), and a
+  // failure is retried by the regular triggers.
+  void runCycle({ trigger: SyncTrigger.PostSignIn }).catch((error) => {
+    console.warn('[session] the first download after sign-in failed', error);
+  });
+
+  return { ok: true, pendingData: true, adopted, downloaded: 0 };
 }
 
 /**
@@ -232,8 +226,12 @@ export async function signOutGoogle(options: {
   }
 
   if (!options.discardChanges) {
-    // The sign-out button performs the upload itself (spec 6.4).
-    await runCycle({ trigger: SyncTrigger.Manual });
+    // Upload only what is actually still waiting: an idle sign-out must not sit
+    // through a full cycle (a listing plus a pull of the other device's changes)
+    // just to discover there is nothing to send.
+    if ((await countPendingOperations(account.id)) > 0) {
+      await runCycle({ trigger: SyncTrigger.Manual });
+    }
     const pending = await countPendingOperations(account.id);
     if (pending > 0) {
       return { ok: false, pending, error: 'Account_SignOutPendingDetail' };

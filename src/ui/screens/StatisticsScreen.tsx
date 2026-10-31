@@ -4,7 +4,8 @@
 // days with no decided meals print "–". Neutral disclaimer caption below.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import {
   PeriodProgress,
@@ -22,7 +23,6 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { fonts, cardShadow, themeColors, typeScale, type ThemeColors } from '../theme';
-import { usePullToRefresh } from '../usePullToRefresh';
 import { t, tFmt } from '../strings';
 
 type Mode = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -96,12 +96,13 @@ export function StatisticsScreen(): React.JSX.Element {
     setYearBars([]);
   }, [app.profile, anchor, mode]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Pull the statistics down to synchronize and recompute the period.
-  const { refreshing, onRefresh } = usePullToRefresh(load);
+  // Reloaded whenever the tab comes to the front (and on mount, mode or period
+  // change), so the bars follow the background cycles without a gesture.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   // A background cycle that imported another device's records recomputes the
   // period, so the bars never lag behind the dashboard.
@@ -132,16 +133,7 @@ export function StatisticsScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
-          progressBackgroundColor={colors.cardFill}
-        />
-      }>
+      contentContainerStyle={styles.content}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Statistics')}</Text>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill }]}>
         {/* iOS segmented control for the four periods (same mode switching). */}

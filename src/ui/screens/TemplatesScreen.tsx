@@ -5,7 +5,8 @@
 // PENDING entries. No destructive template management (parity with Windows).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { MealTemplate } from '../../domain/models';
 import { formatDate, parseDate } from '../../domain/analytics';
@@ -16,7 +17,6 @@ import { useApp } from '../appContext';
 import { BarButton } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { fonts, cardShadow, themeColors, typeScale } from '../theme';
-import { usePullToRefresh } from '../usePullToRefresh';
 import { t, tFmt } from '../strings';
 
 /**
@@ -38,12 +38,13 @@ export function TemplatesScreen(): React.JSX.Element {
     setTemplates(await getTemplates());
   }, []);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Pull the list down to synchronize and fetch the templates of every device.
-  const { refreshing, onRefresh } = usePullToRefresh(reload);
+  // Reloaded whenever the tab comes to the front, so templates imported by a
+  // background cycle are listed without a pull gesture.
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
 
   // A background cycle that imported another device's templates reloads the list.
   useEffect(() => subscribeDataChange(() => void reload()), [reload]);
@@ -82,16 +83,7 @@ export function TemplatesScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          tintColor={colors.accent}
-          colors={[colors.accent]}
-          progressBackgroundColor={colors.cardFill}
-        />
-      }>
+      contentContainerStyle={styles.content}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Templates')}</Text>
       <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>
 

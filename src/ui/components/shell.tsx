@@ -1,7 +1,7 @@
 // Cross-cutting shell component (spec 6): the busy overlay (6.4) for the few
-// operations that genuinely block the screen (sign-in, sign-out, restore).
-// Background synchronization is NOT reported here - it is silent, and the
-// platform refresh spinner of each screen is its only visible surface.
+// operations that genuinely block the screen (restore, downloading the account
+// preview). Signing in and out is NOT one of them any more - the Settings card
+// runs its own small spinner - and background synchronization is silent.
 
 import React from 'react';
 import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
