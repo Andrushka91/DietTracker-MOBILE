@@ -88,3 +88,6 @@ android-build.log
 *.db
 *.db-wal
 *.db-shm
+
+# Standalone release APKs built by scripts\build-apk.bat (published on the release page)
+release/

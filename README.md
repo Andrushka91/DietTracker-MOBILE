@@ -79,6 +79,7 @@ Something not working? Jump to [Troubleshooting](#troubleshooting).
 | `npm run start:rn` | Plain Metro bundler without the Expo wrapper (advanced) | — |
 | `npm run dev` | **Emulator testing in one command**: starts/reuses the AVD, waits for boot, then build + install + Metro | Android SDK |
 | `npm run android` | Local build + install (`expo run:android`) | Android SDK + USB device/emulator |
+| `npm run apk` | **Standalone release APKs** (JavaScript bundled, no Metro) into `release\` | Android SDK |
 | `npm run emulator` | Start the Android emulator AVD on its own (keep its window open) | Android SDK |
 | `npm run emulator:stop` | Gracefully stop the emulator (snapshot-safe `adb emu kill`) | Android SDK |
 | `npm run ios` | Local build + install (`expo run:ios`) | macOS + Xcode |
@@ -91,6 +92,30 @@ Nothing requires a global install — `expo`, `eas-cli`, `react-native`,
 > uses ships inside Expo Go (see the next section). `npm run android` /
 > `npm run ios` are **local** builds; Android needs the Android SDK (this
 > machine has it, see *Local Android emulator* below), iOS needs Xcode.
+
+## Standalone release APK
+
+`npm run apk` builds what you install on a phone **without** a development server:
+
+| Artifact | Size | For |
+|---|---|---|
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | ~29 MB | every modern phone (64-bit ARM) |
+| `release\DietTracker-1.0.0.0-universal.apk` | ~84 MB | any device, including 32-bit ARM and x86 emulators |
+
+The JavaScript is bundled inside the APK (Hermes bytecode, ~3.2 MB), so the app starts on its own -
+no Metro, no USB cable, no Expo Go. The release variant is signed with the standard **Android debug
+key** (`android/app/build.gradle`, `signingConfig signingConfigs.debug`): that is what makes
+sideloading work, and it can update a build that was signed with the same key. A Google Play upload
+needs its own keystore.
+
+The version comes from `android/app/build.gradle` (`versionName "1.0.0.0"`, `versionCode 1`), which is
+the identity the release is tagged with. `app.json` deliberately keeps the three-part `1.0.0`, because
+iOS requires `CFBundleShortVersionString` in that form and `expo prebuild` would otherwise overwrite
+the Android version with it.
+
+Install: copy the APK to the phone, open it, allow *install unknown apps* for the app you opened it
+from, and confirm. On a connected device the same thing is
+`adb install -r release\DietTracker-1.0.0.0-arm64-v8a.apk`.
 
 ## Local Android emulator (Android Studio SDK)
 
