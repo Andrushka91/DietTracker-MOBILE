@@ -15,7 +15,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
-import { EntityType, MealStatus, SyncTrigger } from '../../domain/enums';
+import { EntityType, MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { formatDate, addDays, forDay } from '../../domain/analytics';
 import { isFutureMeal } from '../../domain/rules/completionRules';
@@ -33,7 +33,7 @@ import {
   saveMeal,
 } from '../../services/mealTracking';
 import { useApp } from '../appContext';
-import { runCycle, subscribeDataChange } from '../../cloud/syncEngine';
+import { subscribeDataChange } from '../../cloud/syncEngine';
 import { journalDelete } from '../../cloud/journal';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { MealCard } from '../components/MealCard';
@@ -66,6 +66,8 @@ export function DashboardScreen({
   /** Meal whose photograph is being prepared/saved right now (spinner tile). */
   const [uploadingMealId, setUploadingMealId] = useState<string | null>(null);
   const batchRef = useRef({ remaining: 0, saved: 0, total: 0 });
+  /** Guards the single photograph pipeline (picker + save) against re-entry. */
+  const photoBusyRef = useRef(false);
   const { width } = useWindowDimensions();
   const now = new Date();
   // Two cards per row once the screen is wide enough (tablet / landscape),
@@ -195,7 +197,10 @@ export function DashboardScreen({
   };
 
   const handleAddPhoto = (entry: MealEntry): void => {
-    if (uploadingMealId !== null) {
+    // One photograph pipeline at a time: `uploadingMealId` only exists during
+    // the save phase, so without this flag a second tap while the system picker
+    // is still open would start a second picker - and a second spinner tile.
+    if (photoBusyRef.current || uploadingMealId !== null) {
       return;
     }
     const existing = (photosByMeal[entry.id] ?? []).length;
@@ -203,21 +208,22 @@ export function DashboardScreen({
       setStatus(t('Photo_LimitReached'));
       return;
     }
+    photoBusyRef.current = true;
     void (async () => {
-      const limit = 3 - existing;
-      const response = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
-        quality: 1,
-        selectionLimit: limit,
-        allowsMultipleSelection: limit > 1,
-      });
-      if (response.canceled || response.assets === null) {
-        return;
-      }
-      // Reading, hashing and thumbnailing a photograph takes a moment on a
-      // phone, so the card shows a spinner tile while it is being saved.
-      setUploadingMealId(entry.id);
       try {
+        const limit = 3 - existing;
+        const response = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: 'images',
+          quality: 1,
+          selectionLimit: limit,
+          allowsMultipleSelection: limit > 1,
+        });
+        if (response.canceled || response.assets === null) {
+          return;
+        }
+        // Reading, hashing and thumbnailing a photograph takes a moment on a
+        // phone, so the card shows a spinner tile while it is being saved.
+        setUploadingMealId(entry.id);
         for (const asset of response.assets) {
           const result = await addPhotoToMeal(
             entry.id,
@@ -231,14 +237,13 @@ export function DashboardScreen({
         }
         app.notifyChanged();
         await reload();
-        // Signed in: pushing the photograph to the account is the slow part, so
-        // the spinner tile stays until one cycle finished. A failure is retried
-        // by the regular background triggers.
-        if (accountId !== null) {
-          await runCycle({ trigger: SyncTrigger.LocalChange });
-        }
       } finally {
+        // The cloud upload itself continues in the background (the debounced
+        // cycle that notifyChanged scheduled). Waiting for it here kept the
+        // placeholder on screen next to the saved photo and started a second,
+        // redundant cycle - the spinner now ends with the local save.
         setUploadingMealId(null);
+        photoBusyRef.current = false;
       }
     })();
   };
@@ -499,7 +504,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: metrics.pagePadding,
     paddingTop: 6,
-    paddingBottom: 32,
+    paddingBottom: 104,
   },
   header: { paddingBottom: 2 },
   dateTitle: { fontSize: typeScale.title2, fontFamily: fonts.medium, marginBottom: 6 },

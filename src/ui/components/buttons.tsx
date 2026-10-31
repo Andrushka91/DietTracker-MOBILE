@@ -1,10 +1,18 @@
 // Small shared controls used by the meal card and settings rows.
-// Chrome follows the iOS button styles: capsule "filled" buttons (the accent
-// button carries the systemBlue fill, neutral buttons the system fill) and
-// circular tinted icon buttons.
+// Chrome is deliberately square: filled neutral/accent buttons with a crisp
+// 4 pt corner (never a capsule, never a circle) and matching icon buttons, so
+// every control in the app reads as the same family.
 
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import { fonts, type ThemeColors } from '../theme';
 import { t } from '../strings';
@@ -22,8 +30,7 @@ export function IconButton(props: {
   const tint = props.disabled === true
     ? props.colors.textMuted
     : props.tint ?? (props.danger === true ? props.colors.missed : props.colors.text);
-  // Standard WinUI button chrome: 1 px control stroke, control fill, 4 px
-  // corners - the Windows action bar looks exactly like this.
+  // Square control chrome: 1 px control stroke, control fill, 4 px corners.
   return (
     <Pressable
       accessibilityRole="button"
@@ -58,6 +65,10 @@ export function BarButton(props: {
    * which keeps three labelled buttons on one row on a phone.
    */
   compact?: boolean;
+  /** Optional leading glyph (emoji / symbol) drawn before the label. */
+  glyph?: string;
+  /** Shows a small spinner inside the button while its action is running. */
+  busy?: boolean;
   /** Optional layout tweak (e.g. flexShrink) merged after the base chrome. */
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
@@ -94,6 +105,13 @@ export function BarButton(props: {
       ]}>
       {/* One line: a compressed button ellipsizes its label instead of wrapping
           taller, so rows that must stay on one line never break. */}
+      {props.busy === true ? (
+        <ActivityIndicator size="small" color={foreground} />
+      ) : (
+        props.glyph !== undefined && (
+          <Text style={[styles.barGlyph, { color: foreground }]}>{props.glyph}</Text>
+        )
+      )}
       <Text
         style={[styles.barLabel, props.compact === true && styles.barLabelCompact, { color: foreground }]}
         numberOfLines={1}>
@@ -162,19 +180,21 @@ export function Segmented(props: {
 
 const styles = StyleSheet.create({
   iconButton: {
-    minWidth: 34,
-    height: 30,
+    minWidth: 36,
+    height: 32,
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 15,
+    borderRadius: 4,
   },
   glyph: { fontSize: 15 },
   bar: {
+    flexDirection: 'row',
+    columnGap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
-    minHeight: 32,
+    paddingVertical: 8,
+    borderRadius: 4,
+    minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -185,12 +205,14 @@ const styles = StyleSheet.create({
    * the medium cut made them look like headings instead of controls.
    */
   barLabel: { fontFamily: fonts.regular, fontSize: 14 },
+  /** Leading symbol of a labelled button (account card, wide actions). */
+  barGlyph: { fontSize: 14 },
   /** SettingsPage.xaml draws the privacy/backup buttons at FontSize 13 / Padding 8,4. */
-  barCompact: { paddingHorizontal: 8, paddingVertical: 5 },
+  barCompact: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32 },
   barLabelCompact: { fontSize: 13 },
-  /** iOS segmented control: rounded track, raised selected segment. */
-  segment: { flexDirection: 'row', borderRadius: 9, padding: 2 },
-  segmentItem: { flex: 1, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: 7 },
+  /** Segmented control: squared track with a raised selected segment. */
+  segment: { flexDirection: 'row', borderRadius: 6, padding: 2 },
+  segmentItem: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
   segmentSelected: {
     shadowColor: '#000000',
     shadowOpacity: 0.15,

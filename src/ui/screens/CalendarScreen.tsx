@@ -342,7 +342,7 @@ function statusLabel(status: MealStatus): string {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: metrics.pagePadding, paddingBottom: 32 },
+  content: { padding: metrics.pagePadding, paddingBottom: 104 },
   panel: { borderRadius: 16, padding: 14 },
   /** The arrows sit next to the centered month label, as one group. */
   monthRow: {
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   dayRowText: { flex: 1, paddingVertical: 6 },
   dayRowTitle: { fontSize: 13, fontFamily: fonts.medium },
   dayRowMeta: { fontSize: 11, marginTop: 1 },
-  dayRowPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  dayRowPill: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 2 },
   dayRowPillText: { color: argb('#FFFFFFFF'), fontSize: 10, fontFamily: fonts.medium },
   legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 6, marginTop: 12 },
   legendItem: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },

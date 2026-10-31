@@ -133,14 +133,14 @@ export function TemplatesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 32, rowGap: 10 },
+  content: { padding: 12, paddingBottom: 104, rowGap: 10 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
   notice: { fontSize: 12, fontStyle: 'italic' },
   panel: { borderRadius: 16, padding: 14 },
   empty: { fontSize: 14, textAlign: 'center', paddingVertical: 18 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: 8 },
   name: { fontSize: 16, fontFamily: fonts.medium, flex: 1 },
-  kind: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  kind: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3 },
   summary: { fontSize: 13, marginTop: 4 },
   updated: { fontSize: 11, marginTop: 4 },
   actions: { flexDirection: 'row', marginTop: 10 },

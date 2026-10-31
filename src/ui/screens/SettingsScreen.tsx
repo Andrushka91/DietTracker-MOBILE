@@ -6,15 +6,7 @@
 //  7 Floating status line (StatusCaption, rendered by the shell)
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
@@ -330,6 +322,8 @@ export function SettingsScreen(): React.JSX.Element {
       {/* 2. Account card */}
       <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Account')}</Text>
       <View style={cardStyle}>
+        {/* One user tile: avatar, identity and the account action at the end of
+            the same row - no second row of buttons under the identity. */}
         <View style={styles.accountRow}>
           <View
             style={[
@@ -342,42 +336,46 @@ export function SettingsScreen(): React.JSX.Element {
               <Text style={[styles.avatarGlyph, { color: colors.textMuted }]}>👤</Text>
             )}
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.body, { color: colors.textSecondary }]} selectable>
-              {app.signedIn ? (quotaLine ?? t('Account_ProviderGoogle')) : t('Account_ProviderNone')}
-            </Text>
-            <Text style={[styles.email, { color: colors.text }]} selectable>
+          <View style={styles.accountText}>
+            <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={1} selectable>
               {app.signedIn
                 ? accountIdentity.email !== ''
                   ? accountIdentity.email
                   : t('Account_SignedIn')
                 : t('Account_NoEmail')}
             </Text>
+            <Text style={[styles.accountMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+              {app.signedIn
+                ? quotaLine ?? t('Account_ProviderGoogle')
+                : t('Account_ProviderNone')}
+            </Text>
           </View>
-        </View>
-        {app.signedIn ? (
-          <View style={styles.inlineRow}>
+          {/* The action keeps its place while it runs: `busy` swaps the glyph for
+              a spinner inside the button, so the tile never jumps. */}
+          {app.signedIn ? (
             <BarButton
-              label={t('Account_SignOut')}
+              compact
               danger
+              label={t('Account_SignOut')}
+              style={styles.accountAction}
               disabled={accountBusy !== null}
+              busy={accountBusy === 'out'}
               onPress={confirmSignOut}
               colors={colors}
             />
-            {accountBusy === 'out' && (
-              <ActivityIndicator size="small" color={colors.accent} />
-            )}
-          </View>
-        ) : accountBusy === 'in' ? (
-          <View style={styles.inlineRow}>
-            <ActivityIndicator size="small" color={colors.accent} />
-            <Text style={[styles.body, { color: colors.textSecondary }]}>{SIGNING_IN}</Text>
-          </View>
-        ) : (
-          <View style={styles.inlineRow}>
-            <BarButton label={t('Account_Google')} accent onPress={() => void signIn()} colors={colors} />
-          </View>
-        )}
+          ) : (
+            <BarButton
+              compact
+              accent
+              label={accountBusy === 'in' ? SIGNING_IN : t('Account_Google')}
+              style={styles.accountAction}
+              disabled={accountBusy === 'in'}
+              busy={accountBusy === 'in'}
+              onPress={() => void signIn()}
+              colors={colors}
+            />
+          )}
+        </View>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Account_CloudSaveHint')}</Text>
       </View>
 
@@ -402,8 +400,7 @@ export function SettingsScreen(): React.JSX.Element {
         <Text style={[styles.body, { color: colors.textSecondary }]}>
           {syncStateLabel(shownSyncState, app.lastSyncSuccess)}
         </Text>
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_SyncFrequencyHint')}</Text>
-        {/* iOS segmented control for the two cadences (same preference writes). */}
+        {/* The cadence control first, its explanation right under it. */}
         <Segmented
           options={[t('Sync_FrequencyWeekly'), t('Sync_FrequencyMonthly')]}
           index={(prefs?.syncFrequency ?? 1) === SyncFrequency.Monthly ? 1 : 0}
@@ -412,12 +409,13 @@ export function SettingsScreen(): React.JSX.Element {
           }
           colors={colors}
         />
-        {/* Two compact actions per row: the three sync actions used to take one
-            full-width line each and left most of the card empty. */}
+        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_SyncFrequencyHint')}</Text>
+        {/* Sync actions: the primary "Synchronize now" spans the card, the two
+            secondary actions share the row below it. */}
         <View style={styles.actionGrid}>
           <BarButton
             compact
-            style={styles.gridCell}
+            style={styles.gridWide}
             label={t('Settings_SyncNow')}
             accent
             disabled={!app.signedIn || syncing}
@@ -453,12 +451,11 @@ export function SettingsScreen(): React.JSX.Element {
         <Text style={[styles.hint, { color: colors.textMuted }]} selectable>
           {dbPath}
         </Text>
-        {/* Export / Restore / Check: two compact buttons per row, so the labels
-            never have to ellipsize to fit one crowded line. */}
+        {/* Export / Restore share a row; the integrity check closes the card. */}
         <View style={styles.actionGrid}>
           <BarButton compact style={styles.gridCell} label={t('Settings_Export')} accent onPress={() => void exportData()} colors={colors} />
           <BarButton compact style={styles.gridCell} label={t('Settings_Import')} onPress={() => void restoreBackupFile()} colors={colors} />
-          <BarButton compact style={styles.gridCell} label={t('Settings_Integrity')} onPress={() => void checkDbIntegrity()} colors={colors} />
+          <BarButton compact style={styles.gridWide} label={t('Settings_Integrity')} onPress={() => void checkDbIntegrity()} colors={colors} />
         </View>
         {integrityText !== null && (
           <Text style={[styles.body, { color: colors.textSecondary }]}>{integrityText}</Text>
@@ -523,7 +520,7 @@ function ToggleRow(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 32, rowGap: 12 },
+  content: { padding: 12, paddingBottom: 104, rowGap: 12 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
   /** Grouped card: no stroke - the card floats on the grouped background. */
   card: { borderRadius: metrics.radius, padding: 16, rowGap: 10 },
@@ -538,27 +535,31 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: typeScale.headline, fontFamily: fonts.medium },
   body: { fontSize: 13, lineHeight: 18 },
-  email: { fontSize: 14, fontFamily: fonts.medium, marginTop: 2 },
   hint: { fontSize: 11, lineHeight: 15 },
+  /** User tile: avatar + identity + the account action, all on one row. */
   accountRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12 },
+  accountText: { flex: 1, rowGap: 2 },
+  accountName: { fontSize: 14, fontFamily: fonts.medium },
+  accountMeta: { fontSize: 12 },
+  /** Wide enough for "Sign in with Google" - the action never ellipsizes. */
+  accountAction: { minWidth: 112, minHeight: 36, justifyContent: 'center' },
   avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: metrics.radiusSmall,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarGlyph: { fontSize: 30 },
-  avatarImage: { width: '100%', height: '100%', borderRadius: metrics.radiusSmall },
+  avatarGlyph: { fontSize: 22 },
+  avatarImage: { width: '100%', height: '100%' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
-  /** Buttons that keep their natural width instead of stretching the card. */
-  inlineRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   /**
-   * Compact action grid: exactly two buttons per row on a phone width. A third
-   * action starts a new row at the same half width instead of stretching over
-   * the whole card, which keeps the card balanced and the buttons small.
+   * Action grid: two equal buttons per row, plus one full-width button for the
+   * primary action of the card. Rectangular chrome keeps every row aligned.
    */
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 6, rowGap: 8 },
-  gridCell: { flexBasis: '48%', flexGrow: 0, flexShrink: 0 },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 8 },
+  gridCell: { flexBasis: '48%', flexGrow: 1, minHeight: 38, justifyContent: 'center' },
+  gridWide: { flexBasis: '100%', flexGrow: 1, minHeight: 38, justifyContent: 'center' },
 });

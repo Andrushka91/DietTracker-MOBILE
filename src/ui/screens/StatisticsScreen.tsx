@@ -273,7 +273,7 @@ function VerticalBars(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 32 },
+  content: { padding: 12, paddingBottom: 104 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium, marginBottom: 8 },
   panel: { borderRadius: 16, padding: 16 },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },

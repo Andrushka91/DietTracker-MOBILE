@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   actionDivider: { borderLeftWidth: StyleSheet.hairlineWidth },
   actionText: { fontSize: 17, textAlign: 'center' },
   actionTextStrong: { fontFamily: fonts.medium },
-  captionHost: { position: 'absolute', right: 14, bottom: 70, left: 14, alignItems: 'flex-end' },
+  captionHost: { position: 'absolute', right: 14, bottom: 100, left: 14, alignItems: 'flex-end' },
   caption: {
     borderRadius: 14,
     paddingHorizontal: 14,

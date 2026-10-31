@@ -88,9 +88,16 @@ function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }): React
   return <Text style={[styles.tabIcon, { opacity: focused ? 1 : 0.55 }]}>{glyph}</Text>;
 }
 
+/** Height of the floating (iOS style) tab bar, labels included. */
+const TAB_BAR_HEIGHT = 66;
+
 function Tabs(): React.JSX.Element {
   const { isDark } = useApp();
   const colors = themeColors(isDark);
+  const insets = useSafeAreaInsets();
+  // The bar floats 14 pt from both edges and clears the home indicator, so the
+  // pages keep their own background right up to the system edges.
+  const barBottom = Math.max(insets.bottom, 10);
   return (
     <Tab.Navigator
       screenOptions={{
@@ -98,13 +105,29 @@ function Tabs(): React.JSX.Element {
         // the month, "Statistics"...).
         headerShown: false,
         tabBarStyle: {
+          position: 'absolute',
+          left: 14,
+          right: 14,
+          bottom: barBottom,
+          height: TAB_BAR_HEIGHT,
+          paddingTop: 7,
+          paddingBottom: 7,
+          borderRadius: 20,
           backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopWidth: 0,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.border,
+          shadowColor: '#000000',
+          shadowOpacity: isDark ? 0.5 : 0.16,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 14,
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 11, fontFamily: fonts.regular },
+        tabBarLabelStyle: { fontSize: 10, fontFamily: fonts.regular, marginTop: 1 },
+        tabBarIconStyle: { marginTop: 2 },
+        tabBarItemStyle: { paddingVertical: 2 },
       }}>
       <Tab.Screen
         name="DashboardTab"
@@ -281,7 +304,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: argb('#FFF3F3F3'),
   },
-  tabIcon: { fontSize: 18 },
+  tabIcon: { fontSize: 20 },
 });
 
 export default App;
