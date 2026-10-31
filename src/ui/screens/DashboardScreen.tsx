@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -42,6 +43,7 @@ import { PhotoViewer } from '../components/PhotoViewer';
 const Bar = BarButton;
 
 import { t, tFmt, formatLongDate } from '../strings';
+import { usePullToRefresh } from '../usePullToRefresh';
 import { fonts, metrics, themeColors, typeScale, type ThemeColors } from '../theme';
 
 export function DashboardScreen({
@@ -88,6 +90,10 @@ export function DashboardScreen({
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Pull the day down to synchronize and refresh it (the visible counterpart of
+  // the silent background cycles).
+  const { refreshing, onRefresh } = usePullToRefresh(reload);
 
   // A background cycle that imported the other device's records refreshes the
   // visible day, so a card never keeps a stale snapshot that a later save would
@@ -348,7 +354,16 @@ export function DashboardScreen({
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.cardFill}
+        />
+      }>
       {/* header - part of the page, not a card: long date title,
           Previous / Today / Next, progress line, three state counters, day
           actions and the status caption (spec 8.2). */}

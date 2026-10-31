@@ -1,6 +1,11 @@
-// Application root (spec 6): bootstraps the database, gates onboarding,
-// hosts the five-tab shell inside a native stack, and mounts the
-// cross-cutting overlays (busy 6.4, status strip 6.3, floating caption 6.6).
+// Application root (spec 6): bootstraps the database, hosts the five-tab shell
+// inside a native stack, and mounts the cross-cutting overlays (busy 6.4,
+// floating caption 6.6).
+//
+// There is no sign-in wall and no synchronization bar: the app opens straight
+// into the dashboard, guest mode included, and the account is connected (or a
+// manual sync started) from the Settings page. Background cycles stay invisible;
+// each list refreshes through its own pull-to-refresh spinner.
 //
 // Navigation (6.2): bottom tab bar with Dashboard / Calendar / Statistics /
 // Templates / Settings; Android hardware back goes to Dashboard before
@@ -31,14 +36,13 @@ import {
 } from '@expo-google-fonts/open-sans';
 
 import { AppProvider, useApp } from './src/ui/appContext';
-import { BusyOverlay, SyncStatusStrip } from './src/ui/components/shell';
+import { BusyOverlay } from './src/ui/components/shell';
 import { StatusCaption } from './src/ui/components/dialogs';
 import { DashboardScreen } from './src/ui/screens/DashboardScreen';
 import { CalendarScreen } from './src/ui/screens/CalendarScreen';
 import { StatisticsScreen } from './src/ui/screens/StatisticsScreen';
 import { TemplatesScreen } from './src/ui/screens/TemplatesScreen';
 import { SettingsScreen } from './src/ui/screens/SettingsScreen';
-import { OnboardingScreen } from './src/ui/screens/OnboardingScreen';
 import { argb, fonts, themeColors } from './src/ui/theme';
 import { t } from './src/ui/strings';
 import { setAppActive, startSyncTriggers, stopSyncTriggers } from './src/cloud/syncEngine';
@@ -53,7 +57,6 @@ const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 type RootStackParamList = {
-  Onboarding: undefined;
   Tabs: undefined;
   Dashboard: { date?: string; mealKey?: number } | undefined;
 };
@@ -154,7 +157,7 @@ function Tabs(): React.JSX.Element {
 }
 
 function Root(): React.JSX.Element {
-  const { ready, onboardingCompleted, isDark, busy } = useApp();
+  const { ready, isDark, busy } = useApp();
   // Hook order matters: this must stay above the `!ready` early return.
   const insets = useSafeAreaInsets();
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
@@ -233,19 +236,12 @@ function Root(): React.JSX.Element {
         style={{
           flex: 1,
           backgroundColor: colors.background,
-          // Without the app bar the status strip and the pages start right
-          // below the system status bar (the onboarding screen already pads
-          // itself, which is why this only applies to the tab shell).
-          paddingTop: onboardingCompleted ? insets.top : 0,
+          // The pages start right below the system status bar.
+          paddingTop: insets.top,
         }}>
-        <SyncStatusStrip />
-        {!onboardingCompleted ? (
-          <OnboardingScreen />
-        ) : (
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Dashboard" component={Tabs} />
-          </Stack.Navigator>
-        )}
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Dashboard" component={Tabs} />
+        </Stack.Navigator>
         <StatusCaption />
         {busy !== null && <BusyOverlay />}
       </View>

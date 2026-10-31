@@ -14,8 +14,10 @@
 //
 // States (spec 6.3): NotConfigured / Synced / Syncing / PendingChanges /
 // Offline / AuthenticationRequired / Error / Paused. Synced is reported only
-// after the provider confirmed the upload. Background cycles are silent; the
-// Manual trigger is the one that surfaces progress + confirmation.
+// after the provider confirmed the upload. The states are no longer painted on
+// a permanent strip: they only feed the one status row of the Settings
+// synchronization card. Pulling a list down (or the "Synchronize now" button)
+// is the only visible manual surface.
 
 import {
   CLOUD_SCHEMA_MIN_SUPPORTED,

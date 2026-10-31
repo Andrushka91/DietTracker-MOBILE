@@ -5,16 +5,18 @@
 // PENDING entries. No destructive template management (parity with Windows).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { MealTemplate } from '../../domain/models';
 import { formatDate, parseDate } from '../../domain/analytics';
 import { getTemplates } from '../../data/repositories';
 import { applyTemplate } from '../../services/mealTracking';
+import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { fonts, cardShadow, themeColors, typeScale } from '../theme';
+import { usePullToRefresh } from '../usePullToRefresh';
 import { t, tFmt } from '../strings';
 
 /**
@@ -39,6 +41,12 @@ export function TemplatesScreen(): React.JSX.Element {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Pull the list down to synchronize and fetch the templates of every device.
+  const { refreshing, onRefresh } = usePullToRefresh(reload);
+
+  // A background cycle that imported another device's templates reloads the list.
+  useEffect(() => subscribeDataChange(() => void reload()), [reload]);
 
   /** True for a real calendar day written as yyyy-MM-dd. */
   const isDate = (value: string): boolean => {
@@ -74,7 +82,16 @@ export function TemplatesScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.cardFill}
+        />
+      }>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Templates')}</Text>
       <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>
 

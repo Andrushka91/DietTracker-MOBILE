@@ -16,13 +16,14 @@
 // legibly, so that detail lives in the list under the grid instead.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { DayProgress, addDays, formatDate, forDay, parseDate } from '../../domain/analytics';
 import { MealStatus } from '../../domain/enums';
 import { MealCategory } from '../../domain/models';
 import { getMealsInRange, getPhotoCounts } from '../../data/repositories';
 import { ensureCategories } from '../../services/mealTracking';
+import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, IconButton } from '../components/buttons';
 import {
@@ -34,6 +35,7 @@ import {
   cardShadow,
 } from '../theme';
 import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t, tFmt } from '../strings';
+import { usePullToRefresh } from '../usePullToRefresh';
 
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
@@ -79,6 +81,13 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Pull the month down to synchronize and redraw the day colours.
+  const { refreshing, onRefresh } = usePullToRefresh(reload);
+
+  // A background cycle that imported another device's records redraws the
+  // month too, so a tab left open never shows a stale colour.
+  useEffect(() => subscribeDataChange(() => void reload()), [reload]);
 
   const shiftMonth = (delta: number): void => {
     const year = Number(month.slice(0, 4));
@@ -143,7 +152,16 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.surface}
+        />
+      }>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
         {/* Month header: the arrows hug both edges and the month sits centered
             between them, iOS-calendar style. */}

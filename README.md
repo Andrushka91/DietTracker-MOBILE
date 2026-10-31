@@ -49,12 +49,13 @@ Leave this terminal open — it prints a **QR code** and keeps serving the app
 1. Unlock the phone and open **Expo Go**.
 2. Tap the scan icon (or just point the phone camera at the terminal) so it
    scans the **QR code**.
-3. The JS bundle downloads (first time: a few seconds) and the app shows
-   **Welcome to Diet Tracker** — you are in.
+3. The JS bundle downloads (first time: a few seconds) and the app opens
+   straight on **Today** — you are in. There is no sign-in wall: guest mode is
+   fully functional, and the Google account is connected later from **Settings**
+   (only needed for synchronization).
 
-Expected path, step by step: QR → loading spinner → onboarding screen →
-enable the consent toggle → *Continue without an account* (guest mode works
-fully offline) → the five meal cards of the Today tab.
+Expected path, step by step: QR → loading spinner → the five meal cards of the
+Today tab.
 
 ### 6. Everyday workflow
 
@@ -212,8 +213,9 @@ src/
   services/   bootstrap, meal tracking facade, reminders (expo-notifications
               triggers), connectivity, device id
   ui/         theme (single source, system appearance), app context, shell
-              components (busy overlay, status strip, dialogs), screens:
-              Onboarding, Dashboard, Calendar, Statistics, Templates, Settings
+              components (busy overlay, dialogs), pull-to-refresh hook
+              (usePullToRefresh), screens: Dashboard, Calendar, Statistics,
+              Templates, Settings
 ```
 
 ## Why Expo Go can run this app
@@ -243,14 +245,20 @@ Every module above was verified against Expo SDK 58's
 
 ## First walkthrough on the device
 
-1. **Onboarding**: enable the consent toggle → *Continue without an account*
-   (guest mode is fully functional offline), or *Sign in with Google* if you
-   put real ids in `google-client.json` (see *Google client configuration*
-   above).
+1. The app opens on **Today** — guest mode is fully functional offline, no
+   account needed. To synchronize, open **Settings → Account → Sign in with
+   Google** (requires real ids in `google-client.json`, see *Google client
+   configuration* above); records created as a guest are adopted by the account.
 2. **Today tab**: five permanent meal cards — type a title + description,
    Save, then ✓ DONE / ✕ MISSED; photos via 📷.
 3. **Calendar / Statistics / Templates / Settings** tabs along the bottom;
    Settings → *Export data* writes a `.dtbackup` you can restore on Windows.
+
+Synchronization has no permanent banner: uploads and downloads happen silently in
+the background (after a save, on start-up, when the app returns to the front and
+on reconnection). Pull any list down to run a cycle on demand — the standard
+spinner appears while it runs — or use **Settings → Synchronization → Synchronize
+now**, where the last successful synchronization is shown as well.
 
 ## Requirements & limits for scanning
 
@@ -339,7 +347,8 @@ npm start
   stepping, sync frequency/backoff, payload + envelope round-trip, Drive
   addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask).
 * Verified on the local Android emulator (API 37, x86_64 debug build):
-  onboarding → guest mode, the five permanent cards, inline edit + save,
+  first launch straight into the dashboard (no sign-in wall) → guest mode,
+  the five permanent cards, inline edit + save,
   mark DONE / mark all MISSED, progress + counters, day templates
   (save-as-template prompt, apply-to-date), calendar month navigation,
   statistics, settings (cadence buttons, storage usage, database path,

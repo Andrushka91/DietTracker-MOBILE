@@ -55,6 +55,16 @@ export async function bootstrapApp(): Promise<BootResult> {
     await upsertPreferences(preferences);
   }
 
+  // First launch opens the app itself (spec change): the onboarding wall asked
+  // for a Google account before the first meal, which is a sign-in prompt
+  // nobody wants. Guest mode is the default, the account is connected later
+  // from Settings - the one place where synchronization is needed - and any
+  // records created before that are adopted by the account on sign-in.
+  if (!preferences.onboardingCompleted) {
+    preferences = { ...preferences, onboardingCompleted: true, updatedAt: new Date().toISOString() };
+    await upsertPreferences(preferences);
+  }
+
   // Categories may exist but be incomplete (partial restore) - heal again.
   const categories = await getCategories();
   if (categories.length < 5) {

@@ -1,7 +1,7 @@
 // App-wide context: the single store the five tabs share (spec 6 shell).
 // Holds the bootstrapped profile + preferences, the account id, the sync
-// state for the status strip, the busy overlay (6.4) and the floating status
-// caption (6.6). Every mutation writes immediately (no Save button - 8.8).
+// state shown by the Settings card, the busy overlay (6.4) and the floating
+// status caption (6.6). Every mutation writes immediately (no Save button - 8.8).
 
 import React, {
   createContext,

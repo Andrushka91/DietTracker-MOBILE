@@ -6,7 +6,16 @@
 //  7 Floating status line (StatusCaption, rendered by the shell)
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
@@ -21,6 +30,7 @@ import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
+import { usePullToRefresh } from '../usePullToRefresh';
 import { formatMegabytes, t, tFmt } from '../strings';
 
 export function SettingsScreen(): React.JSX.Element {
@@ -35,6 +45,8 @@ export function SettingsScreen(): React.JSX.Element {
   });
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
   const [integrityText, setIntegrityText] = useState<string | null>(null);
+  /** True while the explicit "Synchronize now" cycle runs (inline spinner). */
+  const [syncing, setSyncing] = useState(false);
 
   const refreshFacts = useCallback(async () => {
     setDbPath(await databasePath());
@@ -76,7 +88,13 @@ export function SettingsScreen(): React.JSX.Element {
   }, [app.signedIn]);
 
   const synchronizeNow = async (): Promise<void> => {
-    app.setBusy('sync');
+    if (syncing) {
+      return;
+    }
+    // No blocking overlay for a synchronization: the card keeps its own small
+    // spinner for the few seconds the cycle takes, so the page stays usable and
+    // reads like a native pull-to-refresh instead of a modal wall.
+    setSyncing(true);
     try {
       const result = await runCycle({ trigger: SyncTrigger.Manual });
       if (result.uploaded + result.downloaded > 0) {
@@ -88,13 +106,13 @@ export function SettingsScreen(): React.JSX.Element {
       if (result.error !== undefined) {
         app.showStatus(t(result.error.startsWith('Auth_') ? result.error : 'Auth_sync_failed'));
       } else if (result.failed > 0 || result.conflicts > 0) {
-        app.showStatus(t('Sync_PendingChanges'));
+        app.showStatus(t('Auth_sync_failed'));
       } else {
         app.showStatus(t('Sync_Synced'));
       }
       await app.refreshSyncState();
     } finally {
-      app.setBusy(null);
+      setSyncing(false);
     }
   };
 
@@ -249,10 +267,30 @@ export function SettingsScreen(): React.JSX.Element {
   const prefs = app.preferences;
   const cardStyle = [styles.card, cardShadow, { backgroundColor: colors.cardFill }];
 
+  // Pull the page down to synchronize and re-read the storage / quota facts.
+  const { refreshing, onRefresh } = usePullToRefresh(async () => {
+    await refreshFacts();
+    await app.refreshSyncState();
+  });
+
+  // The spinner belongs to the status row: it is shown while an explicit cycle
+  // runs and while the engine still has changes queued for upload.
+  const busySyncing =
+    syncing || app.syncState === SyncState.Syncing || app.syncState === SyncState.PendingChanges;
+
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+          progressBackgroundColor={colors.cardFill}
+        />
+      }>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
       {!app.signedIn && (
         <View style={cardStyle}>
@@ -322,9 +360,15 @@ export function SettingsScreen(): React.JSX.Element {
       {/* 4. Synchronization card */}
       <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Sync')}</Text>
       <View style={cardStyle}>
-        <Text style={[styles.body, { color: colors.textSecondary }]}>
-          {syncStateLabel(app.syncState, app.lastSyncSuccess)}
-        </Text>
+        {/* One calm status row: a small spinner while a cycle runs, the last
+            successful synchronization otherwise. No "pending changes" alarm -
+            the engine retries on its own and the user has nothing to do. */}
+        <View style={styles.syncRow}>
+          {busySyncing && <ActivityIndicator size="small" color={colors.accent} />}
+          <Text style={[styles.body, { color: colors.textSecondary, flex: 1 }]}>
+            {syncStateLabel(busySyncing ? SyncState.Syncing : app.syncState, app.lastSyncSuccess)}
+          </Text>
+        </View>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_SyncFrequencyHint')}</Text>
         {/* iOS segmented control for the two cadences (same preference writes). */}
         <Segmented
@@ -335,10 +379,33 @@ export function SettingsScreen(): React.JSX.Element {
           }
           colors={colors}
         />
-        <View style={styles.actionColumn}>
-          <BarButton label={t('Settings_SyncNow')} accent disabled={!app.signedIn} onPress={() => void synchronizeNow()} colors={colors} />
-          <BarButton label={t('Settings_ExportCalendar')} onPress={() => void exportCalendar()} colors={colors} />
-          <BarButton label={t('Account_Preview')} disabled={!app.signedIn} onPress={() => void whatIsInTheCloud()} colors={colors} />
+        {/* Two compact actions per row: the three sync actions used to take one
+            full-width line each and left most of the card empty. */}
+        <View style={styles.actionGrid}>
+          <BarButton
+            compact
+            style={styles.gridCell}
+            label={t('Settings_SyncNow')}
+            accent
+            disabled={!app.signedIn || syncing}
+            onPress={() => void synchronizeNow()}
+            colors={colors}
+          />
+          <BarButton
+            compact
+            style={styles.gridCell}
+            label={t('Settings_ExportCalendar')}
+            onPress={() => void exportCalendar()}
+            colors={colors}
+          />
+          <BarButton
+            compact
+            style={styles.gridCell}
+            label={t('Account_Preview')}
+            disabled={!app.signedIn}
+            onPress={() => void whatIsInTheCloud()}
+            colors={colors}
+          />
         </View>
       </View>
 
@@ -353,13 +420,12 @@ export function SettingsScreen(): React.JSX.Element {
         <Text style={[styles.hint, { color: colors.textMuted }]} selectable>
           {dbPath}
         </Text>
-        {/* Export / Restore / Check stay on ONE row on every phone width: the
-            compact buttons only shrink (their labels ellipsize) instead of
-            wrapping to a second line, mirroring the Windows UniformWrapPanel. */}
-        <View style={styles.actionWrap}>
-          <BarButton compact style={styles.backupAction} label={t('Settings_Export')} accent onPress={() => void exportData()} colors={colors} />
-          <BarButton compact style={styles.backupAction} label={t('Settings_Import')} onPress={() => void restoreBackupFile()} colors={colors} />
-          <BarButton compact style={styles.backupAction} label={t('Settings_Integrity')} onPress={() => void checkDbIntegrity()} colors={colors} />
+        {/* Export / Restore / Check: two compact buttons per row, so the labels
+            never have to ellipsize to fit one crowded line. */}
+        <View style={styles.actionGrid}>
+          <BarButton compact style={styles.gridCell} label={t('Settings_Export')} accent onPress={() => void exportData()} colors={colors} />
+          <BarButton compact style={styles.gridCell} label={t('Settings_Import')} onPress={() => void restoreBackupFile()} colors={colors} />
+          <BarButton compact style={styles.gridCell} label={t('Settings_Integrity')} onPress={() => void checkDbIntegrity()} colors={colors} />
         </View>
         {integrityText !== null && (
           <Text style={[styles.body, { color: colors.textSecondary }]}>{integrityText}</Text>
@@ -386,7 +452,10 @@ function syncStateLabel(state: SyncState, lastSuccess: string | null): string {
     case SyncState.Syncing:
       return t('Sync_Syncing');
     case SyncState.PendingChanges:
-      return t('Sync_PendingChanges');
+      // Changes waiting for the upload are the engine's own business: the card
+      // keeps saying "Synchronizing" with its spinner instead of raising a
+      // "pending changes" alarm the user cannot act on.
+      return t('Sync_Syncing');
     case SyncState.Offline:
       return t('Sync_Offline');
     case SyncState.Paused:
@@ -450,14 +519,15 @@ const styles = StyleSheet.create({
   avatarGlyph: { fontSize: 30 },
   avatarImage: { width: '100%', height: '100%', borderRadius: metrics.radiusSmall },
   toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
+  /** Status line of the synchronization card: spinner + one sentence. */
+  syncRow: { flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   /** Buttons that keep their natural width instead of stretching the card. */
   inlineRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  /** Stacked actions: every button takes the card width, so the rows line up. */
-  actionColumn: { rowGap: 8 },
   /**
-   * Privacy and backup actions keep one single row on every width: no
-   * wrapping - the compact buttons shrink and ellipsize their labels instead.
+   * Compact action grid: exactly two buttons per row on a phone width. A third
+   * action starts a new row at the same half width instead of stretching over
+   * the whole card, which keeps the card balanced and the buttons small.
    */
-  actionWrap: { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 6 },
-  backupAction: { flexShrink: 1 },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 6, rowGap: 8 },
+  gridCell: { flexBasis: '48%', flexGrow: 0, flexShrink: 0 },
 });
