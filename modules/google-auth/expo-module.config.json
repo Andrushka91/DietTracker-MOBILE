@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["com.diettracker.googleauth.GoogleAuthModule"]
+  }
+}

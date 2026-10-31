@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  OAuth redirect relay for the Diet Tracker mobile app.
+
+  Deployed to: https://andrushka91.github.io/diet-tracker-site/oauth2redirect.html
+  Repo: Andrushka91/diet-tracker-site - the file name must stay exactly
+  "oauth2redirect.html" (lowercase, GitHub Pages is case-sensitive) and that
+  full URL is what gets registered as an "Authorized redirect URI" of the
+  Google Web client.
+
+  Google redirects here with ?code=...&state=... (or ?error=...); this page
+  hands the response straight on to the app's custom scheme, which closes the
+  browser tab and returns into Diet Tracker. See src/cloud/auth.ts.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Returning to Diet Tracker…</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: grid; place-items: center; height: 100vh; margin: 0; color: #333; }
+  </style>
+</head>
+<body>
+  <noscript><p>Enable JavaScript to return to the Diet Tracker app.</p></noscript>
+  <p>Returning to Diet Tracker…</p>
+  <script>
+    (function () {
+      // Forward the full authorization response (query, or fragment fallback).
+      var response = window.location.search || window.location.hash || '';
+      window.location.replace('diettracker://oauth2callback' + response);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.diettracker'
+version = '0.1.0'
+
+android {
+  namespace "com.diettracker.googleauth"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // Google Identity Services authorization stack (auth.api.identity) - the
+  // current replacement for GoogleAuthUtil. No client secret is needed or
+  // allowed here: the OAuth client is the "Android" registration identified
+  // by package name + SHA-1 (RFC 8252 native client).
+  implementation "com.google.android.gms:play-services-auth:22.0.0"
+  implementation "com.facebook.react:react-native"
+}

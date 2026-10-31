@@ -1,0 +1,35 @@
+{
+  "name": "DietTracker",
+  "displayName": "Diet Tracker",
+  "expo": {
+    "name": "Diet Tracker",
+    "slug": "diet-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "platforms": [
+      "android",
+      "ios"
+    ],
+    "android": {
+      "package": "com.diettracker.app",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.CAMERA"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.diettracker.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Attach photographs of your meals to the tracker.",
+        "NSPhotoLibraryUsageDescription": "Select meal photographs from your library."
+      }
+    },
+    "scheme": "diettracker",
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
+  }
+}

@@ -1,0 +1,386 @@
+# Diet Tracker — React Native (Android & iOS)
+
+React Native port of the Windows Diet Tracker (WinUI 3 / .NET 10), built from
+[PROMPT_SPEC.md](./PROMPT_SPEC.md). Same SQLite schema, same migration history,
+same Google Drive dataset — a user signed into the same Google account sees the
+same meals on Windows and on their phone. The app follows the system
+dark/light theme automatically and ships English only.
+
+## Install and run — step by step
+
+> **Work inside this folder** (`react-native/`). The `package.json` in the
+> repository root belongs to the Windows app — every command below is run in
+> *this* directory.
+
+### 1. Prerequisites
+
+| Requirement | Check / get it |
+|---|---|
+| Node.js 22.11+ | `node -v` — install from [nodejs.org](https://nodejs.org) if missing |
+| **Expo Go** on your phone | [Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent) or the iOS App Store |
+| Same Wi-Fi network | phone and this computer on one network (no guest network, no VPN) |
+
+No Android SDK, no Xcode, no Java, no APK — Expo Go is the whole toolchain.
+
+### 2. Install the dependencies (once per machine)
+
+```bash
+cd react-native        # from the repository root
+npm install            # installs everything from package-lock.json
+```
+
+### 3. Sanity check (once — optional but recommended)
+
+```bash
+npm run check          # typecheck + lint + 28 unit tests — must be green
+```
+
+### 4. Start the dev server
+
+```bash
+npm start
+```
+
+Leave this terminal open — it prints a **QR code** and keeps serving the app
+(first start takes ~10–30 seconds).
+
+### 5. Open the app on your phone
+
+1. Unlock the phone and open **Expo Go**.
+2. Tap the scan icon (or just point the phone camera at the terminal) so it
+   scans the **QR code**.
+3. The JS bundle downloads (first time: a few seconds) and the app shows
+   **Welcome to Diet Tracker** — you are in.
+
+Expected path, step by step: QR → loading spinner → onboarding screen →
+enable the consent toggle → *Continue without an account* (guest mode works
+fully offline) → the five meal cards of the Today tab.
+
+### 6. Everyday workflow
+
+* Edit any file → the phone updates instantly (fast refresh).
+* Press `r` in the terminal → manual reload. `Ctrl+C` → stop the server.
+* Next session: just `npm start` again — there is **no build step and no
+  APK**; JS/TS changes are live on save.
+* An APK is only needed if you ever add a library *outside* Expo
+  (`npm run eas:android:dev`) — there are currently none.
+
+Something not working? Jump to [Troubleshooting](#troubleshooting).
+
+### All npm scripts
+
+| Script | What it does | Extra requirements |
+|---|---|---|
+| `npm start` | **Expo dev server that prints a QR code — the phone-testing command** | — |
+| `npm run eas:login` | Log in to your Expo account (optional — only for cloud builds) | free account at [expo.dev](https://expo.dev) |
+| `npm run eas:android:dev` | Optional cloud build of a standalone APK (Expo Go is the default) | after `eas:login` |
+| `npm run check` | `typecheck` + `lint` + `test` in one go | — |
+| `npm test` · `npm run lint` · `npm run typecheck` | Individual checks | — |
+| `npm run start:rn` | Plain Metro bundler without the Expo wrapper (advanced) | — |
+| `npm run dev` | **Emulator testing in one command**: starts/reuses the AVD, waits for boot, then build + install + Metro | Android SDK |
+| `npm run android` | Local build + install (`expo run:android`) | Android SDK + USB device/emulator |
+| `npm run emulator` | Start the Android emulator AVD on its own (keep its window open) | Android SDK |
+| `npm run emulator:stop` | Gracefully stop the emulator (snapshot-safe `adb emu kill`) | Android SDK |
+| `npm run ios` | Local build + install (`expo run:ios`) | macOS + Xcode |
+| `npm run generate` | Re-embed migrations + English strings from the Windows sources | Windows repo one level up |
+
+Nothing requires a global install — `expo`, `eas-cli`, `react-native`,
+`tsc`, `jest` and `eslint` are all resolved through these scripts.
+
+> **Expo Go is the default way onto a phone** — every native module the app
+> uses ships inside Expo Go (see the next section). `npm run android` /
+> `npm run ios` are **local** builds; Android needs the Android SDK (this
+> machine has it, see *Local Android emulator* below), iOS needs Xcode.
+
+## Local Android emulator (Android Studio SDK)
+
+The debug APK is built and installed locally, so the app runs on the AVD
+without Expo Go.
+
+### One command per testing session (recommended)
+
+```bash
+npm install                # once per machine
+npm run dev                # emulator (auto-start) + build + install + Metro
+npm run emulator:stop      # when done: graceful, snapshot-safe shutdown
+```
+
+`npm run dev` reuses a running emulator or starts the AVD
+"Medium_Phone_API_37.0" in its own console window, waits until Android has
+finished booting, then runs the same `expo run:android` build + install +
+Metro chain as `npm run android` (logs: `android-build.log`). End a session
+with `Ctrl+C` in the dev window (that stops Metro) and then
+`npm run emulator:stop` — never force-kill the emulator, that is what
+corrupts quick-boot snapshots.
+
+### Step by step (equivalent)
+
+```bash
+npm run emulator           # 1. starts the AVD "Medium_Phone_API_37.0" (keep it open)
+npm run android            # 2. ensure-ninja + gradle build + install + Metro
+npm run emulator:stop      # 3. graceful shutdown when done (adb emu kill - snapshot-safe)
+```
+
+Metro can also be started on its own (`npm start`) and the installed APK
+attached to it with `adb reverse tcp:8081 tcp:8081`.
+
+**Windows long paths (important).** React Native 0.88 generates C++ codegen
+objects whose full path is ~360 characters, longer than the legacy Windows
+260-character limit. The `ninja` that ships with the SDK's CMake 3.22 is
+version 1.10 and refuses such paths ("`Filename longer than 260 characters`"),
+which is the real reason the native build failed. `scripts/ensure-ninja.ps1`
+(fired automatically by `npm run android`) upgrades that `ninja.exe` to the
+official 1.12.1 build (which understands long paths) and keeps a backup of the
+original; the registry's `LongPathsEnabled` stays as it is. No `subst` drive is
+needed any more, so Gradle, Metro and Android Studio all work on the real
+folder.
+
+## Google client configuration (spec 7.1.4 — no secret in the repo)
+
+* `google-client.json` (committed with placeholders): `androidClientId`
+  (`247931361024-…`, the "DietTracker Android (local build)" registration for
+  package `com.diettracker.app` + the debug SHA-1), optional `webClientId` and
+  `iosClientId`. **No secret exists in the mobile flow and none is embedded**:
+  the Android OAuth client is a native (RFC 8252) registration identified by
+  package name + SHA-1, so there is nothing confidential to keep out of the
+  repo. Sign-in fails fast with `Auth_google_not_configured` while the id is
+  empty.
+* Sign-in is **native Google Identity Services**: the local Expo module
+  `modules/google-auth` (Kotlin) wraps `AuthorizationClient`
+  (play-services-auth `auth.api.identity`). Interactive sign-in shows the GIS
+  account chooser + consent; as long as the saved grant covers the scopes,
+  access tokens renew **silently** — background sync never opens login UI and
+  raises `AuthenticationRequired` instead (local records are never deleted).
+  Identity (sub/email/name) comes from the OpenID Connect userinfo endpoint.
+* The `drive.appdata` scope is requested — the app never sees the user's
+  other Drive files.
+* iOS native sign-in is future work: without `iosClientId` sign-in fails fast
+  (`Auth_google_not_configured`). Expo Go also cannot run sign-in any more
+  (it needs the local native module) — use the local build (`npm run dev`).
+
+## Parity generators (spec 4.3 / 1.5)
+
+`scripts/generate.js` embeds, byte-for-byte:
+
+* `src/data/migrations/*.sql` → `src/data/sql/migrations.generated.ts`
+  (copied 1:1 from `src/DietTracker.Infrastructure/Database/Migrations` — a
+  database exported from Windows opens on mobile without repair, `user_version = 12`)
+* `src/DietTracker.App/Resources/Strings/en-US/Resources.resw` →
+  `src/ui/strings.generated.ts` (all 242 English strings with `{0}` formatting)
+
+Re-run it after refreshing either source. Never renumber or reorder migrations.
+
+## Layout (spec 3.4)
+
+```
+src/
+  domain/     pure rules ported 1:1 from DietTracker.Core (no React Native imports)
+              enums, models, completion/slot/photo/copy/content/frequency rules,
+              validators, analytics, JSON envelope + payload codecs, hashing
+  data/       SQLite (expo-sqlite): connection, 12 migrations, repositories,
+              photo store (files, 256px thumbnails), .dtbackup, integrity check
+  cloud/      Google auth (native GIS AuthorizationClient via modules/google-auth
+              + secure-store), Drive v3 provider (flat
+              "__" names in appDataFolder — identical addressing to Windows),
+              durable outbox journal, sync engine (push/pull/echo suppression/
+              conflicts/tombstones/backoff), account session lifecycle
+  services/   bootstrap, meal tracking facade, reminders (expo-notifications
+              triggers), connectivity, device id
+  ui/         theme (single source, system appearance), app context, shell
+              components (busy overlay, status strip, dialogs), screens:
+              Onboarding, Dashboard, Calendar, Statistics, Templates, Settings
+```
+
+## Why Expo Go can run this app
+
+The original port was built on community native libraries (`op-sqlite`,
+`notifee`, native Google Sign-In, `react-native-keychain`, …). Those **cannot**
+run inside Expo Go — it is a fixed binary from the store that you cannot add
+native code to (that is what caused the old blue "Base module not found"
+error). The app now uses only modules that ship **inside Expo Go**, which is
+why the scan above needs zero build steps:
+
+* `expo-sqlite` — the same 12 migrations, byte-identical schema
+  (`user_version = 12`, a Windows database opens unchanged)
+* `expo-notifications` — reminder triggers, channels, action buttons, snooze
+* `expo-secure-store` — token storage (Keychain / Keystore equivalent)
+* `expo-file-system` — photos, backups, device id files
+* `expo-image-picker` + `expo-image-manipulator` — camera/gallery and
+  256 px JPEG thumbnails
+* `modules/google-auth` — native Google Identity Services sign-in
+  (**dev build only**, not Expo Go)
+* `expo-print` — reserved for the A4 PDF writer
+* plus `@react-native-community/netinfo`, `react-native-screens`,
+  `react-native-safe-area-context` and React Navigation — all Expo Go natives
+
+Every module above was verified against Expo SDK 58's
+`bundledNativeModules.json` (the authoritative list of what Expo Go contains).
+
+## First walkthrough on the device
+
+1. **Onboarding**: enable the consent toggle → *Continue without an account*
+   (guest mode is fully functional offline), or *Sign in with Google* if you
+   put real ids in `google-client.json` (see *Google client configuration*
+   above).
+2. **Today tab**: five permanent meal cards — type a title + description,
+   Save, then ✓ DONE / ✕ MISSED; photos via 📷.
+3. **Calendar / Statistics / Templates / Settings** tabs along the bottom;
+   Settings → *Export data* writes a `.dtbackup` you can restore on Windows.
+
+## Requirements & limits for scanning
+
+* Phone and computer on the **same Wi-Fi** (guest networks often isolate
+  devices); no VPN.
+* Windows Firewall must allow Node.js on private networks (accept the prompt
+  on first `npm start`).
+* Cross-network fallback: `npm start -- --tunnel` (Expo installs `@expo/ngrok`
+  when asked) — the QR then works over the internet too.
+* iOS: **Expo Go from the App Store** works the same way — scan the QR there
+  (Windows cannot build iOS locally; a Mac or EAS build is only needed if you
+  ever add a library outside Expo, of which there are currently none).
+
+## Troubleshooting
+
+**Scan fails / app says it cannot connect**
+* Phone and computer must be on the **same Wi-Fi** (not a guest network), VPN off.
+* The server must be running (`npm start`) and that terminal kept open.
+* Windows Firewall: allow **Node.js** on private networks when prompted.
+* Different networks? Use the tunnel: `npm start -- --tunnel` (accept the
+  `@expo/ngrok` install) — the QR then works across the internet.
+
+**Expo Go: "This project uses SDK 58, but Expo Go is running SDK …"**
+* Version mismatch between the Expo Go app and this project. Update **Expo
+  Go** from the Play Store / App Store (or install the exact version the
+  message asks for), then scan again.
+
+**`Call to function 'ExpoNotificationChannelManager.setNotificationChannelAsync' has been rejected … NullPointerException`**
+* Some Expo Go (Android) builds reject the *native* notification-channel
+  creation (the app's arguments are valid — verified against the SDK 58 enum
+  spaces). The app handles this: every channel/category step is best-effort,
+  a warning is logged, reminders are still scheduled, and Android delivers
+  the notifications through its fallback channel. Nothing else is affected;
+  real development builds create the channels normally.
+
+**`WARN  [auth] Google client not configured - sign-in is disabled`**
+* Expected while `google-client.json` has empty ids — sign-in stays disabled
+  (fail-fast, spec 7.1.4) until you configure real Google client ids (see
+  *Google client configuration* above). Guest mode works fully without it.
+
+**Cold start shows the “Diet Tracker – Development Build” launcher**
+* Expected for a dev-client build: tap the **Diet Tracker** entry (or the one
+  under *Recently opened*) to load the bundle from Metro. The app opens
+  directly once that server has been used in the current session.
+
+**Expo Go: "Unable to open exp://…" / nothing happens after scanning**
+* No dev server is running — run `npm start` first, then scan again. Expo Go
+  only loads the project while Metro serves it.
+
+**`Error: listen EADDRINUSE: address already in use :::8081`**
+* A previous `npm start` / `npm run start:rn` was not stopped with `Ctrl+C`
+  and still owns the port. Free it, then start again:
+
+```powershell
+# Windows (PowerShell)
+Get-NetTCPConnection -LocalPort 8081 -State Listen |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+npm start
+```
+
+```bash
+# macOS / Linux
+lsof -ti :8081 | xargs kill -9
+npm start
+```
+
+* Note: `npm start` (Expo) **auto-falls-back** to 8082/8083 with
+  *"Port 8081 is being used by another process"*. The QR still works, but a
+  stale server is holding resources — kill it with the command above to keep
+  the default port.
+* Alternative: run on another port with `npm run start:rn -- --port 8082`.
+
+**Blue screen: `Something went wrong. [runtime not ready]: Error: Base module not found…`**
+* Historical error from before the Expo-module migration: `@op-engineering/
+  op-sqlite` threw when the bundle ran in a binary without the app's native
+  code. The app now uses **only** modules that ship inside Expo Go, so this
+  error cannot occur in the supported workflow. If you still see it, restart
+  Expo Go and `npm start`, and make sure you scan with **Expo Go** — and that
+  you are not loading the bundle into an old leftover dev-build APK.
+
+## Status & honesty statement
+
+* `npm run check` (strict TypeScript + ESLint) is green and **31 domain unit
+  tests** pass (completion rules, five-slot permanence, validators, photo
+  rules, copy rules, analytics incl. the “–” case, DST-safe calendar day
+  stepping, sync frequency/backoff, payload + envelope round-trip, Drive
+  addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask).
+* Verified on the local Android emulator (API 37, x86_64 debug build):
+  onboarding → guest mode, the five permanent cards, inline edit + save,
+  mark DONE / mark all MISSED, progress + counters, day templates
+  (save-as-template prompt, apply-to-date), calendar month navigation,
+  statistics, settings (cadence buttons, storage usage, database path,
+  integrity check → “no problems”), the system photo picker, and the
+  automatic **dark mode** switch (`adb shell cmd uimode night yes|no`).
+* Most of the app runs in **Expo Go** (Android + iOS); **Google sign-in and
+  cloud sync need the local debug build** (see *Local Android emulator*)
+  because authentication is native Google Identity Services
+  (`modules/google-auth`) since the browser-redirect flow was replaced. All
+  data modules still go through Expo SDK modules — `expo-sqlite` (the same
+  12 migrations, identical schema), `expo-notifications`, `expo-secure-store`,
+  `expo-file-system`, `expo-image-picker`, `expo-image-manipulator`.
+  `android/` exists from `npx expo prebuild` (pre-Expo copies in
+  `.native-backup-android/` / `.native-backup-ios/`), and the Google Drive
+  paths have **not** been exercised against a real account (no client
+  registration + interactive consent needs a human) — exactly the same honesty
+  statement as the Windows README.
+* Known deviations from the spec, recorded deliberately:
+  * Reminders ship in **parity mode** (schema + scheduler + notification
+    actions exist; no per-slot Reminders settings section) — the spec's
+    §10.4(b) full mode requires the identical feature on Windows first.
+  * PDF exports (report/calendar) currently surface the status flow; the
+    A4 writer (`expo-print`) is not wired yet and the full report layout is
+    pending. `.dtbackup` export/restore is fully implemented.
+  * “Start at boot” (Android) and the Windows-only tray toggles are hidden
+    (spec 17.4); the 12-hour clock toggle is present and immediate.
+  * “Apply to date” asks for `yyyy-MM-dd` in a small prompt pre-filled with
+    today instead of a native date picker (no extra picker dependency), and the
+    bottom-tab icons are the equivalent emoji because Android has no Segoe
+    Fluent glyph font — both keep the Windows interaction and labelling.
+  * The card state bar sits on the **top** edge of the card: the Windows card draws the
+    same 4 px bar along its bottom border (`BorderThickness="1,1,1,4"`). On the phone the
+    state colour is the card's **top border** (`borderTopWidth: metrics.stateBar` in
+    `src/ui/components/MealCard.tsx`), so a border follows the rounded corners and the
+    top stays exactly as round as the bottom.
+  * The visual language is **Apple Human Interface Guidelines** (iOS system colours and
+    materials) rather than the WinUI tokens of the desktop app: systemBlue `#007AFF`
+    (dark `#0A84FF`) as the interactive tint, systemGreen / systemRed for Done / Missed,
+    systemGray for pending, `systemGroupedBackground` pages with
+    `secondarySystemGroupedBackground` cards (light `#F2F2F7` + white, dark black +
+    `#1C1C1E`), label alpha stacks for the text hierarchy and opaque separators. Cards
+    are borderless and float on a soft shadow (`cardShadow` in `src/ui/theme.ts`), the
+    typography follows the iOS text styles (`typeScale`: largeTitle 34 → caption2 11),
+    buttons are capsules, the dialogs are iOS alerts (hairline action strip) and the
+    calendar paints soft state washes with a circular "today" badge instead of the
+    Windows 2 px day frames. All logic, data flow and wording stay identical.
+  * Cards and counters use the exact iOS state colours of the palette in `src/ui/theme.ts`
+    (done `#34C759`, missed `#FF3B30`, pending `#8E8E93`; calendar cells `#E5E5EA`), and
+    `MealCategory.Color` is not painted as a card fill — the card keeps its neutral
+    surface and the state lives in the top border + status pill. Every card on every page
+    shares the `cardFill` tone `#E5E5EA` (iOS systemGray5) — the same grey as the
+    calendar's untouched day squares (dark mode keeps the standard `#1C1C1E` elevated
+    card on the black page). The calendar panel itself stays white, because its grey
+    squares and day rows need the light canvas behind them to keep their contrast.
+  * The bottom-tab navigator has **no app bar** (`headerShown: false`): like the Windows
+    pages, every screen opens with its own heading (the long date, the month,
+    "Statistics", "Templates", "Settings") and the shell pads the status bar itself.
+    The calendar lists the five cards of the selected day under the month grid, and a
+    row opens that date on the dashboard.
+  * The app bundles **Open Sans** (`@expo-google-fonts/open-sans`, loaded with
+    `expo-font` in `App.tsx`) so both platforms draw the identical humanist sans
+    without redistributing a proprietary system face. The regular cut carries the body
+    text and every button label (no bold top buttons), the semibold cut only the
+    headings, card titles, counters and status pills; sizes and weights follow the
+    iOS text styles from `typeScale`.
+  * The calendar's day cells show the day number, the photo marker and the **n/5**
+    count instead of the miniature meal cards: a phone cell is about 44 pt wide, so
+    the five meals of the selected day are listed as full rows under the grid (title,
+    category, time, photo count, status pill) - same information, legible size.
