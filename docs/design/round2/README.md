@@ -26,6 +26,14 @@ against the remote instead of trusting the local tag:
 | Source of the APKs | release variant of `1.0.0.0` built from the backup commit; signed with the project's standard Android debug key (sideloading only, never Play) |
 | Private configuration | none: `google-client.json` holds a **public** OAuth client id (no secret); no tokens, databases, photos or keystores in the repo or the APKs |
 
+The attached APK was re-checked, not just trusted: `aapt dump badging` reports
+`com.diettracker.app`, `versionName 1.0.0.0`, `versionCode 1` (the version built
+from the backup commit); the Hermes bundle contains the public client id
+`247931361024-…apps.googleusercontent.com` and **no** `client_secret`, private
+key, `AIza…` API key or `ya29.` token — the only `refresh_token` occurrence is
+the `Auth_google_refresh_token_missing` string key, and the archive has no
+`google-services.json` or keystore.
+
 The new branch was created from the first-pass branch (so nothing was thrown
 away); `main` and the backup tag were never rewritten or force-pushed.
 
