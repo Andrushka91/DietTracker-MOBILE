@@ -3,21 +3,20 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "start": "expo start",
-    "start:rn": "react-native start",
-    "emulator": "scripts\\emulator.bat",
-    "emulator:stop": "scripts\\emulator-stop.bat",
-    "dev": "scripts\\dev.bat",
+    "dev": "node scripts/dev.js",
+    "dev:fast": "node scripts/dev.js --skip-build",
+    "emulator": "node scripts/dev.js --emulator-only",
+    "emulator:stop": "node scripts/dev.js --stop",
     "apk": "scripts\\build-apk.bat",
+    "start": "expo start",
+    "ios": "expo run:ios",
     "check": "npm run typecheck && npm run lint && npm test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "jest",
     "generate": "node scripts/generate.js",
     "eas:login": "npx eas-cli login",
-    "eas:android:dev": "npx eas-cli build --platform android --profile development",
-    "android": "scripts\\build-android.bat",
-    "ios": "expo run:ios"
+    "eas:android:dev": "npx eas-cli build --platform android --profile development"
   },
   "dependencies": {
     "@expo-google-fonts/open-sans": "^0.4.2",

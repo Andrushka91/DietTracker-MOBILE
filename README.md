@@ -65,6 +65,9 @@ Today tab.
   APK**; JS/TS changes are live on save.
 * An APK is only needed if you ever add a library *outside* Expo
   (`npm run eas:android:dev`) — there are currently none.
+* Prefer the **real Android emulator** instead of Expo Go? One command does the
+  whole thing (boot, build, install, Metro, open the app): `npm run dev` — see
+  [Local Android emulator](#local-android-emulator-android-studio-sdk).
 
 Something not working? Jump to [Troubleshooting](#troubleshooting).
 
@@ -77,11 +80,11 @@ Something not working? Jump to [Troubleshooting](#troubleshooting).
 | `npm run eas:android:dev` | Optional cloud build of a standalone APK (Expo Go is the default) | after `eas:login` |
 | `npm run check` | `typecheck` + `lint` + `test` in one go | — |
 | `npm test` · `npm run lint` · `npm run typecheck` | Individual checks | — |
-| `npm run start:rn` | Plain Metro bundler without the Expo wrapper (advanced) | — |
-| `npm run dev` | **Emulator testing in one command**: starts/reuses the AVD, waits for boot, then build + install + Metro | Android SDK |
-| `npm run android` | Local build + install (`expo run:android`) | Android SDK + USB device/emulator |
+| `npm run start:rn` | removed — `npm start` is the Metro command | — |
+| `npm run dev` | **The emulator command**: reuses/boots the AVD, builds + installs for the device ABI, starts Metro in this window, opens the app | Android SDK |
+| `npm run dev:fast` | Same session without Gradle (Metro + relaunch) — for JS/TS changes | Android SDK + an installed debug build |
 | `npm run apk` | **Standalone release APKs** (JavaScript bundled, no Metro) into `release\` | Android SDK |
-| `npm run emulator` | Start the Android emulator AVD on its own (keep its window open) | Android SDK |
+| `npm run emulator` | Start the AVD and wait until Android is booted (no build, no Metro) | Android SDK |
 | `npm run emulator:stop` | Gracefully stop the emulator (snapshot-safe `adb emu kill`) | Android SDK |
 | `npm run ios` | Local build + install (`expo run:ios`) | macOS + Xcode |
 | `npm run generate` | Re-embed migrations + English strings from the Windows sources | Windows repo one level up |
@@ -90,7 +93,7 @@ Nothing requires a global install — `expo`, `eas-cli`, `react-native`,
 `tsc`, `jest` and `eslint` are all resolved through these scripts.
 
 > **Expo Go is the default way onto a phone** — every native module the app
-> uses ships inside Expo Go (see the next section). `npm run android` /
+> uses ships inside Expo Go (see the next section). `npm run dev` /
 > `npm run ios` are **local** builds; Android needs the Android SDK (this
 > machine has it, see *Local Android emulator* below), iOS needs Xcode.
 
@@ -166,39 +169,93 @@ Expected artifacts after a run (both on disk and on the release page):
 The debug APK is built and installed locally, so the app runs on the AVD
 without Expo Go.
 
-### One command per testing session (recommended)
+### One command per testing session
 
 ```bash
 npm install                # once per machine
-npm run dev                # emulator (auto-start) + build + install + Metro
+npm run dev                # emulator + build + install + Metro + app, in one go
 npm run emulator:stop      # when done: graceful, snapshot-safe shutdown
 ```
 
-`npm run dev` reuses a running emulator or starts the AVD
-"Medium_Phone_API_37.0" in its own console window, waits until Android has
-finished booting, then runs the same `expo run:android` build + install +
-Metro chain as `npm run android` (logs: `android-build.log`). End a session
-with `Ctrl+C` in the dev window (that stops Metro) and then
-`npm run emulator:stop` — never force-kill the emulator, that is what
-corrupts quick-boot snapshots.
+`npm run dev` (`scripts/dev.js`) is the whole flow in one readable sequence —
+every step prints the value it used, or the exact command that fixes it:
 
-### Step by step (equivalent)
+```
+[1/5] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
+       JDK C:\Program Files\Android\Android Studio\jbr   adb ...\platform-tools\adb.exe
+[2/5] Device      OK    emulator-5554 (sdk_gphone64_x86_64, Android 17) - already running
+[3/5] Build       .....OK    38 s - app-debug.apk 74.5 MB (x86_64) installed
+[4/5] Metro       OK    listening on http://localhost:8081 - bundling errors show up here
+[5/5] Launch      OK    com.diettracker.app started
 
-```bash
-npm run emulator           # 1. starts the AVD "Medium_Phone_API_37.0" (keep it open)
-npm run android            # 2. ensure-ninja + gradle build + install + Metro
-npm run emulator:stop      # 3. graceful shutdown when done (adb emu kill - snapshot-safe)
+Ready - com.diettracker.app runs on emulator-5554.
 ```
 
-Metro can also be started on its own (`npm start`) and the installed APK
-attached to it with `adb reverse tcp:8081 tcp:8081`.
+What it does for you:
+
+* **Device** — reuses a running emulator, or a phone that is connected, and only
+  boots the AVD when neither exists (live `booting ... 24 s` line, AVD window
+  stays open). A serial that is still booting is waited for instead of starting
+  a second emulator.
+* **Build** — `gradle assembleDebug` **for the target ABI only** (`x86_64` on the
+  emulator, `arm64-v8a` on a phone): ~12-40 s instead of minutes, 74 MB instead
+  of 215 MB, then `adb install -r -d`. The full Gradle output still goes to
+  `android-build.log`; the console shows a compact progress line and, on
+  failure, the last 40 log lines. `npm run dev -- --verbose` streams everything.
+* **Metro** — started in **this window** (`expo start --dev-client`), so
+  `r` (reload), `j` (debugger) and red bundling errors work; if a Metro is
+  already answering on the port, it is reused instead of starting a second one.
+* **Launch** — `adb reverse tcp:8081`, then the app is opened through the
+  dev-client deep link (`diettracker://expo-development-client/?url=…`) so it
+  goes straight into the app instead of the "Development servers" launcher.
+
+End a session with `Ctrl+C` in that window (stops Metro, keeps the emulator) and
+then `npm run emulator:stop` — never force-kill the emulator, that is what
+corrupts quick-boot snapshots.
+
+### Flags
+
+| Flag | What it changes |
+|---|---|
+| `npm run dev:fast` | `--skip-build`: Metro + relaunch only — the loop for JS/TS changes |
+| `npm run emulator` | `--emulator-only`: just start the AVD and wait for boot |
+| `npm run emulator:stop` | `--stop`: `adb emu kill`, waits for the emulator to disappear |
+| `--cold` | cold boot (`-no-snapshot`) when a saved snapshot is corrupt |
+| `--avd <name>` | start another AVD (default `Medium_Phone_API_37.0`, else the first) |
+| `--device <serial>` | target a specific `adb` serial (e.g. a USB phone) |
+| `--port <n>` | Metro on another port (default 8081) |
+| `--reset` | wipe the app data first (first-run state) |
+| `--restart-adb` | `adb kill-server` first, when adb itself is wedged |
+| `--verbose` · `--help` | stream the Gradle output · the full flag list |
+
+Anything after `--` reaches the script: `npm run dev -- --cold --reset`.
+
+### When something goes wrong
+
+| Symptom | What the script says / does |
+|---|---|
+| No Android SDK | `FAIL adb was not found in the Android SDK (…)` + how to install it or set `ANDROID_HOME` |
+| No JDK | `FAIL no JDK found for Gradle` + `set JAVA_HOME=…\Android Studio\jbr` |
+| No AVD defined | `FAIL no Android Virtual Device (AVD) is defined` + Device Manager hint |
+| Emulator never boots | waits 5 min, then suggests `npm run dev -- --cold` / Wipe Data |
+| Phone prompts for debugging | `FAIL <serial> is connected but not authorized` |
+| Gradle error | the last 40 lines of `android-build.log` + the exact retry command |
+| Port 8081 taken | `FAIL port 8081 is used by something that is not Metro` + `--port 8082` |
+| adb hangs (zombie server) | every adb call has a timeout; the script restarts adb itself (`kill-server` → `taskkill /F /IM adb.exe` on Windows) and only fails if that does not help |
+
+Metro can still be started on its own (`npm start`) — `npm run dev` then reuses
+it, or attaches with `adb reverse tcp:8081 tcp:8081`. `expo run:android` /
+`expo run:ios` remain available for one-off native builds, but the emulator
+workflow above is the supported one. A dev build shows React Native's yellow
+`process.env.EXPO_OS is not defined` warning once per launch — it comes from
+`babel-preset-expo` in dev mode and does not exist in the release APK.
 
 **Windows long paths (important).** React Native 0.88 generates C++ codegen
 objects whose full path is ~360 characters, longer than the legacy Windows
 260-character limit. The `ninja` that ships with the SDK's CMake 3.22 is
 version 1.10 and refuses such paths ("`Filename longer than 260 characters`"),
 which is the real reason the native build failed. `scripts/ensure-ninja.ps1`
-(fired automatically by `npm run android`) upgrades that `ninja.exe` to the
+(fired automatically by `npm run dev` and `npm run apk`) upgrades that `ninja.exe` to the
 official 1.12.1 build (which understands long paths) and keeps a backup of the
 original; the registry's `LongPathsEnabled` stays as it is. No `subst` drive is
 needed any more, so Gradle, Metro and Android Studio all work on the real
@@ -387,17 +444,19 @@ Two defects of the previous version are covered by regression tests:
   *Google client configuration* above). Guest mode works fully without it.
 
 **Cold start shows the “Diet Tracker – Development Build” launcher**
-* Expected for a dev-client build: tap the **Diet Tracker** entry (or the one
-  under *Recently opened*) to load the bundle from Metro. The app opens
-  directly once that server has been used in the current session.
+* That is the expo-dev-client screen of a debug build. `npm run dev` skips it by
+  opening the app through the dev-client deep link; when you start the app by
+  hand, tap the **Diet Tracker** entry (or the one under *Recently opened*) to
+  load the bundle from Metro. The app opens directly once that server has been
+  used in the current session.
 
 **Expo Go: "Unable to open exp://…" / nothing happens after scanning**
 * No dev server is running — run `npm start` first, then scan again. Expo Go
   only loads the project while Metro serves it.
 
 **`Error: listen EADDRINUSE: address already in use :::8081`**
-* A previous `npm start` / `npm run start:rn` was not stopped with `Ctrl+C`
-  and still owns the port. Free it, then start again:
+* A previous `npm start` / `npm run dev` was not stopped with `Ctrl+C` and still
+  owns the port. Free it, then start again:
 
 ```powershell
 # Windows (PowerShell)
@@ -415,8 +474,9 @@ npm start
 * Note: `npm start` (Expo) **auto-falls-back** to 8082/8083 with
   *"Port 8081 is being used by another process"*. The QR still works, but a
   stale server is holding resources — kill it with the command above to keep
-  the default port.
-* Alternative: run on another port with `npm run start:rn -- --port 8082`.
+  the default port. `npm run dev` reports the same situation as
+  `FAIL port 8081 is used by something that is not Metro` and takes `--port`.
+* Alternative: run on another port with `npm run dev -- --port 8082`.
 
 **Blue screen: `Something went wrong. [runtime not ready]: Error: Base module not found…`**
 * Historical error from before the Expo-module migration: `@op-engineering/
