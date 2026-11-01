@@ -97,15 +97,18 @@ import {
   upsertTemplate,
 } from '../data/repositories';
 import { journalEntity } from './journal';
+import { prefetchInOrder, pullConcurrency, uploadConcurrency } from './parallel';
 import {
   deleteObject,
   downloadObject,
   downloadObjectBase64,
   listChanges,
   listObjects,
+  selectChanges,
   uploadObject,
   type DriveObject,
 } from './driveProvider';
+
 import { AuthError, type AuthErrorCode } from './auth';
 import { ensureThumbnail, originalPath, thumbnailPath } from '../data/photoStore';
 import RNFS from '../platform/fs';
@@ -533,7 +536,7 @@ async function pushOperation(
 //     updates the object it already has instead of creating a new copy,
 //  3. documents are sent through a small bounded window of parallel requests -
 //     uploads are latency bound, and a strictly sequential loop paid one round
-//     trip per document,
+//     trip per document (the window lives in parallel.ts),
 //  4. every document settles on its own: a failure records the backoff and
 //     stays in the outbox, a success removes it - reported progress therefore
 //     always means "documents that really reached the cloud",
@@ -543,8 +546,11 @@ async function pushOperation(
 //     already in flight finish (each is bounded by its own HTTP timeout), so the
 //     caller is never left hanging and never has to guess what happened.
 
-/** Documents one push pass may send at the same time. */
-const UPLOAD_CONCURRENCY = 3;
+/**
+ * The window of one push pass lives in parallel.ts (`uploadConcurrency`): six
+ * requests overlap the round trips, which is what turns a first sign-out with
+ * twenty photographs from twenty round trips into four batches.
+ */
 
 /**
  * Serializes the push phase. A cycle that is downloading must never block an
@@ -571,6 +577,7 @@ export interface OutboxUploadOptions {
   deadlineAt?: number;
   /** Reuses the listing of an earlier pass (retry rounds of one barrier). */
   fileIndex?: Map<string, DriveObject>;
+
   /** Session epoch the caller captured (its own work must never look stale). */
   epoch?: number;
 }
@@ -585,6 +592,13 @@ export interface OutboxUploadResult {
   pending: number;
   /** The listing the pass used - hand it back to the next round. */
   fileIndex: Map<string, DriveObject>;
+  /**
+   * The folder listing as it was BEFORE this pass uploaded anything, handed to
+   * the pull phase of the same cycle. It is `null` when the pass reused an
+   * earlier listing (a retry round of the sign-out barrier) or could not list:
+   * a new listing is one full round trip that two phases must not pay twice.
+   */
+  listing: DriveObject[] | null;
   /** Stable code when the pass was aborted (auth failure). */
   error?: string;
 }
@@ -601,11 +615,11 @@ async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxU
   const account = await getActiveAccount();
   const cachedIndex = options.fileIndex ?? new Map<string, DriveObject>();
   if (account === null) {
-    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex };
+    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex, listing: null };
   }
   const pending = await getPendingOperations(account.id);
   if (pending.length === 0) {
-    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex };
+    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex, listing: null };
   }
 
   const total = pending.length;
@@ -618,8 +632,15 @@ async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxU
   // "no progress" (the caller retries or refuses) instead of throwing at the
   // caller, which would leave the sign-out bar without an answer.
   let fileIndex: Map<string, DriveObject>;
+  /** Snapshot of the folder before this pass uploads: the pull applies it. */
+  let listing: DriveObject[] | null = null;
   try {
-    fileIndex = options.fileIndex ?? (await buildFileIndex());
+    if (options.fileIndex === undefined) {
+      fileIndex = await buildFileIndex();
+      listing = [...fileIndex.values()];
+    } else {
+      fileIndex = options.fileIndex;
+    }
   } catch (error) {
     const message = error instanceof AuthError ? error.code : String(error);
     return {
@@ -627,9 +648,11 @@ async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxU
       failed: 0,
       pending: pending.length,
       fileIndex: cachedIndex,
+      listing: null,
       ...(error instanceof AuthError ? { error: message } : {}),
     };
   }
+
   const epoch = options.epoch ?? sessionEpoch;
   const ignoreBackoff = options.ignoreBackoff === true;
   const deadlineAt = options.deadlineAt ?? Number.POSITIVE_INFINITY;
@@ -678,7 +701,7 @@ async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxU
     }
   };
 
-  const workers = Math.max(1, Math.min(UPLOAD_CONCURRENCY, pending.length));
+  const workers = uploadConcurrency(pending.length);
   await Promise.all(Array.from({ length: workers }, () => worker()));
 
   const remaining = await countPendingOperations(account.id);
@@ -687,23 +710,33 @@ async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxU
     failed,
     pending: remaining,
     fileIndex,
+    listing,
     ...(fatal === null ? {} : { error: fatal }),
   };
 }
 
-/** Push phase of a cycle: drain the durable outbox (order = CreatedAt). */
+/**
+ * Push phase of a cycle: drains the durable outbox (order = CreatedAt) and
+ * hands the listing it paid for to the pull phase.
+ */
 async function pushPending(
   epoch: number,
   onProgress?: (uploaded: number, total: number) => void,
   ignoreBackoff = false,
-): Promise<number> {
+): Promise<{ uploaded: number; listing: DriveObject[] | null }> {
   const pass = await uploadOutbox({ ignoreBackoff, onProgress, epoch });
   if (pass.error !== undefined) {
     // A rejected grant aborts the whole cycle: the pull would fail the same way.
     throw new AuthError(pass.error as AuthErrorCode);
   }
-  return pass.uploaded;
+  return {
+    uploaded: pass.uploaded,
+    // The pull consumes the folder listing this pass already paid for: one
+    // listing per cycle instead of two identical ones back to back.
+    listing: pass.listing,
+  };
 }
+
 
 /** Base64 -> bytes (upload helper; works in Hermes + Jest). */
 function base64ToBytes(base64: string): Uint8Array {
@@ -753,7 +786,14 @@ export async function applyRemoteDocument(
    * Defaults to the envelope revision when the caller has no provider metadata (tests, backups).
    */
   cloudRevisionToken?: string | null,
+  /**
+   * State of the pull pass that is applying this document (identity cache and
+   * prefetched photograph bytes). Absent for a single standalone apply - the
+   * restore path of a backup and the unit tests use it that way.
+   */
+  session?: PullSession,
 ): Promise<ApplyOutcome> {
+
   const header = readEnvelopeHeader(json);
   if (header === null) {
     return 'skipped'; // corrupt document: never crashes, never blocks the cursor
@@ -826,6 +866,7 @@ export async function applyRemoteDocument(
     envelope.payload,
     header.revision,
     cloudRevisionToken ?? null,
+    session,
   );
 }
 
@@ -983,14 +1024,18 @@ async function writeRemoteEntity(
   payload: Record<string, unknown>,
   revision: number,
   cloudRevisionToken: string | null,
+  /** Identity cache / prefetched bytes of the pull pass (absent on a standalone apply). */
+  session?: PullSession,
 ): Promise<ApplyOutcome> {
   // The compare-and-swap base is the provider's revision of the object; the envelope revision is the
   // sender's local counter and cannot prove which cloud version this row is based on.
   const cloudRevision = cloudRevisionToken ?? String(revision);
-  const identity = await loadLocalIdentity();
+  const identity =
+    session === undefined ? await loadLocalIdentity() : await session.localIdentity();
   if (identity === null && entityType !== EntityType.UserProfile) {
     return 'retry';
   }
+
 
   switch (entityType) {
     case EntityType.MealEntry: {
@@ -1060,8 +1105,10 @@ async function writeRemoteEntity(
         entityId,
         photo.localFileId,
         photo.thumbnailId,
+        session,
       );
       return bytesPresent ? 'applied' : 'retry';
+
     }
     case EntityType.MealTemplate: {
       const template = mealTemplateFromPayload(remapTemplatePayload(payload, identity as LocalIdentity));
@@ -1089,8 +1136,11 @@ async function writeRemoteEntity(
       // Matched by the permanent FixedCategoryKey; the local id is preserved so
       // existing meals and reminders keep their foreign key.
       await upsertCategory({ ...categoryFromPayload(payload), id: entityId });
+      // The ids this device maps onto changed: the next document re-reads them.
+      session?.invalidateIdentity();
       return 'applied';
     }
+
     case EntityType.UserProfile: {
       const remote = profileFromPayload(payload);
       const local = await getActiveProfile();
@@ -1101,6 +1151,7 @@ async function writeRemoteEntity(
           syncStatus: SyncStatus.Synced,
           cloudRevision,
         });
+        session?.invalidateIdentity();
         return 'applied';
       }
       if (
@@ -1113,7 +1164,9 @@ async function writeRemoteEntity(
         return 'skipped';
       }
       await upsertProfile({ ...mergeProfileFromRemote(local, remote), cloudRevision });
+      session?.invalidateIdentity();
       return 'applied';
+
     }
     default:
       return 'skipped';
@@ -1135,18 +1188,28 @@ function maxIso(a: string, b: string): string {
   return Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
-/** Best-effort download of a photograph binary (idempotent). True when the bytes exist. */
+/**
+ * Best-effort download of a photograph binary (idempotent). True when the bytes
+ * exist. Bytes the pull pass already started travelling for are simply awaited
+ * here, so the apply loop does not add another round trip per picture.
+ */
 async function downloadPhotoBytesIfMissing(
   photoId: string,
   localFileId: string,
   thumbnailId: string,
+  session?: PullSession,
 ): Promise<boolean> {
   try {
     const path = originalPath(localFileId);
     if (!(await RNFS.exists(path))) {
-      const base64 = await downloadObjectBase64(photoBinaryPath(photoId));
+      const prefetched = session === undefined ? null : session.takeBinary(photoId);
+      const base64 =
+        prefetched === null
+          ? await downloadObjectBase64(photoBinaryPath(photoId))
+          : await prefetched.catch(() => null);
       if (base64 === null) {
         return false;
+
       }
       const dir = photosParent();
       if (!(await RNFS.exists(dir))) {
@@ -1183,6 +1246,73 @@ interface PullResult {
 }
 
 /**
+ * State shared by every document of ONE pull pass.
+ *
+ * Two costs dominated the old loop: `loadLocalIdentity()` re-read the profile
+ * and the category table for every single document, and a photograph's bytes
+ * were only requested after its metadata had been applied - the network sat
+ * idle while SQLite worked. Both are removed here:
+ *
+ *  - the identity of the pass is read once and re-read only when a document
+ *    that carries ids (profile, categories) was applied,
+ *  - a photograph's binary is already travelling (or already in memory) by the
+ *    time the apply loop reaches the document, so `applyRemoteDocument` writes
+ *    it without another round trip.
+ *
+ * The binary window is deliberately tiny (`PHOTO_PREFETCH_LIMIT`): two pictures
+ * of a few megabytes each stay in memory, never the whole gallery.
+ */
+class PullSession {
+  /** `undefined` = not read yet, `null` = the cache has no identity yet. */
+  private identity: LocalIdentity | null | undefined = undefined;
+  /** Photographs whose bytes are travelling ahead of the apply cursor. */
+  private readonly binaries = new Map<string, Promise<string | null>>();
+
+  async localIdentity(): Promise<LocalIdentity | null> {
+    if (this.identity !== undefined) {
+      return this.identity;
+    }
+    const identity = await loadLocalIdentity();
+    this.identity = identity;
+    return identity;
+  }
+
+  /** A document that carries profile/category ids was applied. */
+  invalidateIdentity(): void {
+    this.identity = undefined;
+  }
+
+  /** Starts the binary download of one photograph, unless the window is full. */
+  prefetchBinary(photoId: string): void {
+    if (this.binaries.has(photoId) || this.binaries.size >= PHOTO_PREFETCH_LIMIT) {
+      return;
+    }
+    const promise = downloadObjectBase64(photoBinaryPath(photoId));
+    promise.catch(() => undefined);
+    this.binaries.set(photoId, promise);
+  }
+
+  /** Hands the prefetched bytes to the apply step (or null when none started). */
+  takeBinary(photoId: string): Promise<string | null> | null {
+    const promise = this.binaries.get(photoId);
+    if (promise === undefined) {
+      return null;
+    }
+    this.binaries.delete(photoId);
+    return promise;
+  }
+}
+
+/** Photograph binaries held in memory ahead of the apply cursor. */
+const PHOTO_PREFETCH_LIMIT = 2;
+
+/** `entities/MealPhoto/<guid>.json` -> `<guid>`. */
+function entityIdFromPath(path: string): string {
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  return name.endsWith('.json') ? name.slice(0, -'.json'.length) : name;
+}
+
+/**
  * Pull phase: everything changed since the stored watermark (minus the 5 s
  * skew), newest first.
  *
@@ -1192,16 +1322,34 @@ interface PullResult {
  * NOT advance the watermark: the cursor is clamped to the oldest such document
  * so the next cycle retries it. That is what makes previously skipped records
  * recoverable instead of silently lost.
+ *
+ * Downloads travel through a bounded window (`prefetchInOrder`) while documents
+ * are applied in order, and a photograph's binary is prefetched as soon as its
+ * metadata arrived - the pull is limited by the network again, not by one round
+ * trip per document. The window is what a sync client calls "transfers".
  */
 async function pullChanges(
   accountId: string,
-  options: { acceptOwnDevice: boolean },
+  options: {
+    acceptOwnDevice: boolean;
+    /**
+     * Folder listing the push phase of the same cycle already paid for. The
+     * snapshot semantics are the ones of a listing taken at cycle start, so a
+     * document the other device uploads during the cycle is picked up by the
+     * next one - exactly like today, for one request less.
+     */
+    listing?: DriveObject[];
+  },
   epoch: number,
   onProgress?: (settled: number, total: number) => void,
 ): Promise<PullResult> {
+
   const metadata = await getMetadata(accountId);
   const since = metadata?.lastSyncCursor ?? null;
-  const changes = await listChanges(since);
+  const changes =
+    options.listing === undefined
+      ? await listChanges(since)
+      : selectChanges(options.listing, since);
 
   let downloaded = 0;
   let failed = 0;
@@ -1235,14 +1383,35 @@ async function pullChanges(
   let settled = 0;
   onProgress?.(0, queue.length);
 
+  const session = new PullSession();
+
+  // The downloads of the next documents are in flight while the loop applies
+  // the current one. `downloadObject` rejects on a provider error; the
+  // rejection is delivered to the document's own slot below, where the existing
+  // failure handling (count it, keep the cursor behind it) applies.
+  const downloads = prefetchInOrder(
+    queue,
+    async (change) => {
+      const json = await downloadObject(change.path, change.id);
+      if (json !== null && isPhotoDocument(change.path)) {
+        // Metadata arrived: the picture itself is the expensive part, so its
+        // bytes start travelling now instead of after the apply step.
+        session.prefetchBinary(entityIdFromPath(change.path));
+      }
+      return json;
+    },
+    pullConcurrency(queue.length),
+  );
+
   for (const change of queue) {
     if (cycleIsStale(epoch)) {
       // The session ended while the listing was in flight (sign-out): stop
       // before the first write - the cache it would touch no longer exists.
+      downloads.cancel();
       return { downloaded, failed, conflicts, skipped, unchanged, watermark };
     }
     try {
-      const json = await downloadObject(change.path, change.id);
+      const json = await downloads.next();
       if (json === null) {
         // Listed a moment ago but the object is gone (deleted by another device
         // between listing and download) or its bytes are unreadable: retry, and
@@ -1253,7 +1422,8 @@ async function pullChanges(
         onProgress?.(settled, queue.length);
         continue;
       }
-      const outcome = await applyRemoteDocument(json, options, change.revision);
+      const outcome = await applyRemoteDocument(json, options, change.revision, session);
+
       if (outcome === 'retry') {
         failed += 1;
         markRetry(change.modifiedAt);
@@ -1489,13 +1659,16 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
     emitState(SyncState.Syncing);
   }
   try {
-    const uploaded = pullOnly
-      ? 0
+    // The push phase lists the dataset once; the pull phase of this very cycle
+    // consumes that snapshot instead of listing the same folder a second time.
+    const push = pullOnly
+      ? { uploaded: 0, listing: null as DriveObject[] | null }
       : await pushPending(
           epoch,
           options.onUploadProgress,
           options.ignoreBackoff === true,
         );
+    const uploaded = push.uploaded;
     // A push-only pass stops when the outbox is empty: no listing, no downloads,
     // no watermark. The account boundaries (sign in / sign out) use it and would
     // otherwise wait for a full pull nobody asked for.
@@ -1505,10 +1678,12 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
           account.id,
           {
             acceptOwnDevice: options.acceptOwnDevice ?? false,
+            ...(push.listing === null ? {} : { listing: push.listing }),
           },
           epoch,
           options.onDownloadProgress,
         );
+
 
     if (cycleIsStale(epoch)) {
       // The session ended under us (sign-out): report what happened, but never

@@ -52,6 +52,8 @@ jest.mock('../src/cloud/driveProvider', () => ({
     throw new Error('the drive must not be listed during sign-out');
   }),
   listChanges: jest.fn(async () => []),
+  // The pull phase filters the listing of the push phase instead of listing again.
+  selectChanges: jest.fn((objects: unknown[]) => [...objects]),
   uploadObject: jest.fn(async () => ({
     path: '',
     id: 'id',

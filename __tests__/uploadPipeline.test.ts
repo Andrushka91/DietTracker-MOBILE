@@ -11,7 +11,7 @@
 //  2. The upload itself was strictly sequential - one round trip per document.
 //
 // Covered here:
-//  - one pass sends documents through a bounded parallel window (never above 3),
+//  - one pass sends documents through a bounded parallel window (src/cloud/parallel.ts),
 //  - progress is monotonic and ends on "everything settled",
 //  - the barrier uploads and reports progress while another cycle is running,
 //  - one transient failure is retried (backoff ignored) and the sign-out ends ok,
@@ -56,6 +56,8 @@ jest.mock('expo-sqlite', () => {
 jest.mock('../src/cloud/driveProvider', () => ({
   listObjects: jest.fn(async () => []),
   listChanges: jest.fn(async () => []),
+  // The pull phase filters the listing of the push phase instead of listing again.
+  selectChanges: jest.fn((objects: unknown[]) => [...objects]),
   uploadObject: jest.fn(async (path: string) => ({
     path,
     id: `id-${path}`,
@@ -84,6 +86,7 @@ import {
 import { defaultPreferences } from '../src/services/bootstrap';
 import { ensureCategories, loadDay, saveMeal } from '../src/services/mealTracking';
 import { runCycle, uploadOutbox } from '../src/cloud/syncEngine';
+import { UPLOAD_CONCURRENCY } from '../src/cloud/parallel';
 import { signOutGoogle, type SignOutProgress } from '../src/cloud/session';
 import { AuthError } from '../src/cloud/auth';
 import * as drive from '../src/cloud/driveProvider';
@@ -180,7 +183,7 @@ afterAll(async () => {
 
 
 describe('the upload pipeline drains the outbox in a bounded parallel window', () => {
-  test('several documents travel at the same time, never more than three', async () => {
+  test('several documents travel at the same time, never more than the window', async () => {
     await seedAccount();
     await journalMeals(5);
     await expect(countPendingOperations(LOCAL_ACCOUNT)).resolves.toBe(5);
@@ -203,9 +206,10 @@ describe('the upload pipeline drains the outbox in a bounded parallel window', (
     // Parallel (one round trip is not waited for before the next starts) and
     // bounded (the phone is not asked to run the whole outbox at once).
     expect(peak).toBeGreaterThan(1);
-    expect(peak).toBeLessThanOrEqual(3);
+    expect(peak).toBeLessThanOrEqual(UPLOAD_CONCURRENCY);
     await expect(countPendingOperations(LOCAL_ACCOUNT)).resolves.toBe(0);
   });
+
 
   test('progress is monotonic and ends on the last document', async () => {
     await seedAccount();

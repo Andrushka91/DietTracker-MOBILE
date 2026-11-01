@@ -201,23 +201,32 @@ export async function listObjects(): Promise<DriveObject[]> {
 }
 
 /**
- * Objects modified after the stored watermark (minus a skew window),
- * newest first. The watermark lives in SyncMetadata (LastSyncCursor).
+ * Objects of one listing that changed after the stored watermark (minus a skew
+ * window), newest first. Split out of `listChanges` on purpose: a cycle whose
+ * push phase already listed the folder filters THAT snapshot instead of paying
+ * for a second identical listing, which is one full round trip per cycle.
  */
-export async function listChanges(sinceIso: string | null): Promise<DriveObject[]> {
-  const all = await listObjects();
+export function selectChanges(
+  objects: readonly DriveObject[],
+  sinceIso: string | null,
+): DriveObject[] {
   if (sinceIso === null || sinceIso === '') {
-    return all;
+    return [...objects];
   }
   const sinceMs = Date.parse(sinceIso);
   if (Number.isNaN(sinceMs)) {
-    return all;
+    return [...objects];
   }
   // 5 s skew so clock differences never skip a write (spec 7.5).
   const window = sinceMs - 5000;
-  return all
+  return objects
     .filter((object) => Date.parse(object.modifiedAt) > window)
     .sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+}
+
+/** Objects modified after the stored watermark (newest first), from a fresh listing. */
+export async function listChanges(sinceIso: string | null): Promise<DriveObject[]> {
+  return selectChanges(await listObjects(), sinceIso);
 }
 
 /** Uploads (create or update) one object; returns the new revision token. */

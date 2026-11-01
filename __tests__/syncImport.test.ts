@@ -50,6 +50,8 @@ jest.mock('expo-sqlite', () => {
 jest.mock('../src/cloud/driveProvider', () => ({
   listObjects: jest.fn(async () => []),
   listChanges: jest.fn(async () => []),
+  // The pull phase filters the listing of the push phase instead of listing again.
+  selectChanges: jest.fn((objects: unknown[]) => [...objects]),
   uploadObject: jest.fn(async () => ({ path: '', id: 'id', revision: '1', modifiedAt: '', sizeBytes: 0, hash: null })),
   downloadObject: jest.fn(async () => null),
   downloadObjectBase64: jest.fn(async () => 'AQIDBA=='),

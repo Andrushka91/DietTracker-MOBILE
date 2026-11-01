@@ -72,6 +72,10 @@ jest.mock('../src/cloud/auth', () => {
 jest.mock('../src/cloud/driveProvider', () => ({
   listObjects: jest.fn(async () => []),
   listChanges: jest.fn(async () => []),
+  // The engine's pull phase reuses the listing of the push phase of the same
+  // cycle, so the folder snapshot has to be filtered here instead of fetched.
+  selectChanges: jest.fn((objects: unknown[]) => [...objects]),
+
   uploadObject: jest.fn(async (path: string) => ({
     path,
     id: `id-${path}`,
@@ -106,8 +110,24 @@ const CLOUD_PROFILE = '22222222-2222-4222-8222-222222222222';
 const CLOUD_MEAL = '9aa0da4a-7517-4677-b303-e0cb15d80396';
 const DAY = '2026-11-01';
 
+const listObjects = drive.listObjects as jest.Mock;
 const listChanges = drive.listChanges as jest.Mock;
 const downloadObject = drive.downloadObject as jest.Mock;
+
+/** The one object the account stores: another device's lunch document. */
+function cloudListing() {
+  return [
+    {
+      path: `entities/MealEntry/${CLOUD_MEAL}.json`,
+      id: `id-${CLOUD_MEAL}`,
+      revision: '1',
+      modifiedAt: '2026-11-01T08:30:00.000Z',
+      sizeBytes: 100,
+      hash: null,
+    },
+  ];
+}
+
 
 /** The meal document another device uploaded for the same account. */
 function cloudMealDocument(): string {
@@ -163,17 +183,11 @@ async function seedGuest(): Promise<void> {
 
 beforeEach(async () => {
   await seedGuest();
+  // Both listing calls answer with the same folder snapshot, like the provider.
+  listObjects.mockReset();
+  listObjects.mockImplementation(async () => cloudListing());
   listChanges.mockReset();
-  listChanges.mockImplementation(async () => [
-    {
-      path: `entities/MealEntry/${CLOUD_MEAL}.json`,
-      id: `id-${CLOUD_MEAL}`,
-      revision: '1',
-      modifiedAt: '2026-11-01T08:30:00.000Z',
-      sizeBytes: 100,
-      hash: null,
-    },
-  ]);
+  listChanges.mockImplementation(async () => cloudListing());
   downloadObject.mockReset();
   downloadObject.mockImplementation(async () => cloudMealDocument());
 });

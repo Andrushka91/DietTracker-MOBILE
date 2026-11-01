@@ -160,8 +160,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `8fc42dff…f2ba5f` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `f11d6687…ccd894` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `c0c74efb…e93f44c8` (1.0.0.0 / 2026-11-01, parallel sync) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `997f8fa2…49f9e60b` (1.0.0.0 / 2026-11-01, parallel sync) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -393,7 +393,7 @@ the standard offline-first rules:
    ten edits of the same meal are one operation, not ten.
 2. **One listing per pass** builds the `path → Drive file id` index, so each
    document updates the object it already has instead of creating a copy.
-3. **A small bounded window of parallel requests (3)** - uploads are latency
+3. **A small bounded window of parallel requests (6)** - uploads are latency
    bound, so a sequential loop paid one round trip per document.
 4. **Every document settles on its own**: a success leaves the outbox, a failure
    records the exponential backoff and stays, so the reported progress always
@@ -483,6 +483,42 @@ to cancel and confirm, drawing two identical "OK" buttons), and a partial result
 is reported in the floating caption ("2 meal(s) marked as done. 3 card(s) without
 a title or description were left as they are.") instead of interrupting the page
 (`__tests__/bulkDone.test.ts`).
+## How the download works (parallel pull → the 0-100 % bar)
+
+The pull used to be a strictly sequential loop: `downloadObject` (one round trip),
+apply to SQLite, next document. A first sign-in of an account holding a few
+hundred records therefore spent most of its time **waiting**, and the bar crawled
+even on a fast connection. It is now a small pipeline
+(`src/cloud/parallel.ts`, used by `pullChanges`):
+
+* **A bounded sliding window of 8 downloads** (`prefetchInOrder`). JavaScript is
+  single threaded, so the parallelism that matters here is I/O: eight documents
+  are in the native HTTP stack while the loop applies the current one. Eight is
+  the "transfers" value the mainstream sync clients use and stays far below the
+  provider's per-user quota; the window is never larger than the queue.
+* **The apply order is untouched** - SQLite foreign keys (a photograph only after
+  its meal) and the retry watermark depend on it. A document's failure is
+  delivered at *its own* position, never into another document's slot, and it
+  never becomes an unhandled rejection while earlier documents are applied.
+* **A photograph's bytes start travelling with its metadata** (two pictures in
+  memory): the apply step awaits bytes that are already on their way instead of
+  issuing a second request per picture.
+* **The identity of the pass is read once.** `loadLocalIdentity()` used to re-read
+  the profile and the category table for *every* document; it is cached per pull
+  and re-read only after a document that carries ids (profile, categories) was
+  applied.
+* **One folder listing per cycle.** The push phase already lists the dataset for
+  its `path → id` index; the pull of the same cycle filters that snapshot
+  (`selectChanges`) instead of asking the provider for the identical listing a
+  second time. The snapshot is the one taken **before** the push, so a document
+  this device just uploaded is never downloaded back.
+
+The same work is covered by `__tests__/parallelFetch.test.ts` (order, bound,
+failure isolation, cancel) and `__tests__/pullPipeline.test.ts` (documents really
+travel in parallel, and a cycle pays for one listing). The sign-in bar is fed by
+the same counts, so it now moves in steps of up to eight documents.
+
+
 
 ## Troubleshooting
 
