@@ -157,8 +157,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 29 MB | `8922f3ec…eaf5c8f4d` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 84 MB | `33a10a62…7f4a6dc1d` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `93290f97…be3bff` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `f804096f…7628677` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -436,9 +436,11 @@ npm start
   sign-out boundary: forced upload, progress frames, refusal that keeps data,
   the parallel upload pipeline (bounded window, monotonic progress, bounded
   retry budget, one save per press in the meal card editor).
-* Verified on the local Android emulator (API 37, x86_64 debug build):
+* Verified on the local Android emulator (API 37, x86_64 release APK
+  `DietTracker-1.0.0.0-universal.apk` installed over the previous build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
-  the five permanent cards, inline edit + save,
+  the five permanent cards, inline edit + **one-tap save with the keyboard
+  open** (title and description written, editor closed, no second press),
   mark DONE / mark all MISSED, progress + counters, day templates
   (save-as-template prompt, apply-to-date), calendar month navigation,
   statistics, settings (cadence buttons, storage usage, database path,
