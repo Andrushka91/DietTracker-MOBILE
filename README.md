@@ -197,8 +197,15 @@ alone. Meal-category emoji come from `MealCategory.Icon` in SQLite and are **dat
 not design.
 
 The visual refresh is documented (and reversible) on the
-`redesign/visual-refresh-20261101` branch; the rollback point is the
+`redesign/visual-refresh-20261101` branch (first pass) and the
+`redesign/visual-refresh-20261101-r2` branch (second pass: state rail instead of
+framed cards, reworked header/calendar/statistics, readable contrast, 44 pt
+targets, large-text fixes). The rollback point is the
 `backup/pre-redesign-20261101-2126` tag and its GitHub release.
+
+Evidence: [`docs/design/`](./docs/design/README.md) (first pass) and
+[`docs/design/round2/`](./docs/design/round2/README.md) (second pass, with the
+research, token table, spec departures, validation and screenshots).
 
 ## Standalone release APK
 

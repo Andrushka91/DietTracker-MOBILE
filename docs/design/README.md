@@ -25,8 +25,11 @@ Extra evidence in `after/`:
 | `verify-12h.png` | a real save: the 12-hour preference reached the database and repainted every time label |
 | `verify-restart.png` | the same setting and all meals survived a cold `am force-stop` + relaunch |
 | `verify-reverted.png` | the test change was reverted - times are back to 24-hour, counters unchanged |
-| `wip-large-text.png` | font scale 1.3 - nothing clipped |
-| `wip-keyboard.png` | meal editor with the keyboard up - fields and Save stay visible |
+
+The larger-text and keyboard checks of this round live in
+[`round2/after/large-text-*.png`](./round2/after) and
+[`round2/after/editor-keyboard*.png`](./round2/after), together with the second
+pass of the redesign ([`round2/README.md`](./round2/README.md)).
 
 ## What changed
 
