@@ -1,27 +1,35 @@
 // Theme - single source of truth for both platforms.
 //
-// Visual language: Apple Human Interface Guidelines (iOS system colors and
-// materials). The palette below uses the exact iOS system colors for light and
-// dark mode - systemBlue as the interactive tint, systemGreen / systemRed for
-// the Done / Missed states, systemGray for pending, systemGroupedBackground for
-// the page and secondarySystemGroupedBackground for cards, so pages read as
-// grouped lists (light: #F2F2F7 page + white cards, dark: black page +
-// #1C1C1E cards). Labels use the iOS secondary/tertiary alpha stacks, and
-// separations are the opaque separators (#C6C6C8 / #38383A).
+// Visual language: calm neutral surfaces, a quiet elevation model and exactly
+// ONE accent colour, so the page reads as a calm grouped list instead of a
+// stack of grey boxes. Three rules drive the palette:
 //
-// Type: the bundled humanist sans (Open Sans) is kept for offline reliability,
-// while sizes and weights follow the iOS text styles (see `typeScale` below:
+//   1. Cards are ALWAYS lighter than the page they sit on (light: white cards
+//      on a cool #F4F6F8 wash; dark: #151B23 cards on a near-black #0B0F14
+//      page) and are lifted by a soft shadow, never by a hard stroke.
+//   2. The accent is indigo (#4655D6 light / #8B95F6 dark) - deliberately NOT
+//      one of the three state hues, so "this is interactive" never competes
+//      with done / missed / pending.
+//   3. State colours are muted versions of green / red / slate: they carry the
+//      frame of a meal card and the status pill, but the pill always repeats
+//      the state in WORDS plus a glyph, so nothing depends on colour alone.
+//
+// Type: the bundled humanist sans (Open Sans) is kept for offline reliability.
+// Titles are 700 with a touch of negative tracking, card titles and labels 600,
+// body copy 400; sizes follow the iOS text styles (see `typeScale` below:
 // largeTitle 34 / title 28 / headline 17 / subheadline 15 / footnote 13 /
 // caption 12 / caption2 11).
 //
-//   regular  body text, captions and every button label
-//   medium   headings, card titles, counters and the status pills only
+//   regular  body text and captions
+//   medium   card titles, counters, status pills and button labels
+//   bold     page titles only (pageTitleStyle below)
 
-import { Platform, type ViewStyle } from 'react-native';
+import { Platform, type TextStyle, type ViewStyle } from 'react-native';
 
 export const fonts = {
   regular: 'OpenSans_400Regular',
   medium: 'OpenSans_600SemiBold',
+  bold: 'OpenSans_700Bold',
 };
 
 /**
@@ -65,6 +73,12 @@ export interface ThemeColors {
   textSecondary: string;
   textMuted: string;
   onCardHeader: string;
+  /**
+   * Ink for text drawn ON a state fill (the status pills). Light mode puts white
+   * on the deep state colour; dark mode puts near-black on the lighter one, so
+   * "Done" / "Missed" / "Pending" never become white-on-light-green.
+   */
+  onState: string;
   done: string;
   missed: string;
   /** Card chrome + dashboard counter of an undecided meal (iOS systemGray). */
@@ -82,81 +96,84 @@ export interface ThemeColors {
   statusBarStyle: 'light-content' | 'dark-content';
 }
 
-/** Dashboard counter chips + meal card chrome (iOS systemGreen / systemRed / systemGray). */
-export const DONE_COLOR = argb('#FF34C759');
-export const MISSED_COLOR = argb('#FFFF3B30');
-export const PENDING_COLOR = argb('#FF8E8E93');
-/** Calendar cells keep the quiet gray of an untouched day. */
-export const CELL_PENDING_COLOR = argb('#FFE5E5EA');
+/**
+ * State colours - ONE definition shared by every card frame, pill and counter,
+ * so "done" looks identical on the dashboard, the calendar and the statistics.
+ * Muted on purpose: a screen full of meal cards must not shout.
+ */
+export const DONE_COLOR = argb('#FF1F9D63');
+export const MISSED_COLOR = argb('#FFD64545');
+export const PENDING_COLOR = argb('#FF8A93A3');
+/** Calendar cells keep a quiet wash for a day with nothing decided. */
+export const CELL_PENDING_COLOR = argb('#FFE9EEF5');
 
 export const lightColors: ThemeColors = {
   dark: false,
-  // iOS systemBlue.
-  accent: argb('#FF007AFF'),
+  // Indigo - the only interactive colour in the app.
+  accent: argb('#FF4655D6'),
   accentText: argb('#FFFFFFFF'),
-  // iOS systemGroupedBackground: the page behind grouped cards.
-  background: argb('#FFF2F2F7'),
-  // iOS secondarySystemGroupedBackground: the grouped card itself.
+  // Cool, low-chroma page wash: cards must read lighter than this.
+  background: argb('#FFF4F6F8'),
   surface: argb('#FFFFFFFF'),
   /**
-   * Universal card fill: the grey of the calendar's untouched day squares -
-   * iOS systemGray5 (#E5E5EA) - shared by every card on every page. The
-   * calendar keeps a white panel behind its squares and day rows, which is
-   * exactly where this grey reads best.
+   * Card fill: pure white on the tinted page. Elevation (cardShadow) is what
+   * separates a card from the page - never a grey fill, which used to make
+   * every card look pressed into the background.
    */
-  cardFill: argb('#FFE5E5EA'),
-  // iOS fill (quaternary system fill) - button fills, wells, thumbnails.
-  surfaceVariant: argb('#29787680'),
-  // iOS separator (opaque light variant).
-  border: argb('#FFC6C6C8'),
-  // Label / secondaryLabel (60 %) / tertiaryLabel (30 %).
-  text: argb('#FF000000'),
-  textSecondary: argb('#993C3C43'),
-  textMuted: argb('#4D3C3C43'),
+  cardFill: argb('#FFFFFFFF'),
+  // Controls, segments, inputs and icon-button chrome: a touch deeper than the
+  // page tint so a chip reads as a chip on both the page and a white card.
+  surfaceVariant: argb('#FFE6EBF2'),
+  border: argb('#FFD7DEE8'),
+  // Ink: near-black with a blue cast, then two quiet steps for meta text.
+  text: argb('#FF101828'),
+  textSecondary: argb('#FF475467'),
+  textMuted: argb('#FF98A2B3'),
   onCardHeader: argb('#FFFFFFFF'),
-  // iOS systemGreen / systemRed / systemGray.
+  onState: argb('#FFFFFFFF'),
   done: DONE_COLOR,
   missed: MISSED_COLOR,
   pending: PENDING_COLOR,
   cellPending: CELL_PENDING_COLOR,
   success: DONE_COLOR,
-  // iOS systemOrange.
-  warning: argb('#FFFF9500'),
+  warning: argb('#FFC77700'),
   error: MISSED_COLOR,
-  // iOS modal scrim: ~25 % black over the dimmed page.
+  // Modal scrim: ~40 % ink, enough to isolate the dialog in either theme.
   overlay: argb('#66000000'),
-  // Filled (primary) buttons use the tint itself as the fill.
-  accentFill: argb('#FF007AFF'),
+  // Filled (primary) buttons use the accent itself as the fill.
+  accentFill: argb('#FF4655D6'),
   accentFillText: argb('#FFFFFFFF'),
   statusBarStyle: 'dark-content',
 };
 
 export const darkColors: ThemeColors = {
   dark: true,
-  accent: argb('#FF0A84FF'),
-  accentText: argb('#FFFFFFFF'),
-  // iOS dark grouped background: pure black page, elevated cards.
-  background: argb('#FF000000'),
-  surface: argb('#FF1C1C1E'),
-  // Dark cards keep the standard #1C1C1E elevated grouped-card tone.
-  cardFill: argb('#FF1C1C1E'),
-  surfaceVariant: argb('#3D767680'),
-  border: argb('#FF38383A'),
-  text: argb('#FFFFFFFF'),
-  textSecondary: argb('#99EBEBF5'),
-  textMuted: argb('#4DEBEBF5'),
+  // The same indigo, lightened so it stays legible on near-black.
+  accent: argb('#FF8B95F6'),
+  accentText: argb('#FF0B0F14'),
+  background: argb('#FF0B0F14'),
+  surface: argb('#FF151B23'),
+  // Cards keep the elevated surface tone - one step above the page.
+  cardFill: argb('#FF151B23'),
+  surfaceVariant: argb('#FF1F2833'),
+  border: argb('#FF2A3542'),
+  text: argb('#FFF5F7FA'),
+  textSecondary: argb('#B3E8EDF5'),
+  textMuted: argb('#73E8EDF5'),
   onCardHeader: argb('#FFFFFFFF'),
-  // Dark-mode systemGreen / systemRed / systemGray.
-  done: argb('#FF30D158'),
-  missed: argb('#FFFF453A'),
-  pending: argb('#FF98989F'),
-  cellPending: argb('#FF48484A'),
-  success: argb('#FF30D158'),
-  warning: argb('#FFFF9F0A'),
-  error: argb('#FFFF453A'),
-  overlay: argb('#66000000'),
-  accentFill: argb('#FF0A84FF'),
-  accentFillText: argb('#FFFFFFFF'),
+  // Dark state colours are bright, so the pill ink flips to the page colour.
+  onState: argb('#FF0B0F14'),
+  // Dark-mode states are the light-mode hues, raised for contrast.
+  done: argb('#FF34D399'),
+  missed: argb('#FFF87171'),
+  pending: argb('#FF94A3B8'),
+  cellPending: argb('#FF1B222B'),
+  success: argb('#FF34D399'),
+  warning: argb('#FFF5A524'),
+  error: argb('#FFF87171'),
+  overlay: argb('#99000000'),
+  accentFill: argb('#FF8B95F6'),
+  accentFillText: argb('#FF0B0F14'),
   statusBarStyle: 'light-content',
 };
 
@@ -164,16 +181,18 @@ export function themeColors(isDark: boolean): ThemeColors {
   return isDark ? darkColors : lightColors;
 }
 
-/** Shared radii/metrics. */
+/** Shared radii/metrics - one spacing rhythm for every page. */
 export const metrics = {
-  /** Grouped card corner radius (iOS inset groups sit at 10-12). */
-  radius: 12,
-  /** Small controls: inputs, thumbnails, tinted chips. */
-  radiusSmall: 8,
-  /** The 2 px state frame drawn around every meal card (Windows parity). */
-  cardBorder: 2,
-  spacing: 12,
-  spacingSmall: 8,
+  /** Card corner radius. */
+  radius: 16,
+  /** Small controls: inputs, thumbnails, icon buttons. */
+  radiusSmall: 10,
+  /** Status pills and small kind chips. */
+  radiusChip: 8,
+  /** The state frame drawn around every meal card (thin, not a hard outline). */
+  cardBorder: 1.5,
+  spacing: 16,
+  spacingSmall: 10,
   /**
    * Gap between two adjacent icon buttons. The Dashboard puts the ✓ / ✕ pair
    * on its action row and every meal card puts the same pair in its bottom
@@ -181,13 +200,13 @@ export const metrics = {
    */
   controlGap: 6,
   /**
-   * Distance between two cards in the dashboard grid - the same 8 px the page
-   * keeps to its left and right edges, so the vertical breathing room between
-   * stacked cards matches the horizontal margins.
+   * Distance between two cards in the dashboard grid (and the gap between
+   * stacked cards on every other page), so the vertical breathing room matches
+   * the horizontal page margin.
    */
-  gridGap: 8,
+  gridGap: 10,
   /** Page padding around a scrolling screen. */
-  pagePadding: 8,
+  pagePadding: 14,
   /** Minimum height of a meal card (the card only grows with its content). */
   cardMinHeight: 112,
 };
@@ -209,18 +228,44 @@ export const typeScale = {
 } as const;
 
 /**
- * iOS card material: grouped cards float on the grouped background with a
- * soft shadow instead of a hard 1 px stroke. iOS draws the shadow directly;
- * Android uses a matching elevation.
+ * The page title every screen starts with ("Today" date line, "Statistics",
+ * "Templates", "Settings", the calendar month): 700 with a little negative
+ * tracking, which is what makes the hierarchy read at a glance.
+ */
+export const pageTitleStyle: TextStyle = {
+  fontSize: typeScale.title,
+  lineHeight: Math.round(typeScale.title * 1.15),
+  fontFamily: fonts.bold,
+  letterSpacing: -0.6,
+};
+
+/**
+ * Card elevation: cards are lifted by a soft shadow instead of a stroke. iOS
+ * draws the shadow directly; Android uses a matching elevation.
  */
 export const cardShadow: ViewStyle = (Platform.select({
   ios: {
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: '#0B1220',
+    shadowOpacity: 0.07,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
   },
-  android: { elevation: 2 },
+  android: { elevation: 3 },
+  default: {},
+}) ?? {}) as ViewStyle;
+
+/**
+ * Raised elevation for the elements that float ABOVE the page - the tab bar and
+ * modal cards - so the depth order stays obvious: page < card < floating bar.
+ */
+export const raisedShadow: ViewStyle = (Platform.select({
+  ios: {
+    shadowColor: '#0B1220',
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  android: { elevation: 12 },
   default: {},
 }) ?? {}) as ViewStyle;
 
