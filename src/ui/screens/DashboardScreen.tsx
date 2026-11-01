@@ -25,6 +25,7 @@ import { addPhotoToMeal, removePhoto } from '../../data/photoStore';
 import {
   clearMeal,
   completeMeal,
+  ensureMealStored,
   loadDay,
   markAllDone,
   markAllMissed,
@@ -224,6 +225,11 @@ export function DashboardScreen({
         // Reading, hashing and thumbnailing a photograph takes a moment on a
         // phone, so the card shows a spinner tile while it is being saved.
         setUploadingMealId(entry.id);
+        // "Photo first": an untouched card has no stored row yet, and its id is
+        // minted fresh on every load. Writing the slot once before the first
+        // photograph lands keeps that id stable, so the picture stays attached
+        // and the title / description can be filled in afterwards.
+        await ensureMealStored(entry, accountId);
         for (const asset of response.assets) {
           const result = await addPhotoToMeal(
             entry.id,

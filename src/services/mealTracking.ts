@@ -115,6 +115,36 @@ export async function saveMeal(
   return { ok: true };
 }
 
+/**
+ * Makes sure a slot has a real row before something is attached to it.
+ *
+ * An untouched day slot is materialized on read with a fresh GUID (loadDay), so
+ * anything pointing at that id - a photograph first of all - would be orphaned
+ * by the next reload. Persisting the placeholder keeps the id stable, which is
+ * what lets a photograph be added BEFORE the title or the description is
+ * written ("photo first" editing, spec 8.4).
+ */
+export async function ensureMealStored(
+  entry: MealEntry,
+  accountId: string | null,
+): Promise<MealEntry> {
+  const stored = await getMealsForDate(entry.localProfileId, entry.date);
+  if (stored.some((meal) => meal.id === entry.id)) {
+    return entry;
+  }
+  const now = new Date().toISOString();
+  const toStore: MealEntry = {
+    ...entry,
+    updatedAt: now,
+    syncStatus: SyncStatus.PendingUpload,
+  };
+  await upsertMeal(toStore);
+  if (accountId !== null) {
+    await journalEntity(accountId, EntityType.MealEntry, toStore.id, now);
+  }
+  return toStore;
+}
+
 export interface CompletionResult extends CompletionOutcome {
   /** Entry refreshed from the write (timestamp etc.), when changed. */
   entry?: MealEntry;

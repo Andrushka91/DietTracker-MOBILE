@@ -75,7 +75,8 @@ export async function signInWithGoogle(options: {
   if (existing !== null) {
     const pending = await countPendingOperations(existing.id);
     if (pending > 0) {
-      await runCycle({ trigger: SyncTrigger.Manual });
+      // Push only: the gate is "is the outbox empty?", not "pull the cloud".
+      await runCycle({ trigger: SyncTrigger.Manual, pushOnly: true });
       if ((await countPendingOperations(existing.id)) > 0) {
         return { ok: false, error: 'Account_SignInPendingChanges' };
       }
@@ -228,9 +229,11 @@ export async function signOutGoogle(options: {
   if (!options.discardChanges) {
     // Upload only what is actually still waiting: an idle sign-out must not sit
     // through a full cycle (a listing plus a pull of the other device's changes)
-    // just to discover there is nothing to send.
+    // just to discover there is nothing to send. The upload itself is a
+    // push-only pass for the same reason - the cache is about to be deleted, so
+    // downloading the other device's documents first is pure waiting.
     if ((await countPendingOperations(account.id)) > 0) {
-      await runCycle({ trigger: SyncTrigger.Manual });
+      await runCycle({ trigger: SyncTrigger.Manual, pushOnly: true });
     }
     const pending = await countPendingOperations(account.id);
     if (pending > 0) {

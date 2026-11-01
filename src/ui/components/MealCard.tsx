@@ -179,7 +179,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
         styles.card,
         {
           backgroundColor: colors.cardFill,
-          borderTopColor: statusColor,
+          borderColor: statusColor,
           minHeight: metrics.cardMinHeight,
         },
       ]}>
@@ -283,10 +283,10 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
 const styles = StyleSheet.create({
   card: {
     borderRadius: metrics.radius,
-    // The state colour is the card's 4 px TOP BORDER: a border follows the
-    // rounded corners exactly, so the top is as round as the bottom (a child
-    // bar inside the corners always renders a tighter curve).
-    borderTopWidth: metrics.stateBar,
+    // The state colour frames the WHOLE card (green DONE / red MISSED / grey
+    // pending), like the Windows window: a full border follows the rounded
+    // corners exactly, so the frame is as round at the bottom as at the top.
+    borderWidth: metrics.cardBorder,
     flexGrow: 1,
     flexBasis: '100%',
     // iOS grouped card: no stroke - a soft shadow carries the elevation.
@@ -297,11 +297,11 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   /**
-   * Compact card body: 4 px below the state bar + 8 px sides gives the header
-   * the same distance from the card's top and right edges, and the bottom
-   * padding repeats those 8 px so the action buttons keep an even frame.
+   * Compact card body: the 2 px frame plus an even inner padding keeps the same
+   * distance from the card's edges on all four sides, so the header, the status
+   * pill and the action buttons each sit in a corner at the same inset.
    */
-  cardContent: { paddingHorizontal: 8, paddingTop: 4, paddingBottom: 8, flexGrow: 1 },
+  cardContent: { paddingHorizontal: 9, paddingTop: 7, paddingBottom: 9, flexGrow: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -312,10 +312,10 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontFamily: fonts.medium },
   headerTime: { fontSize: 12 },
   /**
-   * Top-aligned like the iOS calendar badge: the 4 px margin plus the 4 px the
-   * card body keeps above the header put the pill 8 px below the state bar -
-   * the same distance the 8 px side padding gives it on the right, so the
-   * capsule sits in an even top-right corner instead of hugging the bar.
+   * Top-aligned like the iOS calendar badge: the 4 px margin plus the 7 px the
+   * card body keeps above the header put the pill 11 px below the card's top
+   * edge - the same distance the 9 px side padding gives it on the right, so the
+   * capsule sits in an even top-right corner instead of hugging the frame.
    */
   pill: {
     marginLeft: 'auto',

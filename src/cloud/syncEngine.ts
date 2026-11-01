@@ -1148,6 +1148,14 @@ export interface RunCycleOptions {
    * it is about to run.
    */
   pullOnly?: boolean;
+  /**
+   * Uploads without downloading. Used by the account boundaries (sign in / sign
+   * out), which only need the outbox emptied before the session changes: a full
+   * listing + pull of the other device's documents is seconds of waiting the
+   * user cannot see the result of, and the regular triggers keep the local copy
+   * current anyway.
+   */
+  pushOnly?: boolean;
 }
 
 /**
@@ -1223,7 +1231,10 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
   // week. "Only with the button below" is still respected - the user asked for
   // no automatic cloud traffic at all - and the throttle keeps the poll from
   // turning into a request storm.
-  const pullOnly = options.pullOnly === true || options.trigger === SyncTrigger.AutoPull;
+  const pushOnly = options.pushOnly === true;
+  const pullOnly =
+    !pushOnly && (options.pullOnly === true || options.trigger === SyncTrigger.AutoPull);
+
   if (pullOnly) {
     const profile = await getActiveProfile();
     const prefs = profile === null ? null : await getPreferences(profile.id);
@@ -1250,33 +1261,41 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
   }
   try {
     const uploaded = pullOnly ? 0 : await pushPending(account.id);
-    const pull = await pullChanges(account.id, {
-      acceptOwnDevice: options.acceptOwnDevice ?? false,
-    });
+    // A push-only pass stops when the outbox is empty: no listing, no downloads,
+    // no watermark. The account boundaries (sign in / sign out) use it and would
+    // otherwise wait for a full pull nobody asked for.
+    const pull: PullResult = pushOnly
+      ? { downloaded: 0, failed: 0, conflicts: 0, skipped: 0, unchanged: 0, watermark: '' }
+      : await pullChanges(account.id, {
+          acceptOwnDevice: options.acceptOwnDevice ?? false,
+        });
 
     const now = new Date().toISOString();
-    const metadata = (await getMetadata(account.id)) ?? {
-      cloudAccountId: account.id,
-      providerType: account.providerType,
-      lastSyncCursor: null,
-      lastSyncTimestamp: null,
-      schemaVersion: CLOUD_SCHEMA_VERSION,
-      deviceId: await getDeviceId(),
-      manifestRevision: null,
-      lastFullUploadAt: null,
-    };
-    await upsertMetadata({
-      ...metadata,
-      lastSyncCursor: pull.watermark === '' ? metadata.lastSyncCursor : pull.watermark,
-      lastSyncTimestamp: now,
-    });
-    await upsertAccount({ ...account, lastSynchronizedAt: now });
+    if (!pushOnly) {
+      const metadata = (await getMetadata(account.id)) ?? {
+        cloudAccountId: account.id,
+        providerType: account.providerType,
+        lastSyncCursor: null,
+        lastSyncTimestamp: null,
+        schemaVersion: CLOUD_SCHEMA_VERSION,
+        deviceId: await getDeviceId(),
+        manifestRevision: null,
+        lastFullUploadAt: null,
+      };
+      await upsertMetadata({
+        ...metadata,
+        lastSyncCursor: pull.watermark === '' ? metadata.lastSyncCursor : pull.watermark,
+        lastSyncTimestamp: now,
+      });
+      await upsertAccount({ ...account, lastSynchronizedAt: now });
+    }
 
     const stillPending = (await countPendingOperations(account.id)) > 0;
     const retryable = pull.failed > 0 || pull.conflicts > 0 || stillPending;
-    if (!retryable) {
+    if (!retryable && !pushOnly) {
       // "Last successful synchronization" is only claimed when every listed
-      // document was handled: a skipped download used to look like success.
+      // document was handled: a skipped download used to look like success. A
+      // push-only pass is not a synchronization and never claims it.
       lastSuccessfulSync = now;
     }
 
@@ -1294,8 +1313,9 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
     }
 
     // A passive pull that found nothing keeps the state it had; one that brought records publishes
-    // the result, which is also what refreshes the visible day.
-    if (!pullOnly || retryable || pull.downloaded > 0) {
+    // the result, which is also what refreshes the visible day. A push-only pass always publishes
+    // (the Settings card was left on "Synchronizing" by the emit above).
+    if (pushOnly || !pullOnly || retryable || pull.downloaded > 0) {
       emitState(retryable ? SyncState.PendingChanges : SyncState.Synced);
     }
 

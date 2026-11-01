@@ -4,9 +4,14 @@
 //    no Save button)                 4 Synchronization card
 //  5 Privacy and backup card         6 About card
 //  7 Floating status line (StatusCaption, rendered by the shell)
+//
+// Signing in and out runs behind the GLOBAL busy overlay (shell.tsx), not a
+// button spinner: the account change touches the whole database, so no other
+// control of the app may be pressed while it runs.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
@@ -24,14 +29,16 @@ import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
 import { formatMegabytes, t, tFmt } from '../strings';
 
 /**
- * RN-only wording while the account card runs the Google flow (the Windows
- * resource table has no matching key yet).
+ * Height the floating tab bar needs at the bottom of a scrolling page: the bar
+ * itself (66 pt) plus its 10 pt margin plus breathing room, so the last card of
+ * a page is never hidden behind it.
  */
-const SIGNING_IN = 'Signing in…';
+const FLOATING_TAB_BAR_CLEARANCE = 110;
 
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  const insets = useSafeAreaInsets();
   const [dbPath, setDbPath] = useState('');
   const [storageMb, setStorageMb] = useState('0.00');
   const [quotaLine, setQuotaLine] = useState<string | null>(null);
@@ -43,8 +50,6 @@ export function SettingsScreen(): React.JSX.Element {
   const [integrityText, setIntegrityText] = useState<string | null>(null);
   /** True while the explicit "Synchronize now" cycle runs (inline spinner). */
   const [syncing, setSyncing] = useState(false);
-  /** 'in' / 'out' while the Google flow runs - the card shows a small spinner. */
-  const [accountBusy, setAccountBusy] = useState<'in' | 'out' | null>(null);
 
   const refreshFacts = useCallback(async () => {
     setDbPath(await databasePath());
@@ -236,51 +241,56 @@ export function SettingsScreen(): React.JSX.Element {
       onCancel: () => setDialog(null),
       onConfirm: async () => {
         setDialog(null);
-        setAccountBusy('out');
+        // The global overlay blocks the whole screen (every other button, the
+        // tab bar and the back key) until the account change is done.
+        app.setBusy('signingOut');
+        let result: Awaited<ReturnType<typeof app.signOut>>;
         try {
-          const result = await app.signOut(false);
-          if (!result.ok) {
-            // Pending-changes refusal: offer the explicit discard path.
-            setDialog({
-              title: t('Account_SignOutPendingTitle'),
-              message: `${t('Account_SignOutPendingDetail').replace('{0}', String(result.pending ?? 0))}\n\n${t('Account_SignOutPendingMessage')}`,
-              cancelText: t('Common_No'),
-              confirmText: t('Account_SignOut'),
-              destructive: true,
-              onCancel: () => {
-                setDialog(null);
-                app.showStatus(t('Account_SignOutPendingKept'));
-              },
-              onConfirm: async () => {
-                setDialog(null);
-                setAccountBusy('out');
-                try {
-                  await app.signOut(true);
-                  app.showStatus(t('Account_SignOutDiscarded'));
-                } finally {
-                  setAccountBusy(null);
-                }
-              },
-            });
-          } else {
-            app.showStatus(t('Account_SignedOut'));
-          }
+          result = await app.signOut(false);
         } finally {
-          setAccountBusy(null);
+          app.setBusy(null);
         }
+        if (!result.ok) {
+          // Pending-changes refusal: offer the explicit discard path.
+          setDialog({
+            title: t('Account_SignOutPendingTitle'),
+            message: `${t('Account_SignOutPendingDetail').replace('{0}', String(result.pending ?? 0))}\n\n${t('Account_SignOutPendingMessage')}`,
+            cancelText: t('Common_No'),
+            confirmText: t('Account_SignOut'),
+            destructive: true,
+            onCancel: () => {
+              setDialog(null);
+              app.showStatus(t('Account_SignOutPendingKept'));
+            },
+            onConfirm: async () => {
+              setDialog(null);
+              app.setBusy('signingOut');
+              try {
+                await app.signOut(true);
+                app.showStatus(t('Account_SignOutDiscarded'));
+              } finally {
+                app.setBusy(null);
+              }
+            },
+          });
+          return;
+        }
+        app.showStatus(t('Account_SignedOut'));
       },
     });
   };
 
   /**
-   * Plain Google sign-in: the button turns into a small spinner while the
-   * picker and the account connection run. No modal, no confirmation wall.
+   * Plain Google sign-in. The account card keeps its own buttons untouched: the
+   * GLOBAL overlay shows the spinner and its sentence, and nothing else on the
+   * page can be pressed while the picker, the adoption and the first download
+   * are running. No confirmation wall.
    */
   const signIn = async (): Promise<void> => {
-    if (accountBusy !== null) {
+    if (app.busy !== null) {
       return;
     }
-    setAccountBusy('in');
+    app.setBusy('signingIn');
     try {
       const result = await app.signInWithConsent(true);
       if (!result.ok) {
@@ -290,7 +300,7 @@ export function SettingsScreen(): React.JSX.Element {
       app.showStatus(t('Account_SignedIn'));
       await refreshFacts();
     } finally {
-      setAccountBusy(null);
+      app.setBusy(null);
     }
   };
 
@@ -310,7 +320,12 @@ export function SettingsScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={[
+        styles.content,
+        // The floating tab bar sits ON TOP of the page; the extra room keeps the
+        // About card (the last one) fully readable above it.
+        { paddingBottom: FLOATING_TAB_BAR_CLEARANCE + Math.max(insets.bottom, 10) },
+      ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
       {!app.signedIn && (
         <View style={cardStyle}>
@@ -350,16 +365,15 @@ export function SettingsScreen(): React.JSX.Element {
                 : t('Account_ProviderNone')}
             </Text>
           </View>
-          {/* The action keeps its place while it runs: `busy` swaps the glyph for
-              a spinner inside the button, so the tile never jumps. */}
+          {/* The buttons never carry a spinner: the global busy overlay covers
+              the whole screen while Google runs, so the card keeps its layout -
+              no label swap, no size jump, and no second tap can slip through. */}
           {app.signedIn ? (
             <BarButton
               compact
               danger
               label={t('Account_SignOut')}
               style={styles.accountAction}
-              disabled={accountBusy !== null}
-              busy={accountBusy === 'out'}
               onPress={confirmSignOut}
               colors={colors}
             />
@@ -367,10 +381,8 @@ export function SettingsScreen(): React.JSX.Element {
             <BarButton
               compact
               accent
-              label={accountBusy === 'in' ? SIGNING_IN : t('Account_Google')}
+              label={t('Account_Google')}
               style={styles.accountAction}
-              disabled={accountBusy === 'in'}
-              busy={accountBusy === 'in'}
               onPress={() => void signIn()}
               colors={colors}
             />
@@ -520,7 +532,8 @@ function ToggleRow(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 104, rowGap: 12 },
+  /** Page frame; the bottom padding is computed at render time (tab bar). */
+  content: { padding: 12, rowGap: 12 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
   /** Grouped card: no stroke - the card floats on the grouped background. */
   card: { borderRadius: metrics.radius, padding: 16, rowGap: 10 },

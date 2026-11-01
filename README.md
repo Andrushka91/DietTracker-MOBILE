@@ -118,6 +118,41 @@ Install: copy the APK to the phone, open it, allow *install unknown apps* for th
 from, and confirm. On a connected device the same thing is
 `adb install -r release\DietTracker-1.0.0.0-arm64-v8a.apk`.
 
+## Keyword: **“same version”** — commit, push, deploy APK
+
+Write **`same version`** (or *“push commit on same version, deploy apk on same version”*)
+and the whole release round runs, with **no version bump anywhere**:
+
+| Step | Command | Guard |
+|---|---|---|
+| 1. Verify | `npm run check` (`tsc --noEmit` + `eslint .` + `jest`) | must be green; 0 errors, tests all passing |
+| 2. Bundle both APKs | `npm run apk` (`scripts\build-apk.bat`) | rewrites `release\DietTracker-1.0.0.0-arm64-v8a.apk` + `-universal.apk` |
+| 3. Commit | `git add -A` + `git commit -m "<what changed>"` (one message in English, no `--amend`) | working tree of the previous round is clean |
+| 4. Push | `git push origin main` | remote `https://github.com/Andrushka91/DietTracker-MOBILE.git` |
+| 5. Report | APK names, sizes, SHA-256 from the build log | taken from `release-build.log` / build output |
+
+Rules that make this reproducible:
+
+* **The version never changes in this flow.** `android/app/build.gradle`
+  (`versionName "1.0.0.0"`, `versionCode 1`) and `app.json` (`version: "1.0.0"`)
+  stay exactly as they are — the new APKs replace the previous files of the
+  same name, and `adb install -r` / sideloading updates the installed app
+  because the debug key is unchanged.
+* A **new** version (`1.0.0.1`, `versionCode 2`, …) is only ever produced when
+  the request explicitly says *new version*.
+* The build is done **before** the commit, so the commit contains the code the
+  shipped APK was built from. Build logs (`release-build.log`,
+  `android-build.log`) stay untracked.
+* Nothing is force-pushed, no tag is moved, no history is rewritten.
+
+Expected artifacts after a run:
+
+| File | ~Size | SHA-256 |
+|---|---|---|
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | printed by the build |
+| `release\DietTracker-1.0.0.0-universal.apk` | 87 MB | printed by the build |
+
+
 ## Local Android emulator (Android Studio SDK)
 
 The debug APK is built and installed locally, so the app runs on the AVD

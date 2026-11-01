@@ -5,7 +5,6 @@
 
 import React from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -67,9 +66,14 @@ export function BarButton(props: {
   compact?: boolean;
   /** Optional leading glyph (emoji / symbol) drawn before the label. */
   glyph?: string;
-  /** Shows a small spinner inside the button while its action is running. */
-  busy?: boolean;
-  /** Optional layout tweak (e.g. flexShrink) merged after the base chrome. */
+  /**
+   * Optional layout tweak (e.g. flexShrink) merged after the base chrome.
+   *
+   * There is deliberately no `busy` prop: an operation long enough to need a
+   * spinner raises the GLOBAL busy overlay (shell.tsx), so the button itself
+   * never swaps its glyph for an indicator and the screen cannot be used while
+   * the operation runs.
+   */
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
   const background =
@@ -105,12 +109,8 @@ export function BarButton(props: {
       ]}>
       {/* One line: a compressed button ellipsizes its label instead of wrapping
           taller, so rows that must stay on one line never break. */}
-      {props.busy === true ? (
-        <ActivityIndicator size="small" color={foreground} />
-      ) : (
-        props.glyph !== undefined && (
-          <Text style={[styles.barGlyph, { color: foreground }]}>{props.glyph}</Text>
-        )
+      {props.glyph !== undefined && (
+        <Text style={[styles.barGlyph, { color: foreground }]}>{props.glyph}</Text>
       )}
       <Text
         style={[styles.barLabel, props.compact === true && styles.barLabelCompact, { color: foreground }]}

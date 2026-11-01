@@ -170,8 +170,8 @@ export const metrics = {
   radius: 12,
   /** Small controls: inputs, thumbnails, tinted chips. */
   radiusSmall: 8,
-  /** The 4 px state bar along the top edge of every meal card. */
-  stateBar: 4,
+  /** The 2 px state frame drawn around every meal card (Windows parity). */
+  cardBorder: 2,
   spacing: 12,
   spacingSmall: 8,
   /**
