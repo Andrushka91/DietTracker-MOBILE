@@ -5,7 +5,7 @@
 // dirname('R:\') === 'R:\' - so it throws "Couldn't find package.json up
 // from path R:\" even though package.json is right there. The loop below
 // checks each directory (including the root) before stopping.
-// Idempotent: run before every build (build-android.bat does).
+// Idempotent: run before every build (scripts/dev.js and build-apk.bat do).
 
 // Edge fix for expo-modules-autolinking's package.json walk loops:
 //   for (let dir = root; path.dirname(dir) !== dir; dir = path.dirname(dir))
@@ -14,7 +14,7 @@
 // dirname('R:\') === 'R:\' - so it throws "Couldn't find package.json up
 // from path R:\" even though package.json is right there. The patched loop
 // checks every directory (including the root) before stopping.
-// Idempotent: build-android.bat runs this before every build, so an
+// Idempotent: scripts/dev.js / build-apk.bat run this before every build, so an
 // npm install that restores the package is re-patched automatically.
 
 const fs = require('fs');
