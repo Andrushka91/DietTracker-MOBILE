@@ -160,8 +160,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `da8ed18e…9dc678` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `fec87e54…9716b5` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `972e6907…adf20e` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `458605a3…e01f07` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -571,7 +571,9 @@ npm start
   * The calendar's day cells show the day number, the photo marker and the **n/5**
     count instead of the miniature meal cards: a phone cell is about 44 pt wide, so
     the five meals of the selected day are listed as full rows under the grid (title,
-    category, time, photo count, status pill) - same information, legible size.
+    category, time, photo count, status pill) - same information, legible size. Those
+    rows keep the dashboard card's 9 pt inset inside their 2 pt state border, so the
+    slot emoji has air around it instead of sitting on the stroke.
   * The calendar header is one symmetrical block: the ‹ / › month arrows are pinned to
     the panel's two edges (so the left arrow sits exactly above the left edge of the
     grid and the right one above the right edge of the action row) with the month label

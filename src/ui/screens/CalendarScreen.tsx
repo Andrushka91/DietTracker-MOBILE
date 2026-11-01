@@ -436,15 +436,17 @@ const styles = StyleSheet.create({
   dayList: { marginTop: 12, rowGap: 6 },
   /**
    * A compact dashboard card: the frame is exactly the meal card's (same
-   * metrics.radius / metrics.cardBorder and the state colour as the border), so
-   * both screens read as one family - only the height stays compact.
+   * metrics.radius / metrics.cardBorder and the state colour as the border, and
+   * the same 9 pt inset from the border), so both screens read as one family -
+   * only the height stays compact. Without that inset the emoji sat on the
+   * stroke, which looked crowded.
    */
   dayRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: metrics.radius,
     borderWidth: metrics.cardBorder,
-    paddingRight: 8,
+    paddingHorizontal: 9,
     columnGap: 8,
   },
   dayRowIcon: { fontSize: 18, paddingVertical: 8 },
