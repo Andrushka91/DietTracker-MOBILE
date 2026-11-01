@@ -20,7 +20,7 @@ import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
-import { argb, cardShadow, fonts, metrics, themeColors } from '../theme';
+import { argb, cardShadow, fonts, metrics, statusPillColors, themeColors } from '../theme';
 import { BarButton, IconButton, localizedCode } from './buttons';
 import { Icon, type IconName } from './icons';
 import { PhotoGallery } from './PhotoGallery';
@@ -102,6 +102,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
    */
   const statusIcon: IconName | null =
     meal.status === MealStatus.Done ? 'checkmark' : meal.status === MealStatus.Missed ? 'close' : null;
+  /** Fill + ink of the pill: solid state colour, or an outline for pending. */
+  const pill = statusPillColors(colors, meal.status);
   const effectiveTime =
     meal.plannedTime ?? (category.defaultTime !== '' ? category.defaultTime : null);
 
@@ -219,17 +221,30 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     <View
       style={[
         styles.card,
+        cardShadow,
         {
           backgroundColor: colors.cardFill,
-          borderColor: statusColor,
+          borderColor: colors.border,
           minHeight: metrics.cardMinHeight,
         },
       ]}>
+      {/*
+       * The state rail: one 3 pt strip on the leading edge in the state colour.
+       * The old card was framed by a full 1.5 pt green/red box, so five meals in
+       * a row read as five alert boxes and the meat of the card - the meal - was
+       * the quietest thing in it. The rail keeps the state at a glance, the pill
+       * keeps it in words, and the card itself stays a calm white surface.
+       */}
+      {meal.status !== MealStatus.Pending && (
+        <View style={[styles.rail, { backgroundColor: statusColor }]} />
+      )}
       <View style={styles.cardContent}>
-      {/* header - no fill: the Windows card keeps the card colour and lets
-          only the status pill carry the state */}
+      {/* header - no fill: the card keeps its surface and only the rail, the
+          pill and the counter dot carry the state */}
       <View style={styles.header}>
-        <Text style={styles.icon}>{category.icon !== '' ? category.icon : '🍽️'}</Text>
+        <View style={[styles.iconTile, { backgroundColor: colors.surfaceVariant }]}>
+          <Text style={styles.icon}>{category.icon !== '' ? category.icon : '🍽️'}</Text>
+        </View>
         <View style={styles.headerText}>
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
             {category.name !== '' ? category.name : t(mealNameKey(category.fixedCategoryKey))}
@@ -238,9 +253,21 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             {formatTime(effectiveTime, use12HourClock)}
           </Text>
         </View>
-        <View style={[styles.pill, { backgroundColor: statusColor }]}>
-          {statusIcon !== null && <Icon name={statusIcon} size={11} color={colors.onState} />}
-          <Text style={[styles.pillText, { color: colors.onState }]}>{statusLabel}</Text>
+        <View
+          style={[
+            styles.pill,
+            {
+              backgroundColor: pill.fill,
+              borderWidth: pill.solid ? 0 : 1,
+              borderColor: colors.border,
+            },
+          ]}>
+          {statusIcon !== null ? (
+            <Icon name={statusIcon} size={11} color={pill.ink} />
+          ) : (
+            <View style={[styles.pillDot, { backgroundColor: pill.dot }]} />
+          )}
+          <Text style={[styles.pillText, { color: pill.ink }]}>{statusLabel}</Text>
         </View>
       </View>
 
@@ -305,9 +332,18 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
               {meal.title}
             </Text>
           )}
-          <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={3}>
-            {meal.ingredients}
-          </Text>
+          {meal.ingredients !== '' && (
+            <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={3}>
+              {meal.ingredients}
+            </Text>
+          )}
+          {/* An untouched card still has five available actions; the quiet
+              placeholder says why there is no text instead of leaving a hole. */}
+          {meal.title === '' && meal.ingredients === '' && (
+            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+              {t('Rn_MealEmpty')}
+            </Text>
+          )}
           <View style={styles.bottomRow}>
             <PhotoGallery
               photos={photos}
@@ -316,6 +352,9 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
               onOpen={props.onOpenPhoto}
               onRemove={props.onRemovePhoto}
             />
+            {/* A hairline separates the meal from its tools, so the row of
+                glyphs stops floating in the same visual plane as the text. */}
+            <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
             <View style={styles.actions}>
               <View style={styles.actionRow}>
                 <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
@@ -336,74 +375,86 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
 const styles = StyleSheet.create({
   card: {
     borderRadius: metrics.radius,
-    // The state colour frames the WHOLE card (green DONE / red MISSED / grey
-    // pending), like the Windows window: a full border follows the rounded
-    // corners exactly, so the frame is as round at the bottom as at the top.
+    // Neutral hairline; the state lives on the rail and in the pill.
     borderWidth: metrics.cardBorder,
     flexGrow: 1,
     flexBasis: '100%',
     // White card on the tinted page: the shadow carries the elevation.
     ...cardShadow,
   },
+  /** Leading state strip, inset so it follows the rounded corners visually. */
+  rail: {
+    position: 'absolute',
+    left: 0,
+    top: 12,
+    bottom: 12,
+    width: metrics.statusRail,
+    borderTopRightRadius: metrics.statusRail,
+    borderBottomRightRadius: metrics.statusRail,
+  },
   /**
-   * Compact card body: the frame plus an even inner padding keeps the same
-   * distance from the card's edges on all four sides, so the header, the status
-   * pill and the action buttons each sit in a corner at the same inset.
+   * Compact card body: roomier than the old 12 pt frame padding, because the
+   * card no longer draws a coloured stroke - the air is what groups it now.
    */
-  cardContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, flexGrow: 1 },
+  cardContent: { paddingLeft: 15, paddingRight: 13, paddingTop: 12, paddingBottom: 6, flexGrow: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 6,
+    columnGap: 10,
   },
-  icon: { fontSize: 26 },
+  /** Emoji sit on a soft tile so they align with the text block, not beside it. */
+  iconTile: {
+    width: 38,
+    height: 38,
+    borderRadius: metrics.radiusSmall,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: { fontSize: 20 },
   headerText: { flexShrink: 1 },
   headerTitle: { fontSize: 16, fontFamily: fonts.medium, letterSpacing: -0.2 },
-  headerTime: { fontSize: 12 },
-  /**
-   * Top-aligned like the iOS calendar badge: the 4 px margin plus the 7 px the
-   * card body keeps above the header put the pill 11 px below the card's top
-   * edge - the same distance the 9 px side padding gives it on the right, so the
-   * capsule sits in an even top-right corner instead of hugging the frame.
-   */
+  headerTime: { fontSize: 12, marginTop: 1 },
+  /** Capsule pill: the same shape and inset in every card, always top-right. */
   pill: {
     marginLeft: 'auto',
     alignSelf: 'flex-start',
-    marginTop: 4,
+    marginTop: 3,
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 3,
-    borderRadius: metrics.radiusChip,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    columnGap: 4,
+    borderRadius: metrics.radiusPill,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
   },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
   pillText: { fontSize: 11, fontFamily: fonts.medium },
   error: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 8 },
   errorText: { color: argb('#FFFFFFFF'), fontSize: 12 },
-  title: { fontSize: 16, marginTop: 4 },
-  body: { fontSize: 14, marginTop: 1, lineHeight: 18 },
+  title: { fontSize: 16, lineHeight: 21, fontFamily: fonts.medium, marginTop: 10 },
+  body: { fontSize: 14, marginTop: 3, lineHeight: 19 },
+  emptyText: { fontSize: 13, fontStyle: 'italic', marginTop: 10 },
   /**
    * Photo strip and action row, stacked: the pictures take the full card width
    * (so three thumbnails always sit side by side instead of wrapping), and the
-   * five action buttons keep their own line under them.
+   * five action buttons keep their own line under a hairline.
    */
   bottomRow: {
     flexDirection: 'column',
     alignItems: 'stretch',
     marginTop: 'auto',
-    rowGap: 8,
+    rowGap: 2,
   },
+  divider: { height: StyleSheet.hairlineWidth, marginTop: 10 },
   /**
-   * The action row always ends on the card's right edge: the buttons sit
-   * directly under the status pill, at the same 8 px the header keeps.
+   * The action row ends on the card's text edge: the negative margin pulls the
+   * 44 pt touch squares back, so the last glyph lines up under the pill.
    */
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', flexShrink: 0 },
-  /**
-   * The five icon buttons keep one even gap (metrics.controlGap), so the ✓ and
-   * ✕ pair is separated by exactly the same distance the Dashboard's own ✓ / ✕
-   * pair uses at the top of the page - before this the card row had no gap at
-   * all and the buttons touched each other.
-   */
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+    marginRight: -10,
+  },
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
