@@ -21,10 +21,10 @@ import {
 import { getMealsInRange } from '../../data/repositories';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
-import { BarButton, Segmented } from '../components/buttons';
+import { IconButton, Segmented } from '../components/buttons';
 import { fonts, metrics, pageTitleStyle, cardShadow, themeColors, type ThemeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
-import { t, tFmt } from '../strings';
+import { formatMonthShort, t, tFmt } from '../strings';
 
 type Mode = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -77,7 +77,7 @@ export function StatisticsScreen(): React.JSX.Element {
         const monthAnchor = `${year}-${String(month).padStart(2, '0')}-15`;
         const progress = forMonth(monthAnchor, byDate);
         bars.push({
-          label: String(month).padStart(2, '0'),
+          label: formatMonthShort(month),
           done: progress.completed,
           missed: progress.missed,
           pending: progress.pending,
@@ -145,15 +145,30 @@ export function StatisticsScreen(): React.JSX.Element {
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill }]}>
         {/* iOS segmented control for the four periods (same mode switching). */}
         <Segmented
-          options={MODES.map((item) => item.toUpperCase().slice(0, 1))}
+          options={[
+            t('Rn_PeriodDay'),
+            t('Rn_PeriodWeek'),
+            t('Rn_PeriodMonth'),
+            t('Rn_PeriodYear'),
+          ]}
           index={MODES.indexOf(mode)}
           onChange={(index) => setMode(MODES[index])}
           colors={colors}
         />
         <View style={styles.navRow}>
-          <BarButton label="‹" onPress={() => shift(-1)} colors={colors} />
+          <IconButton
+            label={t('Dashboard_PreviousDay')}
+            icon="chevron-back"
+            onPress={() => shift(-1)}
+            colors={colors}
+          />
           <Text style={[styles.periodLabel, { color: colors.text }]}>{label}</Text>
-          <BarButton label="›" onPress={() => shift(1)} colors={colors} />
+          <IconButton
+            label={t('Dashboard_NextDay')}
+            icon="chevron-forward"
+            onPress={() => shift(1)}
+            colors={colors}
+          />
         </View>
 
         {period !== null && (
@@ -188,7 +203,7 @@ export function StatisticsScreen(): React.JSX.Element {
         )}
 
         {yearBars.length > 0 && (
-          <VerticalBars groups={yearBars} barWidth={8} height={110} showValues={false} colors={colors} />
+          <VerticalBars groups={yearBars} barWidth={7} height={96} showValues={false} colors={colors} />
         )}
 
         <Text style={[styles.disclaimer, { color: colors.textMuted }]}>
@@ -215,7 +230,7 @@ function VerticalBars(props: {
   colors: ThemeColors;
 }): React.JSX.Element {
   const series = [
-    { key: 'done', value: (group: { done: number }) => group.done, name: t('Dashboard_CountDone'), color: props.colors.accent },
+    { key: 'done', value: (group: { done: number }) => group.done, name: t('Dashboard_CountDone'), color: props.colors.done },
     { key: 'missed', value: (group: { missed: number }) => group.missed, name: t('Dashboard_CountMissed'), color: props.colors.missed },
     { key: 'pending', value: (group: { pending: number }) => group.pending, name: t('Dashboard_CountPending'), color: props.colors.pending },
   ];
@@ -223,7 +238,16 @@ function VerticalBars(props: {
   const gap = wide ? 10 : 2;
   return (
     <View style={styles.chart}>
-      <View style={[styles.chartGroups, { columnGap: wide ? 24 : 3 }]}>
+      <View
+        style={[
+          styles.chartGroups,
+          {
+            columnGap: wide ? 24 : 3,
+            // One period = three state bars, centred under the label; the yearly
+            // chart spreads its twelve months across the full width instead.
+            justifyContent: props.groups.length === 1 ? 'center' : 'space-between',
+          },
+        ]}>
         {props.groups.map((group) => (
           <View key={group.label} style={styles.chartGroup}>
             <View style={[styles.chartBars, { height: props.height, columnGap: gap }]}>
@@ -231,17 +255,25 @@ function VerticalBars(props: {
                 const value = item.value(group);
                 const ratio = group.total > 0 ? Math.min(value / group.total, 1) : 0;
                 return (
+                  /* The track shows the full height the bar is measured against,
+                     so a 3/5 share reads as a proportion instead of a floating
+                     pill. */
                   <View
                     key={item.key}
                     style={[
-                      styles.barVertical,
-                      {
-                        width: props.barWidth,
-                        backgroundColor: item.color,
-                        height: `${Math.round(ratio * 100)}%`,
-                      },
-                    ]}
-                  />
+                      styles.barTrack,
+                      { width: props.barWidth, backgroundColor: props.colors.hairline },
+                    ]}>
+                    <View
+                      style={[
+                        styles.barVertical,
+                        {
+                          backgroundColor: item.color,
+                          height: `${Math.round(ratio * 100)}%`,
+                        },
+                      ]}
+                    />
+                  </View>
                 );
               })}
             </View>
@@ -295,10 +327,12 @@ const styles = StyleSheet.create({
   },
   chartGroup: { alignItems: 'center' },
   chartBars: { flexDirection: 'row', alignItems: 'flex-end' },
-  barVertical: { borderRadius: 999 },
+  /** Full-height track behind each bar: the scale the share is measured against. */
+  barTrack: { height: '100%', borderRadius: 999, justifyContent: 'flex-end', overflow: 'hidden' },
+  barVertical: { width: '100%', borderRadius: 999 },
   chartValues: { flexDirection: 'row', marginTop: 6 },
   barValue: { fontSize: 11, textAlign: 'center' },
-  chartGroupLabel: { fontSize: 11, marginTop: 2 },
+  chartGroupLabel: { fontSize: 10, marginTop: 3 },
   chartLegend: {
     flexDirection: 'row',
     flexWrap: 'wrap',
