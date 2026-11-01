@@ -69,17 +69,21 @@ import {
   deleteTemplate,
   deleteTombstone,
   failOperation,
+  getAllPhotos,
   getActiveAccount,
   getActiveProfile,
   getCategories,
   getMealById,
   getMealBySlot,
+  getMealsInRange,
   getMetadata,
   getPendingOperations,
   getPhotoById,
   getPreferences,
   getReminderById,
+  getReminders,
   getTemplateById,
+  getTemplates,
   hasOpenConflict,
   insertConflict,
   upsertAccount,
@@ -92,6 +96,7 @@ import {
   upsertReminder,
   upsertTemplate,
 } from '../data/repositories';
+import { journalEntity } from './journal';
 import {
   deleteObject,
   downloadObject,
@@ -1685,44 +1690,73 @@ export function cancelScheduledCycle(): void {
 /**
  * Queues EVERY local record for upload (first sign-in adoption of guest
  * records, post-provider-switch - spec 7.6 PushAllAsync).
+ *
+ * `onlyPending` restricts the pass to records the cloud may not have yet (the
+ * rows still flagged `PendingUpload`). The sign-out barrier uses that form as its
+ * safety net: it costs a handful of journal entries on a normal session, but it
+ * also picks up an edit that was written while the screens still had no account
+ * id - the one case where a local change is never lost.
  */
-export async function pushAllLocalRecords(): Promise<number> {
+export async function pushAllLocalRecords(
+  options: { onlyPending?: boolean } = {},
+): Promise<number> {
   const account = await getActiveAccount();
   const profile = await getActiveProfile();
   if (account === null || profile === null) {
     return 0;
   }
-  const { journalEntity } = await import('./journal');
+  const onlyPending = options.onlyPending === true;
+  /** False when the row is already confirmed by the provider. */
+  const needsPush = (syncStatus: number): boolean =>
+    !onlyPending || syncStatus !== SyncStatus.Synced;
   const now = new Date().toISOString();
   let queued = 0;
 
-  const range = await import('../data/repositories');
-  const meals = await range.getMealsInRange(profile.id, '0001-01-01', '9999-12-31');
+  const meals = await getMealsInRange(profile.id, '0001-01-01', '9999-12-31');
   for (const meal of meals) {
+    if (!needsPush(meal.syncStatus)) {
+      continue;
+    }
     await journalEntity(account.id, EntityType.MealEntry, meal.id, meal.updatedAt);
     queued += 1;
   }
-  const photos = await range.getAllPhotos();
+  const photos = await getAllPhotos();
   for (const photo of photos) {
+    if (!needsPush(photo.syncStatus)) {
+      continue;
+    }
     await journalEntity(account.id, EntityType.MealPhoto, photo.id, photo.updatedAt);
     queued += 1;
   }
-  const templates = await range.getTemplates();
+  const templates = await getTemplates();
   for (const template of templates) {
+    if (!needsPush(template.syncStatus)) {
+      continue;
+    }
     await journalEntity(account.id, EntityType.MealTemplate, template.id, template.updatedAt);
     queued += 1;
   }
-  const reminders = await range.getReminders(profile.id);
+  const reminders = await getReminders(profile.id);
   for (const reminder of reminders) {
+    if (!needsPush(reminder.syncStatus)) {
+      continue;
+    }
     await journalEntity(account.id, EntityType.ReminderSettings, reminder.id, reminder.updatedAt);
     queued += 1;
   }
-  const categories = await range.getCategories();
+  // Configuration documents (the five fixed categories, the preferences and the
+  // profile) are pushed by the adoption pass of a sign-in. The sign-out safety
+  // net only rescues CONTENT - the meals, photographs and templates whose loss
+  // cannot be undone - so a sign-out stays a handful of documents.
+  if (onlyPending) {
+    return queued;
+  }
+  const categories = await getCategories();
   for (const category of categories) {
     await journalEntity(account.id, EntityType.MealCategory, category.id, now);
     queued += 1;
   }
-  const prefs = await range.getPreferences(profile.id);
+  const prefs = await getPreferences(profile.id);
   if (prefs !== null) {
     await journalEntity(account.id, EntityType.AppPreferences, profile.id, prefs.updatedAt);
     queued += 1;

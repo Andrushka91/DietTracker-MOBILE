@@ -18,6 +18,7 @@ import { ValidationResult, validateMealEntry, validateTemplate } from '../domain
 import { journalEntity } from '../cloud/journal';
 import {
   getCategories,
+  getMealBySlot,
   getMealsForDate,
   getTemplates,
   upsertCategory,
@@ -90,6 +91,26 @@ export interface SaveResult {
 }
 
 /**
+ * Journals one slot for upload, naming the row the DATABASE kept.
+ *
+ * `upsertMeal` never rewrites the primary key (photographs reference it), so a
+ * draft may arrive with a different id than the stored row. Journaling the
+ * draft's id would queue a document that `loadEntityForSync` can no longer read -
+ * the operation would then be completed without uploading anything and the edit
+ * would only ever exist on this phone.
+ */
+async function journalStoredMeal(
+  accountId: string | null,
+  slot: MealEntry,
+  at: string,
+): Promise<void> {
+  // No null guard: the journal resolves "no account id" to the ACTIVE account
+  // and writes nothing only in true guest mode (see cloud/journal.ts).
+  const stored = await getMealBySlot(slot.localProfileId, slot.date, slot.mealCategoryKey);
+  await journalEntity(accountId, EntityType.MealEntry, stored?.id ?? slot.id, at);
+}
+
+/**
  * Validates + persists one meal. The card keeps its editor open on failure
  * (validation returned to the caller, spec 8.3).
  */
@@ -109,9 +130,7 @@ export async function saveMeal(
     syncStatus: SyncStatus.PendingUpload,
   };
   await upsertMeal(toStore);
-  if (accountId !== null) {
-    await journalEntity(accountId, EntityType.MealEntry, toStore.id, now);
-  }
+  await journalStoredMeal(accountId, toStore, now);
   return { ok: true };
 }
 
@@ -139,10 +158,9 @@ export async function ensureMealStored(
     syncStatus: SyncStatus.PendingUpload,
   };
   await upsertMeal(toStore);
-  if (accountId !== null) {
-    await journalEntity(accountId, EntityType.MealEntry, toStore.id, now);
-  }
-  return toStore;
+  await journalStoredMeal(accountId, toStore, now);
+  const kept = await getMealBySlot(toStore.localProfileId, toStore.date, toStore.mealCategoryKey);
+  return kept ?? toStore;
 }
 
 export interface CompletionResult extends CompletionOutcome {
@@ -265,9 +283,7 @@ export async function clearMeal(
     syncStatus: SyncStatus.PendingUpload,
   };
   await upsertMeal(cleared);
-  if (accountId !== null) {
-    await journalEntity(accountId, EntityType.MealEntry, cleared.id, cleared.updatedAt);
-  }
+  await journalStoredMeal(accountId, cleared, cleared.updatedAt);
 }
 
 /** Saves the whole visible day as a full-day template (spec 8.2/8.7). */
@@ -286,9 +302,7 @@ export async function saveDayAsTemplate(
   }
   const now = new Date().toISOString();
   await upsertTemplate(template);
-  if (accountId !== null) {
-    await journalEntity(accountId, EntityType.MealTemplate, template.id, now);
-  }
+  await journalEntity(accountId, EntityType.MealTemplate, template.id, now);
   return { ok: true, template };
 }
 
@@ -305,9 +319,7 @@ export async function saveMealAsTemplate(
   }
   const now = new Date().toISOString();
   await upsertTemplate(template);
-  if (accountId !== null) {
-    await journalEntity(accountId, EntityType.MealTemplate, template.id, now);
-  }
+  await journalEntity(accountId, EntityType.MealTemplate, template.id, now);
   return { ok: true, template };
 }
 
@@ -355,9 +367,7 @@ export async function applyTemplate(
       syncStatus: SyncStatus.PendingUpload,
     };
     await upsertMeal(merged);
-    if (accountId !== null) {
-      await journalEntity(accountId, EntityType.MealEntry, merged.id, merged.updatedAt);
-    }
+    await journalStoredMeal(accountId, merged, merged.updatedAt);
     applied += 1;
   }
   return applied;

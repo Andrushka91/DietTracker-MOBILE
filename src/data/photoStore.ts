@@ -179,12 +179,12 @@ export async function addPhotoToMeal(
   // document; the sync engine uploads the binary separately (spec 7.4).
   // Journaling never breaks the user's edit: a failure is reported and the
   // photograph stays local, where the next full reconciliation picks it up.
-  if (accountId !== null) {
-    try {
-      await journalEntity(accountId, EntityType.MealPhoto, photo.id, photo.updatedAt);
-    } catch (error) {
-      console.warn('[photos] the photograph could not be queued for upload', error);
-    }
+  // The journal itself resolves the account (the screen's cached id can be
+  // empty for a moment) and writes nothing in true guest mode.
+  try {
+    await journalEntity(accountId, EntityType.MealPhoto, photo.id, photo.updatedAt);
+  } catch (error) {
+    console.warn('[photos] the photograph could not be queued for upload', error);
   }
   return { ok: true, photo };
 }

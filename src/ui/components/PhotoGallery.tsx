@@ -1,7 +1,9 @@
 // Photo gallery (spec 8.4) - up to three square thumbnails inside the meal
-// card. A tap opens the full-size viewer; every tile carries its own small X in
-// the corner. While a photograph is being saved a compact "Uploading..." line
-// with a spinner sits under the thumbnails, so progress is visible without a
+// card. Every tile carries TWO small badges in its corners: an expand button
+// ("Show") that opens the photograph full screen, and the X that removes it -
+// tapping the picture itself does the same as "Show", the badge only makes the
+// gesture visible. While a photograph is being saved a compact caption with a
+// spinner sits under the thumbnails, so progress is visible without a
 // placeholder square appearing next to the pictures that already landed.
 
 import React from 'react';
@@ -12,8 +14,12 @@ import { thumbnailUri } from '../../data/photoStore';
 import { t } from '../strings';
 import { fonts, argb, type ThemeColors } from '../theme';
 
-/** Tile edge in points: three tiles + two gaps fit beside the action buttons. */
-const TILE = 62;
+/**
+ * Tile edge in points. The strip has its own row above the action buttons, so
+ * even the third picture keeps a comfortable size: three tiles + two gaps stay
+ * well inside the narrowest phone card (a 360 pt screen leaves ~322 pt).
+ */
+const TILE = 56;
 
 export function PhotoGallery(props: {
   photos: MealPhoto[];
@@ -43,6 +49,16 @@ export function PhotoGallery(props: {
                   style={[styles.tile, { backgroundColor: props.colors.surfaceVariant }]}
                 />
               </Pressable>
+              {/* "Show": expands the photograph to the full-screen viewer. The
+                  picture itself stays tappable, this badge makes it obvious. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t('Photo_Show')} ${photo.originalFileName}`}
+                onPress={() => props.onOpen(photo)}
+                hitSlop={8}
+                style={styles.expand}>
+                <Text style={styles.expandText}>{'\u2922'}</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('Common_Close')}
@@ -69,8 +85,8 @@ export function PhotoGallery(props: {
 
 const styles = StyleSheet.create({
   host: { flexShrink: 1 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 8 },
-  /** Rounded clip + the delete badge that sits inside the corner. */
+  row: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 6, rowGap: 6 },
+  /** Rounded clip + the two badges that sit inside the corners. */
   tileHost: {
     width: TILE,
     height: TILE,
@@ -80,13 +96,28 @@ const styles = StyleSheet.create({
   },
   tile: { width: '100%', height: '100%' },
   /**
-   * Small dark badge over the photograph - readable on any picture, and the
+   * Small dark badges over the photograph - readable on any picture, and the
    * whole 20 pt square is the touch target (hitSlop adds 8 pt around it).
+   * The X keeps its corner (top-right, where it always was) and "Show" sits in
+   * the opposite one, so a thumb never removes a picture while aiming for the
+   * full-screen viewer.
    */
+  expand: {
+    position: 'absolute',
+    bottom: 3,
+    left: 3,
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: argb('#99000000'),
+  },
+  expandText: { color: argb('#FFFFFFFF'), fontSize: 12, lineHeight: 14 },
   remove: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    top: 3,
+    right: 3,
     width: 20,
     height: 20,
     borderRadius: 5,

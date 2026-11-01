@@ -31,10 +31,15 @@ import { t } from '../strings';
  */
 const SIGNING_IN = 'Signing in…';
 
-/** RN-only wording of the sign-out upload bar (no Windows resource exists). */
-const UPLOAD_HINT = 'Please keep the app open until every change is saved on your account.';
-const UPLOAD_WAITING = 'Waiting for the connection… retrying';
-const UPLOAD_COUNT = '{0} of {1} change(s) saved';
+/**
+ * RN-only wording of the sign-out cloud-sync bar (no Windows resource exists).
+ *
+ * The bar is not an "upload" screen: it is the moment the phone proves that the
+ * account already holds every change, so the wording says exactly that.
+ */
+const SYNC_HINT = 'Please keep the app open until every change is synced with the cloud.';
+const SYNC_WAITING = 'Waiting for the connection… retrying';
+const SYNC_COUNT = '{0} of {1} change(s) synced with the cloud';
 
 /** 0-1 of the bar; `finishing` is the full bar, `preparing` is an empty one. */
 function progressRatio(progress: SignOutProgress): number {
@@ -88,9 +93,9 @@ export function BusyOverlay(): React.JSX.Element | null {
 /**
  * The sign-out barrier: a blocking card with a bar that fills from 0 % to 100 %
  * as every pending change reaches the account. No cancel/skip button exists on
- * purpose - the data must be uploaded before the local cache is deleted, so the
- * only way out is to let it finish (or to wait for the refusal, which keeps all
- * data and returns to the page).
+ * purpose - the data must be synced with the account before the local cache is
+ * deleted, so the only way out is to let it finish (or to wait for the refusal,
+ * which keeps all data and returns to the page).
  */
 function ProgressOverlay({
   busy,
@@ -103,11 +108,11 @@ function ProgressOverlay({
   const colors = themeColors(isDark);
   const ratio = progressRatio(progress);
   const percent = Math.round(ratio * 100);
-  const title = progress.stage === 'finishing' ? t('Busy_SigningOut') : t('Busy_UploadingChanges');
+  const title = progress.stage === 'finishing' ? t('Busy_SigningOut') : t('Busy_SyncingChanges');
   const detail =
     progress.stage === 'waiting'
-      ? UPLOAD_WAITING
-      : UPLOAD_COUNT.replace('{0}', String(progress.uploaded)).replace('{1}', String(progress.total));
+      ? SYNC_WAITING
+      : SYNC_COUNT.replace('{0}', String(progress.uploaded)).replace('{1}', String(progress.total));
   return (
     <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
       <View style={[styles.scrim, { backgroundColor: colors.overlay }]}>
@@ -122,7 +127,7 @@ function ProgressOverlay({
               {detail}
             </Text>
           </View>
-          <Text style={[styles.hint, { color: colors.textMuted }]}>{UPLOAD_HINT}</Text>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>{SYNC_HINT}</Text>
           <Text style={[styles.stageCaption, { color: colors.textMuted }]}>{stageText(busy)}</Text>
         </View>
       </View>
@@ -136,7 +141,7 @@ function stageText(stage: BusyStage): string {
     case 'sync':
       return t('Busy_Synchronizing');
     case 'uploading':
-      return t('Busy_UploadingChanges');
+      return t('Busy_SyncingChanges');
     case 'downloading':
     case 'loadingAccount':
       return t('Busy_Downloading');

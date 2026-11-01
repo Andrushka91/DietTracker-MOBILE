@@ -22,6 +22,8 @@ import { totalPhotoBytes, getActiveAccount } from '../../data/repositories';
 import RNFS from '../../platform/fs';
 import { readTokens } from '../../cloud/auth';
 import { previewRestoreFromCloud, restoreFromCloud, runCycle } from '../../cloud/syncEngine';
+import { getDeviceId } from '../../services/deviceId';
+import { showSyncResultNotification } from '../../services/reminders';
 import { getQuota } from '../../cloud/driveProvider';
 import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
@@ -31,8 +33,8 @@ import { useFloatingTabBarClearance } from '../tabBar';
 import { formatMegabytes, t, tFmt } from '../strings';
 
 /**
- * RN-only wording: the sign-out can no longer be forced past a failed upload,
- * so the refusal says what happens instead of offering a discard path.
+ * RN-only wording: the sign-out can no longer be forced past a failed sync, so
+ * the refusal says what happens instead of offering a discard path.
  */
 const SIGN_OUT_UPLOAD_FAILED =
   'Sign-out was cancelled so nothing is lost: those changes are only on this device. Check the connection and try again in a moment.';
@@ -107,7 +109,6 @@ export function SettingsScreen(): React.JSX.Element {
     try {
       const result = await runCycle({ trigger: SyncTrigger.Manual });
       if (result.uploaded + result.downloaded > 0) {
-        const { showSyncResultNotification } = await import('../../services/reminders');
         await showSyncResultNotification(result.uploaded, result.downloaded);
       }
       // One status line that tells the truth: a cycle that could not apply every
@@ -160,7 +161,6 @@ export function SettingsScreen(): React.JSX.Element {
 
   const exportData = async (): Promise<void> => {
     try {
-      const { getDeviceId } = await import('../../services/deviceId');
       const result = await createBackup(await getDeviceId());
       app.showStatus(tFmt('Settings_BackupCreated', result.counts.meals, result.counts.photos));
     } catch {

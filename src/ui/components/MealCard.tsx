@@ -164,6 +164,13 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       setEditing(false);
       props.onEditingChange?.(meal.id, false);
       return true;
+    } catch (error) {
+      // A rejected write (a database constraint, a full disk) must never look
+      // like a dead button: the editor stays open, the reason is on the card and
+      // the next tap can try again.
+      console.warn('[meal card] the save was rejected', error);
+      setErrorLine(t('Settings_SaveFailed'));
+      return false;
     } finally {
       saveBusyRef.current = false;
       setSaving(false);
@@ -367,23 +374,21 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, marginTop: 4 },
   body: { fontSize: 14, marginTop: 1, lineHeight: 18 },
   /**
-   * Photo strip on the left, action row on the right. Wrapping keeps the two
-   * apart when a card holds three photographs on a narrow phone.
+   * Photo strip and action row, stacked: the pictures take the full card width
+   * (so three thumbnails always sit side by side instead of wrapping), and the
+   * five action buttons keep their own line under them.
    */
   bottomRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     marginTop: 'auto',
-    columnGap: 8,
-    rowGap: 6,
-    alignItems: 'flex-end',
+    rowGap: 8,
   },
   /**
-   * The action row always ends on the card's right edge: `marginLeft: 'auto'`
-   * pushes it there even when the card holds no photograph, so the ✓ / ✕ pair
-   * sits directly under the status pill, at the same 8 px the header keeps.
+   * The action row always ends on the card's right edge: the buttons sit
+   * directly under the status pill, at the same 8 px the header keeps.
    */
-  actions: { alignItems: 'flex-end', marginLeft: 'auto', flexShrink: 0 },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', flexShrink: 0 },
   /**
    * The five icon buttons keep one even gap (metrics.controlGap), so the ✓ and
    * ✕ pair is separated by exactly the same distance the Dashboard's own ✓ / ✕

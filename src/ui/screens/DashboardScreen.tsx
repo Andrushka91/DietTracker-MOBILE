@@ -20,6 +20,7 @@ import { EntityType, MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { formatDate, addDays, forDay } from '../../domain/analytics';
 import { isFutureMeal } from '../../domain/rules/completionRules';
+import { MAX_PHOTOS_PER_MEAL } from '../../domain/rules/photoRules';
 import { ensureCategories } from '../../services/mealTracking';
 import { getPhotoCounts, getPhotosForMeal } from '../../data/repositories';
 import { addPhotoToMeal, removePhoto } from '../../data/photoStore';
@@ -134,13 +135,21 @@ export function DashboardScreen({
   const progress = meals === null ? null : forDay(date, meals, photoCounts);
 
   const handleSave = async (draft: MealEntry): Promise<string | null> => {
-    const result = await saveMeal(draft, accountId, true);
-    if (!result.ok) {
-      return result.validation?.failures[0]?.message ?? t('Settings_SaveFailed');
+    try {
+      const result = await saveMeal(draft, accountId, true);
+      if (!result.ok) {
+        const failure = result.validation?.failures[0];
+        return failure === undefined ? t('Settings_SaveFailed') : localizedCode(failure.code);
+      }
+      app.notifyChanged();
+      await reload();
+      return null;
+    } catch (error) {
+      // A rejected write is reported on the card instead of disappearing into an
+      // unhandled rejection (that is what made Save look dead).
+      console.warn('[dashboard] the meal could not be saved', error);
+      return t('Settings_SaveFailed');
     }
-    app.notifyChanged();
-    await reload();
-    return null;
   };
 
   const handleComplete = async (entry: MealEntry): Promise<void> => {
@@ -189,9 +198,7 @@ export function DashboardScreen({
         const attached = await getPhotosForMeal(entry.id);
         for (const photo of attached) {
           await removePhoto(photo);
-          if (accountId !== null) {
-            await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
-          }
+          await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
         }
         await clearMeal(entry, accountId, now);
         app.notifyChanged();
@@ -200,6 +207,14 @@ export function DashboardScreen({
     });
   };
 
+  /**
+   * Photograph pipeline, step 1: where does the picture come from?
+   *
+   * A meal photograph is often taken right now (the plate in front of the user),
+   * so the card offers the camera as well as the gallery. The dialog is the iOS
+   * two-button choice the rest of the app already uses: gallery on the left,
+   * camera on the right.
+   */
   const handleAddPhoto = (entry: MealEntry): void => {
     // One photograph pipeline at a time: `uploadingMealId` only exists during
     // the save phase, so without this flag a second tap while the system picker
@@ -208,14 +223,58 @@ export function DashboardScreen({
       return;
     }
     const existing = (photosByMeal[entry.id] ?? []).length;
-    if (existing >= 3) {
+    if (existing >= MAX_PHOTOS_PER_MEAL) {
+      setStatus(t('Photo_LimitReached'));
+      return;
+    }
+    setDialog({
+      title: t('Photo_AddTitle'),
+      message: t('Photo_AddMessage'),
+      cancelText: t('Photo_ChooseGallery'),
+      confirmText: t('Photo_TakeCamera'),
+      onCancel: () => {
+        setDialog(null);
+        void pickPhotos(entry, 'gallery');
+      },
+      onConfirm: () => {
+        setDialog(null);
+        void pickPhotos(entry, 'camera');
+      },
+    });
+  };
+
+  /**
+   * Photograph pipeline, step 2: pick (camera or gallery), validate, store the
+   * bytes + the thumbnail, journal the metadata and refresh the card.
+   *
+   * The camera takes exactly one picture; the gallery may hand over the
+   * remaining slots of the meal at once.
+   */
+  const pickPhotos = async (entry: MealEntry, source: 'gallery' | 'camera'): Promise<void> => {
+    if (photoBusyRef.current || uploadingMealId !== null) {
+      return;
+    }
+    const existing = (photosByMeal[entry.id] ?? []).length;
+    if (existing >= MAX_PHOTOS_PER_MEAL) {
       setStatus(t('Photo_LimitReached'));
       return;
     }
     photoBusyRef.current = true;
-    void (async () => {
-      try {
-        const limit = 3 - existing;
+    try {
+      const limit = MAX_PHOTOS_PER_MEAL - existing;
+      let assets: ImagePicker.ImagePickerAsset[];
+      if (source === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (permission.granted !== true) {
+          setStatus(t('Photo_CameraDenied'));
+          return;
+        }
+        const captured = await ImagePicker.launchCameraAsync({ mediaTypes: 'images', quality: 1 });
+        if (captured.canceled || captured.assets === null) {
+          return;
+        }
+        assets = captured.assets;
+      } else {
         const response = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: 'images',
           quality: 1,
@@ -225,36 +284,42 @@ export function DashboardScreen({
         if (response.canceled || response.assets === null) {
           return;
         }
-        // Reading, hashing and thumbnailing a photograph takes a moment on a
-        // phone, so the card shows a spinner tile while it is being saved.
-        setUploadingMealId(entry.id);
-        // "Photo first": an untouched card has no stored row yet, and its id is
-        // minted fresh on every load. Writing the slot once before the first
-        // photograph lands keeps that id stable, so the picture stays attached
-        // and the title / description can be filled in afterwards.
-        await ensureMealStored(entry, accountId);
-        for (const asset of response.assets) {
-          const result = await addPhotoToMeal(
-            entry.id,
-            asset.uri ?? '',
-            asset.fileName ?? 'photo.jpg',
-            accountId,
-          );
-          if (!result.ok && result.code !== undefined) {
-            setStatus(localizedCode(result.code));
-          }
-        }
-        app.notifyChanged();
-        await reload();
-      } finally {
-        // The cloud upload itself continues in the background (the debounced
-        // cycle that notifyChanged scheduled). Waiting for it here kept the
-        // placeholder on screen next to the saved photo and started a second,
-        // redundant cycle - the spinner now ends with the local save.
-        setUploadingMealId(null);
-        photoBusyRef.current = false;
+        assets = response.assets;
       }
-    })();
+      // Reading, hashing and thumbnailing a photograph takes a moment on a
+      // phone, so the card shows a spinner tile while it is being saved.
+      setUploadingMealId(entry.id);
+      // "Photo first": an untouched card has no stored row yet, and its id is
+      // minted fresh on every load. Writing the slot once before the first
+      // photograph lands keeps that id stable, so the picture stays attached
+      // and the title / description can be filled in afterwards.
+      const stored = await ensureMealStored(entry, accountId);
+      for (const asset of assets) {
+        const result = await addPhotoToMeal(
+          stored.id,
+          asset.uri ?? '',
+          asset.fileName ?? 'photo.jpg',
+          accountId,
+        );
+        if (!result.ok && result.code !== undefined) {
+          setStatus(localizedCode(result.code));
+        }
+      }
+      app.notifyChanged();
+      await reload();
+    } catch (error) {
+      // A denied permission, a picker failure or a full disk must be visible:
+      // the card simply keeps the photographs it already had.
+      console.warn('[dashboard] the photograph could not be added', error);
+      setStatus(t('Error_photo_source_missing'));
+    } finally {
+      // The cloud sync itself continues in the background (the debounced cycle
+      // that notifyChanged scheduled). Waiting for it here kept the spinner on
+      // screen next to the saved photo and started a second, redundant cycle -
+      // the spinner now ends with the local save.
+      setUploadingMealId(null);
+      photoBusyRef.current = false;
+    }
   };
 
   const handleRemovePhoto = (photo: MealPhoto): void => {
@@ -268,9 +333,7 @@ export function DashboardScreen({
       onConfirm: async () => {
         setDialog(null);
         await removePhoto(photo);
-        if (accountId !== null) {
-          await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
-        }
+        await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
         app.notifyChanged();
         await reload();
       },

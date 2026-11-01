@@ -349,16 +349,18 @@ Every module above was verified against Expo SDK 58's
    Google** (requires real ids in `google-client.json`, see *Google client
    configuration* above); records created as a guest are adopted by the account.
 2. **Today tab**: five permanent meal cards — type a title + description,
-   Save, then ✓ DONE / ✕ MISSED; photos via 📷.
+   Save, then ✓ DONE / ✕ MISSED; photographs via 📷 (the camera takes a new
+   picture, the gallery picks existing ones - up to three per meal).
 3. **Calendar / Statistics / Templates / Settings** tabs along the bottom;
    Settings → *Export data* writes a `.dtbackup` you can restore on Windows.
 
-Synchronization has no banner and no gesture: uploads and downloads happen silently
-in the background (after a save, on start-up, when the app returns to the front, on
-reconnection), and every tab reloads itself when it comes to the front or when a
-background cycle brought new records. A manual cycle is available from
-**Settings → Synchronization → Synchronize now**, where the last successful
-synchronization is shown as well.
+Synchronization has no banner and no gesture: changes travel to the account and
+back silently in the background (after a save, on start-up, when the app returns
+to the front, on reconnection), and every tab reloads itself when it comes to the
+front or when a background cycle brought new records. A manual cycle is available
+from **Settings → Synchronization → Synchronize now**, where the last successful
+synchronization is shown as well. The wording of the account boundary says what
+it does: the phone **syncs with the cloud** - it never talks about "uploading".
 
 ## Requirements & limits for scanning
 
@@ -415,6 +417,36 @@ Two defects of the previous version are covered by regression tests:
   `keyboardShouldPersistTaps="never"`. It is now `"handled"`, and the card also
   keeps a re-entry guard so a double tap writes the record once
   (`__tests__/mealCardSave.test.tsx`).
+
+The round after that fixed what those two did not cover - **the Save button of a
+card that already held a photograph, and the sign-out that deleted changes the
+cloud had never received**:
+
+* the slot upsert replaced the row's **primary key**
+  (`ON CONFLICT ... DO UPDATE SET Id = excluded.Id`). `MealPhoto.MealEntryId`
+  references it and there is no `ON UPDATE` action, so as soon as a photograph
+  existed the write was rolled back with `FOREIGN KEY constraint failed` - the
+  editor stayed open and Save looked dead, while meals without pictures saved
+  normally. The key is never rewritten now (a draft with another id simply
+  updates the slot's content) and the card reports a rejected write on its error
+  line instead of swallowing it (`__tests__/photoSave.test.ts`);
+* the outbox was journaled with the id from the screen's draft. After the fix
+  above that draft id can differ from the stored row, so the journal now names
+  the row the database keeps - otherwise the push would have "completed" a
+  document that no longer existed and the edit would never have reached the
+  cloud;
+* a write made while the screens still cached `accountId = null` (the first
+  frames after a sign-in or a restart) was journaled **nowhere**: it was written
+  locally, the cloud never saw it, and the sign-out then had nothing to sync
+  before it deleted the cache - the "fast sign-out, changes gone" report
+  (`__tests__/syncRescue.test.ts`). `cloud/journal.ts` resolves "no cached id" to
+  the ACTIVE account row and journals nothing only in true guest mode;
+* the sign-out barrier now **queues every record the provider has not confirmed**
+  (`pushAllLocalRecords({ onlyPending: true })`) before it counts the outbox, so
+  a lost journal entry can no longer cost data: the bar syncs the content
+  (meals, photographs, templates, reminders), then removes the cache. The bar's
+  wording says *"Syncing with the cloud…"* and *"{0} of {1} change(s) synced
+  with the cloud"* instead of talking about uploads.
 
 ## Troubleshooting
 
@@ -583,6 +615,14 @@ npm start
     counters that used to sit under those buttons are gone - the day cells and the
     status pills already carry that state, and the date line was what pushed the grid
     down.
+  * **Photographs on a card**: the strip has its own row above the action buttons
+    and draws three 56 pt tiles, so all three pictures of a meal fit side by side
+    on the narrowest phone instead of wrapping. Each tile carries two badges - the
+    **⤢ "Show"** button (bottom-left) opens the in-app full-screen viewer, and the
+    **✕** keeps its old top-right corner for removal; tapping the picture itself
+    still opens it too. The camera button on the card offers *Camera* / *Gallery*
+    (`expo-image-picker.launchCameraAsync`, permission asked on first use), so a
+    photograph can be taken while the meal is on the table.
   * **Signing out cannot skip the upload.** The account card opens the iOS-style
     confirmation, then the global overlay shows a determinate bar from 0 % to 100 %
     (`busyProgress` in `src/ui/appContext.tsx`, painted by `ProgressOverlay` in

@@ -31,6 +31,7 @@ import {
   upsertProfile,
 } from '../data/repositories';
 import { removeAllPhotoFiles } from '../data/photoStore';
+import { createBackup } from '../data/backup';
 import { closeDb } from '../data/database';
 import { getDeviceId } from '../services/deviceId';
 import { ensureCategories } from '../services/mealTracking';
@@ -396,7 +397,6 @@ export async function signInWithGoogle(options: {
  */
 async function backupBeforeAccountSwitch(): Promise<void> {
   try {
-    const { createBackup } = await import('../data/backup');
     const result = await createBackup(await getDeviceId());
     console.info('[session] account switch backup written', result.path, result.counts);
   } catch (error) {
@@ -444,14 +444,26 @@ export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignO
     return { ok: true, pending: 0 };
   }
 
-  const pending = await countPendingOperations(account.id);
+  let pending = await countPendingOperations(account.id);
   if (options.discardChanges !== true) {
     // Nothing that is only queued may start once the bar is up: a cycle that
     // began concurrently would list and download an account that is about to be
     // removed, and it would compete with the barrier for the same documents.
     cancelScheduledCycle();
     report({ stage: 'preparing', uploaded: 0, total: pending });
+    // Safety net BEFORE the count is trusted: every record this phone still
+    // holds as "not confirmed by the provider" is queued, so the cloud copy is
+    // complete even when a change never reached the outbox (the screens cache
+    // the account id, and an edit written in the window where that cache was
+    // empty used to be journaled nowhere - the sign-out then deleted it).
+    try {
+      await pushAllLocalRecords({ onlyPending: true });
+    } catch (error) {
+      console.warn('[session] the sign-out could not queue every local record', error);
+    }
+    pending = await countPendingOperations(account.id);
     if (pending > 0) {
+      report({ stage: 'uploading', uploaded: 0, total: pending });
       const upload = await uploadOutboxBeforeSignOut(account.id, pending, options, report);
       if (upload.pending > 0) {
         // Nothing was purged yet: the local copy is intact and the user can try

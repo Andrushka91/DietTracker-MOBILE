@@ -303,6 +303,14 @@ export async function getMealById(id: string): Promise<MealEntry | null> {
  * Inserts or updates one entry. The unique slot index (profile/date/key)
  * makes an upsert of the same slot replace the row, exactly like Windows'
  * ON CONFLICT DO UPDATE.
+ *
+ * The stored `Id` is NEVER rewritten. It is the value `MealPhoto.MealEntryId`
+ * points at, and the schema carries no `ON UPDATE` action, so replacing it threw
+ * `FOREIGN KEY constraint failed` for every meal that already had a photograph -
+ * which is exactly what made the Save button of a "photo first" card do nothing
+ * (the write was rolled back and the editor stayed open). A draft that arrives
+ * with a different id simply updates the slot's content; the next read hands the
+ * card the stored id back.
  */
 export async function upsertMeal(entry: MealEntry): Promise<void> {
   await runInTransaction([
@@ -313,7 +321,6 @@ export async function upsertMeal(entry: MealEntry): Promise<void> {
          CloudRevision, ContentHash)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(LocalProfileId, Date, MealCategoryKey) DO UPDATE SET
-          Id = excluded.Id,
           MealCategoryId = excluded.MealCategoryId,
           Title = excluded.Title,
           Ingredients = excluded.Ingredients,
