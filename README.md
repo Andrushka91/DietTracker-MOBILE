@@ -6,59 +6,77 @@ same Google Drive dataset — a user signed into the same Google account sees th
 same meals on Windows and on their phone. The app follows the system
 dark/light theme automatically and ships English only.
 
-## ⚡ Quick start: `npm run emulator:apk`
-
-**One command runs the real, released app on the Android emulator** — it boots
-the emulator, installs the standalone APK from `release\` and opens it:
+## ⚡ Quick start — one command, six steps
 
 ```bash
 npm run emulator:apk
 ```
 
+**That is the whole pipeline after any change:** no separate `npm install`, no
+`npm run apk`, no `adb install`, no `am start`. The script prints every step it
+runs, and fails with the exact command that fixes the step that broke:
+
+| # | Step | What the script actually runs | Log / what it prints |
+|---|---|---|---|
+| 1 | **Toolchain** | finds the Android SDK, the JDK and `adb`, then exports `ANDROID_HOME`, `JAVA_HOME` and the `PATH` every later command uses | the three absolute paths — or the exact command that installs the missing piece |
+| 2 | **Packages** | `npm install --no-audit --no-fund`, then re-applies the expo-autolinking drive-root fix | `npm-install.log` — `OK npm install 1 s - dependencies up to date` |
+| 3 | **Release** | `scripts\build-apk.bat`: Gradle `assembleRelease` twice (universal, then arm64-v8a), both copied to `release\`, then **both files are checked for a fresh timestamp** | `release-build.log` — sizes and version of both APKs |
+| 4 | **Device** | reuses a running emulator or a connected phone, else boots the AVD `Medium_Phone_API_37.0` and waits (max 5 min) for `sys.boot_completed` | live `booting ... 4 s` line · `--cold`, `--avd <name>`, `--device <serial>` |
+| 5 | **Install** | `adb install -r -d release\DietTracker-<version>-universal.apk` | `INSTALL_FAILED_*` → the one command that fixes it |
+| 6 | **Launch** | `am start -n com.diettracker.app/.MainActivity` | the app's PID |
+
+A real run on this machine:
+
 ```
-Diet Tracker - Android dev session (4 steps)
+Diet Tracker - Android dev session (6 steps)
   project D:\PROGRAMMING\REACT_NATIVE\DIET TRACKER
-[1/4] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
+[1/6] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
        JDK C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot\   adb ...\platform-tools\adb.exe
-[2/4] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - booted in 4 s
-[3/4] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
-[4/4] Launch      OK    com.diettracker.app (pid 13289) started from the release APK
+[2/6] Packages    OK    npm install 1 s - dependencies up to date
+[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.0-universal.apk 83.7 MB  +  DietTracker-1.0.0.0-arm64-v8a.apk 29 MB (version 1.0.0.0)
+[4/6] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - booted in 4 s
+[5/6] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[6/6] Launch      OK    com.diettracker.app (pid 13289) started from the release APK
 
 Ready - the release build runs on emulator-5554.
        this is the APK from the release page: bundled JavaScript, no Metro, no dev menu
 ```
 
-What the four steps do, and why there are four of them:
+Three details the steps hide:
 
-1. **Toolchain** — finds the Android SDK, the JDK and `adb`, and prints the exact
-   path of each; a missing piece fails with the command that installs it.
-2. **Device** — reuses an already running emulator (or a connected phone) and
-   only boots the AVD when nothing is ready, with a live `booting ... 4 s` line.
-   `--avd <name>`, `--device <serial>` and `--cold` select another device or a
-   cold boot; an emulator that is still booting is waited for, never duplicated.
-3. **Install** — installs `release\DietTracker-<version>-*.apk`, picking the file
-   the target can actually run: **universal** on an x86_64 emulator (the arm64
-   build is refused with `INSTALL_FAILED_NO_MATCHING_ABIS`), **arm64** on a
-   phone. The version comes from `android/app/build.gradle`, and
-   `adb install -r -d` keeps the app's data (a signature clash prints the one
-   `adb uninstall` command that fixes it).
-4. **Launch** — starts `com.diettracker.app` with a plain `am start` and reports
-   its PID. The JavaScript is bundled inside the APK, so this is exactly what a
-   user gets after sideloading the download: **no Metro, no dev menu, no reload**.
+* **Which APK** — `universal` on an x86_64 emulator (an arm64 APK is refused with
+  `INSTALL_FAILED_NO_MATCHING_ABIS`), `arm64-v8a` on a phone. The version comes
+  from `android/app/build.gradle`, so a version bump needs no change here.
+* **It updates, never replaces** — `adb install -r -d` keeps the app's data; a
+  signature clash prints the one `adb uninstall` line that fixes it. `--reset`
+  wipes the data first for a true first-run check.
+* **No Metro, no dev menu** — the JavaScript is bundled inside the APK, so this is
+  exactly what a user gets after sideloading the download.
 
-Requirements: the **Android SDK** (Android Studio) and, once, the APKs in
-`release\` — `npm run apk` builds them. Nothing else: no Metro, no Expo Go, no
-cable. `--reset` wipes the app data first, so the next start is a true first run.
+Requirements: the **Android SDK** (Android Studio) and Node.js 22.11 — nothing
+else: no Metro, no Expo Go, no cable. Flags reach the script after `--`:
+`npm run emulator:apk -- --reset --cold`.
+
+| Variant | Difference |
+|---|---|
+| **`npm run emulator:apk`** | all six steps — the default after any change |
+| `npm run refresh` | alias, the identical `--all` sequence |
+| `npm run emulator:apk:only` (`--apk`) | 4 steps — device, install, launch on the APK already in `release\` (no npm install, no Gradle) |
+| `npm run emulator:apk -- --skip-deps` | 5 steps — the same chain without the `npm install` |
 
 | I want to… | Command |
 |---|---|
-| Run the **released** app on the emulator (bundled JS, like the download) | **`npm run emulator:apk`** |
+| **Everything after a change** (npm install + both APKs + install + app) | **`npm run emulator:apk`** |
+| Same thing (alias, identical sequence) | `npm run refresh` |
+| Re-install the APK already in `release\` (no npm install, no build) | `npm run emulator:apk:only` |
 | **Develop** with hot reload on the emulator (builds a debug APK + Metro) | `npm run dev` |
 | Develop from my **phone** with Expo Go and a QR code (no SDK, no APK) | `npm start` |
-| Rebuild the two release APKs after a change | `npm run apk` |
+| Rebuild the two release APKs only | `npm run apk` |
 | Stop the emulator gracefully (snapshot-safe) | `npm run emulator:stop` |
 
 Full details, flags and troubleshooting: [Local Android emulator](#local-android-emulator-android-studio-sdk).
+Reusable prompt that builds this same six-step command in another project:
+[PROMPT_ONE_COMMAND_PIPELINE.md](./PROMPT_ONE_COMMAND_PIPELINE.md).
 
 ## Install and run — step by step
 
@@ -125,9 +143,9 @@ Today tab.
   whole thing (boot, build, install, Metro, open the app): `npm run dev` — see
   [Local Android emulator](#local-android-emulator-android-studio-sdk).
 * Want to see the **released build** instead (bundled JavaScript, no Metro, no
-  dev menu — what the download page ships)? `npm run emulator:apk` boots the
-  emulator, installs the APK from `release\` and opens it — the same four steps
-  as the quick start above.
+  dev menu — what the download page ships)? `npm run emulator:apk` runs the whole
+  chain for that build: `npm install`, both release APKs, the emulator, the
+  install and the launch.
 
 Something not working? Jump to [Troubleshooting](#troubleshooting).
 
@@ -144,8 +162,11 @@ Something not working? Jump to [Troubleshooting](#troubleshooting).
 | `npm run dev` | **The emulator command**: reuses/boots the AVD, builds + installs for the device ABI, starts Metro in this window, opens the app | Android SDK |
 | `npm run dev:fast` | Same session without Gradle (Metro + relaunch) — for JS/TS changes | Android SDK + an installed debug build |
 | `npm run apk` | **Standalone release APKs** (JavaScript bundled, no Metro) into `release\` | Android SDK |
+| `npm run refresh` | Identical to `npm run emulator:apk` (same npm install → APKs → emulator → install → launch sequence, second name) | Android SDK |
+| `npm run refresh:dev` | `npm install`, then a debug build + Metro + launch (a dev session that also picks up newly added packages) | Android SDK |
 | `npm run emulator` | Start the AVD and wait until Android is booted (no build, no Metro) | Android SDK |
-| `npm run emulator:apk` | **Run the shipped build**: boot/reuse the AVD, install the APK from `release\` (universal on an emulator) and launch it — no Gradle, no Metro | Android SDK + `npm run apk` once |
+| **`npm run emulator:apk`** | **One command, the whole chain**: `npm install` → rebuild **both** release APKs → boot/reuse the AVD → install the APK → launch the app. No Metro | Android SDK |
+| `npm run emulator:apk:only` | Re-install the APK already in `release\` and launch it — no npm install, no Gradle, no Metro | Android SDK + `npm run apk` once |
 | `npm run emulator:stop` | Gracefully stop the emulator (snapshot-safe `adb emu kill`) | Android SDK |
 | `npm run ios` | Local build + install (`expo run:ios`) | macOS + Xcode |
 | `npm run generate` | Re-embed migrations + English strings from the Windows sources | Windows repo one level up |
@@ -233,16 +254,18 @@ without Expo Go.
 ### One command per testing session
 
 ```bash
-npm install                # once per machine
-npm run dev                # emulator + build + install + Metro + app, in one go
-npm run emulator:apk       # OR: emulator + the shipped release APK + app (no Metro)
+npm install                # once per machine — npm run emulator:apk does it as well
+npm run emulator:apk       # the whole chain: npm install + both APKs + emulator + install + app
+npm run dev                # OR: debug build + Metro, for hot reload while coding
 npm run emulator:stop      # when done: graceful, snapshot-safe shutdown
 ```
 
-### Try the APK that users download — `npm run emulator:apk`
+### The APK users download — `npm run emulator:apk:only`
 
-`npm run apk` builds the standalone APKs into `release\`; `npm run emulator:apk`
-does the rest in one command, exactly as a user would experience the download:
+`npm run apk` builds the standalone APKs into `release\`;
+`npm run emulator:apk:only` (`--apk`) installs the one that is already there and
+starts it, exactly as a user would experience the download — no `npm install`, no
+Gradle, no Metro:
 
 ```
 [1/4] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
@@ -255,7 +278,7 @@ Ready - the release build runs on emulator-5554.
        npm run emulator:stop   shut the emulator down gracefully (snapshot-safe)
 ```
 
-What it does, and why it is a separate command from `npm run dev`:
+What it does, and why it is a separate command from the full `npm run emulator:apk`:
 
 * **The emulator is booted or reused for you** — the same device step (`--avd`,
   `--device`, `--cold`, a still-booting serial is waited for) as `npm run dev`.
@@ -271,6 +294,42 @@ What it does, and why it is a separate command from `npm run dev`:
 * **It updates instead of replacing**: the release APK is signed with the same
   debug key, so `adb install -r -d` keeps the app's data (a signature mismatch
   prints the one `adb uninstall` line that fixes it).
+
+### After a change — `npm run emulator:apk`
+
+It is the same command in every case, and it covers all four things you would
+otherwise type by hand (`npm install`, `npm run apk`, install, launch):
+
+| What you changed | Command | What runs |
+|---|---|---|
+| JS/TS under `src\`, while developing | `npm run dev:fast` | Metro reload only — seconds |
+| anywhere in the sources | **`npm run emulator:apk`** | `npm install` → `build-apk.bat` (both release APKs) → install → launch |
+| `package.json` / a newly added package | **`npm run emulator:apk`** | the same — the dependency step installs it |
+| native code / `app.json` | **`npm run emulator:apk`** | the same (Gradle recompiles the native part) |
+| nothing, APK already built | `npm run emulator:apk:only` | install + launch the APK already in `release\` |
+
+```
+[2/6] Packages    OK    npm install 1 s - dependencies up to date
+[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.0-universal.apk 83.7 MB  +  DietTracker-1.0.0.0-arm64-v8a.apk 29 MB (version 1.0.0.0)
+[5/6] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[6/6] Launch      OK    com.diettracker.app (pid 13886) started from the release APK
+```
+
+* **Packages** — a plain `npm install` (`--no-audit --no-fund`): a second when
+  nothing changed, the real install after a dependency edit. Output:
+  `npm-install.log`; the autolinking drive-root fix is re-applied right after it.
+  `--skip-deps` leaves this step out.
+* **Release** — `scripts\build-apk.bat`: the same two Gradle release builds
+  `npm run apk` runs. Both files are then checked for a fresh timestamp, so a
+  bundle that silently failed can never be installed as "the new build".
+  Output: `release-build.log` (dots are progress, `--verbose` streams it).
+* **Install / Launch** — the **universal** APK on the x86_64 emulator,
+  `adb install -r -d`, then `am start`. No Metro, no dev menu.
+
+`npm run refresh` is the same sequence (`--all`) under a second name, and
+`npm run refresh:dev` (`--deps`) is that dependency step followed by the
+`npm run dev` sequence (debug build + Metro + hot reload) — the right one when
+you added a package and want to keep developing.
 
 `npm run dev` (`scripts/dev.js`) is the whole flow in one readable sequence —
 every step prints the value it used, or the exact command that fixes it:
@@ -313,8 +372,11 @@ corrupts quick-boot snapshots.
 | Flag | What it changes |
 |---|---|
 | `npm run dev:fast` | `--skip-build`: Metro + relaunch only — the loop for JS/TS changes |
+| `npm run emulator:apk` · `npm run refresh` | `--all` (alias `--refresh`): `npm install` + both release APKs + install + launch (implies `--apk` and `--deps`) |
+| `npm run emulator:apk:only` | `--apk`: install the APK already in `release\` and launch it (no npm install, no build, no Metro) |
+| `npm run refresh:dev` | `--deps`: `npm install` first, then the normal dev sequence |
+| `--skip-deps` | leave the `npm install` out of `--all` / `--deps` |
 | `npm run emulator` | `--emulator-only`: just start the AVD and wait for boot |
-| `npm run emulator:apk` | `--apk`: install the APK from `release\` and launch it (no build, no Metro) |
 | `npm run emulator:stop` | `--stop`: `adb emu kill`, waits for the emulator to disappear |
 | `--cold` | cold boot (`-no-snapshot`) when a saved snapshot is corrupt |
 | `--avd <name>` | start another AVD (default `Medium_Phone_API_37.0`, else the first) |

@@ -2,11 +2,17 @@
 /**
  * Diet Tracker - ONE command that runs the app on the Android emulator.
  *
- *   npm run dev              emulator + build + install + Metro + launch
- *   npm run dev:fast         Metro + relaunch only (JS/TS-only changes)
- *   npm run emulator         only start the AVD and wait until it is booted
- *   npm run emulator:apk     emulator + install the release APK + launch it (no Metro)
- *   npm run emulator:stop    graceful shutdown (adb emu kill, snapshot-safe)
+ *   npm run emulator:apk       THE one command: npm install + rebuild both release
+ *                              APKs + boot/reuse the AVD + install the APK + launch
+ *                              the app - everything a change needs, no Metro
+ *   npm run refresh            identical to emulator:apk (the same --all sequence)
+ *   npm run emulator:apk:only  AVD + install the APK already in release\ + launch it
+ *                              (no npm install, no build, no Metro)
+ *   npm run dev                emulator + build + install + Metro + launch
+ *   npm run dev:fast           Metro + relaunch only (JS/TS-only changes)
+ *   npm run refresh:dev        npm install + debug build + Metro + launch
+ *   npm run emulator           only start the AVD and wait until it is booted
+ *   npm run emulator:stop      graceful shutdown (adb emu kill, snapshot-safe)
  *
  * This replaces the old scripts\dev.bat -> build-android.bat -> expo run:android
  * chain, which hid every error inside android-build.log and guessed the device
@@ -22,17 +28,35 @@
  *                      in THIS window so `r` / `j` keys and red boxes work
  *   [5/5] Launch       adb reverse tcp:8081 + am start com.diettracker.app
  *
- * `npm run emulator:apk` is the same sequence without a build and without Metro:
- * it installs the APK that is already in release\ (the one the release page
- * ships, universal on an emulator because x86_64 cannot run the arm64 build) and
- * starts it - i.e. exactly what a user gets after sideloading the download.
+ * `npm run emulator:apk` (= `npm run refresh`, the `--all` sequence) is every step
+ * a change needs, in one command:
+ *
+ *   [1/6] Toolchain    Android SDK, JDK, adb
+ *   [2/6] Packages     npm install
+ *   [3/6] Release      scripts\build-apk.bat -> both release APKs in release\
+ *                      (the two files are checked by timestamp, so a failed
+ *                      bundle can never be installed as "the new build")
+ *   [4/6] Device       boot / reuse the AVD
+ *   [5/6] Install      adb install -r -d of the universal APK (x86_64 cannot run
+ *                      the arm64 build)
+ *   [6/6] Launch       am start com.diettracker.app
+ *
+ * No Metro and no dev client: the JavaScript is bundled inside the APK, so this
+ * is what a user gets after sideloading the download. `--skip-deps` drops the
+ * npm install, and `npm run emulator:apk:only` installs what is already in
+ * release\ without building anything.
  *
  * Flags (all optional):
  *   -h, --help          this text
  *   -s, --skip-build    no Gradle install (fast loop for JS changes)
  *       --emulator-only only start / wait for the emulator
- *       --apk           install the release APK from release\ and launch it
- *                       (implies --skip-build; Metro is not started)
+ *       --apk           install the APK already in release\ and launch it
+ *                       (no npm install, no build, no Metro)
+ *       --refresh/--all npm install + rebuild both release APKs + install +
+ *                       launch (implies --apk and --deps)
+ *       --deps          npm install first, then the normal sequence
+ *                       (dev build + Metro)
+ *       --skip-deps     leave the npm install out of --refresh / --deps
  *       --stop          gracefully shut the emulator down
  *       --cold          cold boot the AVD (-no-snapshot)
  *       --avd <name>    AVD to start (default: Medium_Phone_API_37.0, else first)
@@ -55,6 +79,11 @@ const LOG_FILE = path.join(ROOT, 'android-build.log');
 const APK_FILE = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
 /** `npm run apk` writes the two standalone APKs here (ignored by git, published on the release page). */
 const RELEASE_DIR = path.join(ROOT, 'release');
+/** Output of the `npm install` that `--all` / `--deps` run (gitignored: *.log). */
+const NPM_LOG = path.join(ROOT, 'npm-install.log');
+/** Output of scripts\build-apk.bat when `--all` rebuilds the release APKs. */
+const RELEASE_LOG = path.join(ROOT, 'release-build.log');
+const BUILD_APK_BAT = path.join(__dirname, 'build-apk.bat');
 const PACKAGE_ID = 'com.diettracker.app';
 const MAIN_ACTIVITY = `${PACKAGE_ID}/.MainActivity`;
 /** URL scheme from app.json - the prefix of the dev client deep link. */
@@ -98,7 +127,11 @@ const opts = {
   help: has('--help', '-h'),
   skipBuild: has('--skip-build', '-s'),
   emulatorOnly: has('--emulator-only'),
-  apk: has('--apk', '--release-apk'),
+  // --refresh / --all is the one-command sequence: npm install, rebuild both
+  // release APKs, boot the AVD, install that APK, launch the app.
+  refresh: has('--refresh', '--all'),
+  deps: has('--deps', '--install-deps', '--refresh', '--all') && !has('--skip-deps'),
+  apk: has('--apk', '--release-apk', '--refresh', '--all'),
   stop: has('--stop'),
   cold: has('--cold'),
   reset: has('--reset'),
@@ -523,12 +556,53 @@ async function ensureDevice(tools) {
 
 
 // ---------------------------------------------------------------------------
+// [2/..] dependencies - npm install, always part of the one-command sequence
+// ---------------------------------------------------------------------------
+
+/**
+ * `npm install` - the step that makes a newly added package visible to Gradle
+ * (autolinking) and to Metro. It runs on every --all / --deps session, exactly
+ * like a manual `npm install` would: a few seconds when nothing changed, and the
+ * actual install when package.json or package-lock.json moved on.
+ */
+async function ensureDependencies(tools) {
+  step('Packages');
+  let result;
+  try {
+    result = await runLogged('npm', ['install', '--no-audit', '--no-fund'], {
+      env: tools.env,
+      logFile: NPM_LOG,
+      display: 'npm install',
+      timeoutMs: 20 * 60 * 1000,
+    });
+  } catch (error) {
+    fail(`could not start npm (${error.message}).`, ['Is Node.js 22.11+ on PATH?  node -v']);
+  }
+  if (result.code !== 0) {
+    console.log('');
+    for (const line of tailOfLog(20, NPM_LOG)) {
+      console.log(`       ${line}`);
+    }
+    fail(`npm install failed (exit ${result.code}) - full output: ${path.basename(NPM_LOG)}`, [
+      'Retry by hand:  npm install',
+    ]);
+  }
+  // A reinstall restores node_modules\expo-modules-autolinking from the registry
+  // and drops the drive-root fix, so it is re-applied before Gradle links anything.
+  run(process.execPath, [path.join(__dirname, 'patch-autolinking.js')], { env: tools.env });
+  ok(`npm install ${duration(result.elapsed)} - dependencies up to date`);
+  info(`full output: ${path.basename(NPM_LOG)}`);
+  return true;
+}
+
+
+// ---------------------------------------------------------------------------
 // [3/..] build - gradle assembleDebug for the target ABI, then adb install
 // ---------------------------------------------------------------------------
 
-function tailOfLog(lines) {
+function tailOfLog(lines, file = LOG_FILE) {
   try {
-    const content = fs.readFileSync(LOG_FILE, 'utf8').split(/\r?\n/);
+    const content = fs.readFileSync(file, 'utf8').split(/\r?\n/);
     return content.slice(-lines).filter((line) => line.trim() !== '');
   } catch {
     return [];
@@ -556,6 +630,64 @@ function prepareNativeBuild(tools) {
   }
 }
 
+/**
+ * Runs a long child process (Gradle, npm install, scripts\build-apk.bat),
+ * streams its output into a log file and prints a dot every 3 s, so a build that
+ * takes minutes never looks hung. `.bat` / `.cmd` files go through cmd.exe:
+ * spawning a batch file directly is refused by current Node versions.
+ */
+function runLogged(command, commandArgs, options = {}) {
+  const logFile = options.logFile || LOG_FILE;
+  const display = options.display || [command, ...commandArgs].join(' ');
+  fs.writeFileSync(logFile, `${new Date().toISOString()}  ${display}\n`);
+
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const log = fs.createWriteStream(logFile, { flags: 'a' });
+    const spawnOptions = {
+      cwd: options.cwd || ROOT,
+      env: options.env || process.env,
+      windowsHide: true,
+    };
+    const child =
+      // npm / npx are `npm.cmd` shims and a batch file cannot be spawned
+      // directly (EINVAL on current Node), so anything without an `.exe`
+      // extension - and every .bat/.cmd - runs through cmd.exe via `shell`.
+      // The executable is quoted here because this project path contains a
+      // space; cmd.exe /s then keeps those quotes when it strips the outer pair.
+      IS_WINDOWS && (path.extname(command) === '' || /\.(bat|cmd)$/i.test(command))
+        ? spawn(
+            [/\s/.test(command) ? `"${command}"` : command, ...commandArgs].join(' '),
+            { ...spawnOptions, shell: true },
+          )
+        : spawn(command, commandArgs, spawnOptions);
+    const watchdog = options.timeoutMs ? setTimeout(() => child.kill(), options.timeoutMs) : null;
+
+    child.stdout.pipe(log);
+    child.stderr.pipe(log);
+    if (opts.verbose) {
+      child.stdout.pipe(process.stdout);
+      child.stderr.pipe(process.stderr);
+    }
+    const tick = setInterval(() => process.stdout.write('.'), 3000);
+    const finish = () => {
+      clearInterval(tick);
+      if (watchdog) {
+        clearTimeout(watchdog);
+      }
+      log.end();
+    };
+    child.on('error', (error) => {
+      finish();
+      reject(error);
+    });
+    child.on('close', (code) => {
+      finish();
+      resolve({ code, elapsed: Date.now() - started, command: display });
+    });
+  });
+}
+
 /** Runs Gradle with a compact progress line; the full output goes to the log. */
 function gradleBuild(tools, abi) {
   const gradleArgs = ['assembleDebug'];
@@ -564,37 +696,11 @@ function gradleBuild(tools, abi) {
     // arm64-v8a, and building all four would quadruple the install size/time.
     gradleArgs.push(`-PreactNativeArchitectures=${abi}`);
   }
-  const command = `gradlew.bat ${gradleArgs.join(' ')}`;
-  fs.writeFileSync(LOG_FILE, `${new Date().toISOString()}  ${command}\n`);
-
-  return new Promise((resolve, reject) => {
-    const started = Date.now();
-    const log = fs.createWriteStream(LOG_FILE, { flags: 'a' });
-    // Gradle is a .bat file on Windows: it has to run through cmd.exe.
-    const child = IS_WINDOWS
-      ? spawn('cmd.exe', ['/d', '/s', '/c', command], {
-          cwd: ANDROID_DIR,
-          env: tools.env,
-          windowsHide: true,
-        })
-      : spawn('./gradlew', gradleArgs, { cwd: ANDROID_DIR, env: tools.env });
-    child.stdout.pipe(log);
-    child.stderr.pipe(log);
-    if (opts.verbose) {
-      child.stdout.pipe(process.stdout);
-      child.stderr.pipe(process.stderr);
-    }
-    const tick = setInterval(() => process.stdout.write('.'), 3000);
-    child.on('error', (error) => {
-      clearInterval(tick);
-      log.end();
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearInterval(tick);
-      log.end();
-      resolve({ code, elapsed: Date.now() - started, command });
-    });
+  return runLogged(path.join(ANDROID_DIR, IS_WINDOWS ? 'gradlew.bat' : 'gradlew'), gradleArgs, {
+    cwd: ANDROID_DIR,
+    env: tools.env,
+    logFile: LOG_FILE,
+    display: `gradlew${IS_WINDOWS ? '.bat' : ''} ${gradleArgs.join(' ')}`,
   });
 }
 
@@ -732,6 +838,78 @@ function launchReleaseApp(tools, target) {
   }
   const pid = adb(['shell', 'pidof', PACKAGE_ID]).stdout.trim();
   ok(`${PACKAGE_ID}${pid ? ` (pid ${pid})` : ''} started from the release APK`);
+}
+
+
+// ---------------------------------------------------------------------------
+// [3/..] --all : rebuild both release APKs (npm install already ran)
+// ---------------------------------------------------------------------------
+
+/** The two files scripts\build-apk.bat writes for a version, in reverse size order. */
+function releaseArtifacts(version) {
+  return ['universal', 'arm64-v8a'].map((abi) => path.join(RELEASE_DIR, `DietTracker-${version}-${abi}.apk`));
+}
+
+/**
+ * The `Release` step of the one-command sequence: `scripts\build-apk.bat` runs
+ * both Gradle release builds (`npm run apk`), and the files it wrote are checked
+ * by timestamp, so a bundle that silently failed can never be installed as "the
+ * new build". The install and launch that follow are the `--apk` code path.
+ */
+async function buildReleaseApks(tools) {
+  step('Release');
+  if (!IS_WINDOWS) {
+    fail('rebuilding the release APKs needs scripts\\build-apk.bat (Windows).', [
+      'Build them on Windows, or install a release APK that already exists:  npm run emulator:apk',
+    ]);
+  }
+  prepareNativeBuild(tools);
+  info(`build-apk.bat: universal + arm64-v8a, output in ${path.basename(RELEASE_LOG)} - 3-10 min`);
+
+  const startedAt = Date.now();
+  let result;
+  try {
+    result = await runLogged(BUILD_APK_BAT, [], {
+      env: tools.env,
+      logFile: RELEASE_LOG,
+      display: 'scripts\\build-apk.bat',
+      timeoutMs: 60 * 60 * 1000,
+    });
+  } catch (error) {
+    fail(`could not start build-apk.bat (${error.message}).`, ['Retry by hand:  npm run apk']);
+  }
+  if (result.code !== 0) {
+    console.log('');
+    for (const line of tailOfLog(25, RELEASE_LOG)) {
+      console.log(`       ${line}`);
+    }
+    fail(`build-apk.bat failed (exit ${result.code}) - full output: ${path.basename(RELEASE_LOG)}`, [
+      'The Gradle error is at the end of that log; retry by hand:  npm run apk',
+    ]);
+  }
+
+  const version = releaseVersion();
+  if (!version) {
+    fail('could not read versionName from android\\app\\build.gradle.', [
+      path.join(ANDROID_DIR, 'app', 'build.gradle'),
+    ]);
+  }
+  // Both files have to be new: build-apk.bat copies them out of Gradle, and a
+  // silent copy failure would otherwise hand the emulator the previous build.
+  const stale = releaseArtifacts(version).filter(
+    (file) => !fs.existsSync(file) || fs.statSync(file).mtimeMs < startedAt,
+  );
+  if (stale.length > 0) {
+    fail('build-apk.bat finished but did not rewrite:', [
+      ...stale.map((file) => path.relative(ROOT, file)),
+      `VERSION in scripts\\build-apk.bat must match versionName "${version}"`,
+    ]);
+  }
+  const sizes = releaseArtifacts(version)
+    .map((file) => `${path.basename(file)} ${megabytes(fs.statSync(file).size)}`)
+    .join('  +  ');
+  ok(`${duration(result.elapsed)} - ${sizes} (version ${version})`);
+  return version;
 }
 
 
@@ -890,9 +1068,10 @@ function printApkSummary(target, release) {
   console.log(`Ready - the release build runs on ${target.serial}.`);
   info('this is the APK from the release page: bundled JavaScript, no Metro, no dev menu');
   info(`${path.basename(release.file)}  (version ${release.version})`);
-  info('npm run emulator:stop   shut the emulator down gracefully (snapshot-safe)');
-  info('npm run emulator:apk    install / relaunch it again');
-  info('npm run dev             development session with hot reload instead');
+  info('npm run emulator:stop     shut the emulator down gracefully (snapshot-safe)');
+  info('npm run emulator:apk      the whole chain again: npm install + both APKs + this');
+  info('npm run emulator:apk:only just install / relaunch this APK (no build, fast)');
+  info('npm run dev               development session with hot reload instead');
   console.log('');
 }
 
@@ -956,13 +1135,23 @@ function banner() {
 }
 
 function computeSteps() {
+  let total = 2; // toolchain, device
+  if (opts.deps) {
+    total += 1; // npm install (skipped when node_modules is current)
+  }
+  if (opts.refresh) {
+    total += 1; // both release APKs
+  }
   if (opts.emulatorOnly) {
-    return 2; // toolchain, device
+    return total;
   }
   if (opts.apk) {
-    return 4; // toolchain, device, install, launch
+    return total + 2; // install, launch
   }
-  return opts.skipBuild ? 4 : 5; // + Metro + launch (+ build)
+  if (!opts.skipBuild) {
+    total += 1;
+  }
+  return total + 2; // Metro, launch
 }
 
 async function main() {
@@ -978,6 +1167,19 @@ async function main() {
   stepTotal = computeSteps();
   banner();
   const tools = prepareToolchain();
+
+  // Dependencies come before every build: Gradle reads node_modules for the
+  // autolinking manifest and Metro bundles out of it, so a newly added package
+  // that was never installed shows up as a confusing "module not found" later.
+  if (opts.deps) {
+    await ensureDependencies(tools);
+  }
+  // --all rebuilds what `--apk` installs, so it happens before the emulator is
+  // even booted - the AVD is not needed to produce the APKs.
+  if (opts.refresh) {
+    await buildReleaseApks(tools);
+  }
+
   const target = await ensureDevice(tools);
 
   if (opts.emulatorOnly) {

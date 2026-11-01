@@ -357,6 +357,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   );
 }
 
+/** One legend entry: the state dot plus its description (the dot carries the colour). */
 function Legend(props: {
   color: string;
   label: string;
@@ -365,7 +366,9 @@ function Legend(props: {
   return (
     <View style={styles.legendItem}>
       <View style={[styles.legendChip, { backgroundColor: props.color }]} />
-      <Text style={[styles.legendText, { color: props.textColor }]}>{props.label}</Text>
+      <Text style={[styles.legendText, { color: props.textColor }]} numberOfLines={1}>
+        {props.label}
+      </Text>
     </View>
   );
 }
@@ -455,9 +458,18 @@ const styles = StyleSheet.create({
   dayRowMeta: { fontSize: 11, marginTop: 1 },
   dayRowPill: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 2 },
   dayRowPillText: { color: argb('#FFFFFFFF'), fontSize: 10, fontFamily: fonts.medium },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, rowGap: 6, marginTop: 12 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
+  legend: {
+    flexDirection: 'row',
+    // One row for all three states - the dot already carries the colour, so the
+    // label is only the description and fits beside the others.
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: 10,
+    marginTop: 12,
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', columnGap: 5, flexShrink: 1 },
   /** Small solid state dot, like the iOS calendar legend. */
   legendChip: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 11 },
+  legendText: { fontSize: 11, flexShrink: 1 },
 });
