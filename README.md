@@ -6,6 +6,60 @@ same Google Drive dataset — a user signed into the same Google account sees th
 same meals on Windows and on their phone. The app follows the system
 dark/light theme automatically and ships English only.
 
+## ⚡ Quick start: `npm run emulator:apk`
+
+**One command runs the real, released app on the Android emulator** — it boots
+the emulator, installs the standalone APK from `release\` and opens it:
+
+```bash
+npm run emulator:apk
+```
+
+```
+Diet Tracker - Android dev session (4 steps)
+  project D:\PROGRAMMING\REACT_NATIVE\DIET TRACKER
+[1/4] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
+       JDK C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot\   adb ...\platform-tools\adb.exe
+[2/4] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - booted in 4 s
+[3/4] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[4/4] Launch      OK    com.diettracker.app (pid 13289) started from the release APK
+
+Ready - the release build runs on emulator-5554.
+       this is the APK from the release page: bundled JavaScript, no Metro, no dev menu
+```
+
+What the four steps do, and why there are four of them:
+
+1. **Toolchain** — finds the Android SDK, the JDK and `adb`, and prints the exact
+   path of each; a missing piece fails with the command that installs it.
+2. **Device** — reuses an already running emulator (or a connected phone) and
+   only boots the AVD when nothing is ready, with a live `booting ... 4 s` line.
+   `--avd <name>`, `--device <serial>` and `--cold` select another device or a
+   cold boot; an emulator that is still booting is waited for, never duplicated.
+3. **Install** — installs `release\DietTracker-<version>-*.apk`, picking the file
+   the target can actually run: **universal** on an x86_64 emulator (the arm64
+   build is refused with `INSTALL_FAILED_NO_MATCHING_ABIS`), **arm64** on a
+   phone. The version comes from `android/app/build.gradle`, and
+   `adb install -r -d` keeps the app's data (a signature clash prints the one
+   `adb uninstall` command that fixes it).
+4. **Launch** — starts `com.diettracker.app` with a plain `am start` and reports
+   its PID. The JavaScript is bundled inside the APK, so this is exactly what a
+   user gets after sideloading the download: **no Metro, no dev menu, no reload**.
+
+Requirements: the **Android SDK** (Android Studio) and, once, the APKs in
+`release\` — `npm run apk` builds them. Nothing else: no Metro, no Expo Go, no
+cable. `--reset` wipes the app data first, so the next start is a true first run.
+
+| I want to… | Command |
+|---|---|
+| Run the **released** app on the emulator (bundled JS, like the download) | **`npm run emulator:apk`** |
+| **Develop** with hot reload on the emulator (builds a debug APK + Metro) | `npm run dev` |
+| Develop from my **phone** with Expo Go and a QR code (no SDK, no APK) | `npm start` |
+| Rebuild the two release APKs after a change | `npm run apk` |
+| Stop the emulator gracefully (snapshot-safe) | `npm run emulator:stop` |
+
+Full details, flags and troubleshooting: [Local Android emulator](#local-android-emulator-android-studio-sdk).
+
 ## Install and run — step by step
 
 > **Work inside this folder** (`react-native/`). The `package.json` in the
@@ -21,6 +75,8 @@ dark/light theme automatically and ships English only.
 | Same Wi-Fi network | phone and this computer on one network (no guest network, no VPN) |
 
 No Android SDK, no Xcode, no Java, no APK — Expo Go is the whole toolchain.
+(Only the two emulator commands, `npm run dev` and `npm run emulator:apk`, need
+the Android SDK; both are described at the top of this file.)
 
 ### 2. Install the dependencies (once per machine)
 
@@ -32,7 +88,7 @@ npm install            # installs everything from package-lock.json
 ### 3. Sanity check (once — optional but recommended)
 
 ```bash
-npm run check          # typecheck + lint + 78 unit tests — must be green
+npm run check          # typecheck + lint + 99 unit tests — must be green
 ```
 
 ### 4. Start the dev server
@@ -68,6 +124,10 @@ Today tab.
 * Prefer the **real Android emulator** instead of Expo Go? One command does the
   whole thing (boot, build, install, Metro, open the app): `npm run dev` — see
   [Local Android emulator](#local-android-emulator-android-studio-sdk).
+* Want to see the **released build** instead (bundled JavaScript, no Metro, no
+  dev menu — what the download page ships)? `npm run emulator:apk` boots the
+  emulator, installs the APK from `release\` and opens it — the same four steps
+  as the quick start above.
 
 Something not working? Jump to [Troubleshooting](#troubleshooting).
 
@@ -628,7 +688,7 @@ npm start
 
 ## Status & honesty statement
 
-* `npm run check` (strict TypeScript + ESLint) is green and **78 unit tests**
+* `npm run check` (strict TypeScript + ESLint) is green and **99 unit tests**
   pass (completion rules, five-slot permanence, validators, photo
   rules, copy rules, analytics incl. the “–” case, DST-safe calendar day
   stepping, sync frequency/backoff, payload + envelope round-trip, Drive
@@ -636,7 +696,9 @@ npm start
   sign-out boundary: forced upload, progress frames, refusal that keeps data,
   the parallel upload pipeline (bounded window, monotonic progress, bounded
   retry budget, one save per press in the meal card editor, and the floating
-  tab bar clearance for six real device insets).
+  tab bar clearance for six real device insets),
+  the parallel download pipeline (ordered prefetch window, per-document failure
+  isolation, cancel, one folder listing per cycle).
 * Verified on the local Android emulator (API 37, x86_64 release APK
   `DietTracker-1.0.0.0-universal.apk` installed over the previous build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
