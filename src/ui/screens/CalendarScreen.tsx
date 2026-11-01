@@ -12,7 +12,9 @@
 // figure.
 //
 // The five meals of the selected day are listed under the grid as compact rows
-// (state bar, icon, title, time, status pill). On a phone a day cell is about
+// wearing the SAME frame as the dashboard meal cards (status-coloured border,
+// grouped fill, radius, shadow) - only the height stays compact, because the
+// calendar needs the space. On a phone a day cell is about
 // 44 pt wide, which cannot hold the miniature meal cards of the Windows panel
 // legibly, so that detail lives in the list under the grid instead.
 
@@ -300,17 +302,20 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
               slot.plannedTime ?? (category !== undefined ? category.defaultTime : null),
               app.use12HourClock,
             );
-            // The exact same grey wash the untouched day squares wear, so the
-            // list matches the grid pixel for pixel in both themes.
-            const rowFill = tint(colors.cellPending, '55');
             return (
               <Pressable
                 key={slot.mealCategoryKey}
                 accessibilityRole="button"
                 accessibilityLabel={`${name} - ${t('Calendar_OpenDay')}`}
                 onPress={() => props.onOpenDay(selected)}
-                style={[styles.dayRow, { backgroundColor: rowFill }]}>
-                <View style={[styles.dayRowBar, { backgroundColor: pill }]} />
+                // The SAME frame the dashboard meal cards wear (status-coloured
+                // border, grouped-card fill, radius and shadow); only the compact
+                // height stays, because the day list needs the space.
+                style={[
+                  styles.dayRow,
+                  cardShadow,
+                  { backgroundColor: colors.cardFill, borderColor: pill },
+                ]}>
                 <Text style={styles.dayRowIcon}>{category?.icon !== '' ? category?.icon : '🍽️'}</Text>
                 <View style={styles.dayRowText}>
                   <Text style={[styles.dayRowTitle, { color: colors.text }]} numberOfLines={1}>
@@ -402,15 +407,19 @@ const styles = StyleSheet.create({
   cellCount: { fontSize: 10, fontFamily: fonts.medium },
   /** The five meal rows of the selected day. */
   dayList: { marginTop: 12, rowGap: 6 },
+  /**
+   * A compact dashboard card: the frame is exactly the meal card's (same
+   * metrics.radius / metrics.cardBorder and the state colour as the border), so
+   * both screens read as one family - only the height stays compact.
+   */
   dayRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: metrics.radius,
+    borderWidth: metrics.cardBorder,
     paddingRight: 8,
     columnGap: 8,
-    overflow: 'hidden',
   },
-  dayRowBar: { width: 4, alignSelf: 'stretch' },
   dayRowIcon: { fontSize: 18, paddingVertical: 8 },
   dayRowText: { flex: 1, paddingVertical: 6 },
   dayRowTitle: { fontSize: 13, fontFamily: fonts.medium },
