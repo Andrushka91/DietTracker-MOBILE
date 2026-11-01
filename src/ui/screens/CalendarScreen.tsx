@@ -32,13 +32,14 @@ import { ensureCategories } from '../../services/mealTracking';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, IconButton } from '../components/buttons';
+import { Icon } from '../components/icons';
 import {
   fonts,
-  argb,
   metrics,
   statusColors,
   themeColors,
   cardShadow,
+  typeScale,
 } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
 import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
@@ -176,7 +177,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
         <View style={styles.monthRow}>
           <IconButton
             label={t('Calendar_PreviousMonth')}
-            glyph={'\u2039'}
+            icon="chevron-back"
             onPress={() => shiftMonth(-1)}
             colors={colors}
           />
@@ -185,7 +186,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
           </Text>
           <IconButton
             label={t('Calendar_NextMonth')}
-            glyph={'\u203A'}
+            icon="chevron-forward"
             onPress={() => shiftMonth(1)}
             colors={colors}
           />
@@ -333,14 +334,25 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                   <Text style={[styles.dayRowTitle, { color: colors.text }]} numberOfLines={1}>
                     {slot.title !== '' ? slot.title : name}
                   </Text>
-                  <Text style={[styles.dayRowMeta, { color: colors.textMuted }]} numberOfLines={1}>
-                    {name}
-                    {time !== '' ? ` · ${time}` : ''}
-                    {slot.photoCount > 0 ? ` · 📷 ${slot.photoCount}` : ''}
-                  </Text>
+                  <View style={styles.dayRowMetaRow}>
+                    <Text style={[styles.dayRowMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                      {name}
+                      {time !== '' ? ` · ${time}` : ''}
+                    </Text>
+                    {slot.photoCount > 0 && (
+                      <View style={styles.photoMarker}>
+                        <Icon name="camera-outline" size={12} color={colors.textMuted} />
+                        <Text style={[styles.dayRowMeta, { color: colors.textMuted }]}>
+                          {slot.photoCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
                 <View style={[styles.dayRowPill, { backgroundColor: pill }]}>
-                  <Text style={styles.dayRowPillText}>{statusLabel(slot.status)}</Text>
+                  <Text style={[styles.dayRowPillText, { color: colors.onState }]}>
+                    {statusLabel(slot.status)}
+                  </Text>
                 </View>
               </Pressable>
             );
@@ -348,7 +360,9 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
         </View>
 
         <View style={styles.legend}>
-          <Legend color={colors.cellPending} label={t('Calendar_LegendPending')} textColor={colors.textMuted} />
+          {/* The dot uses the STATE colour, not the pale cell wash, so all three
+              dots stay equally legible on the white panel. */}
+          <Legend color={colors.pending} label={t('Calendar_LegendPending')} textColor={colors.textMuted} />
           <Legend color={colors.done} label={t('Calendar_LegendGreen')} textColor={colors.textMuted} />
           <Legend color={colors.missed} label={t('Calendar_LegendRed')} textColor={colors.textMuted} />
         </View>
@@ -397,7 +411,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     columnGap: metrics.controlGap,
   },
-  monthLabel: { flex: 1, textAlign: 'center', fontSize: 22, fontFamily: fonts.medium },
+  monthLabel: { flex: 1, textAlign: 'center', fontSize: typeScale.title2, fontFamily: fonts.bold, letterSpacing: -0.4 },
   /** Today / Open day on the left, the selected date bottom-aligned on the right. */
   actionRow: {
     flexDirection: 'row',
@@ -456,8 +470,11 @@ const styles = StyleSheet.create({
   dayRowText: { flex: 1, paddingVertical: 6 },
   dayRowTitle: { fontSize: 13, fontFamily: fonts.medium },
   dayRowMeta: { fontSize: 11, marginTop: 1 },
-  dayRowPill: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 2 },
-  dayRowPillText: { color: argb('#FFFFFFFF'), fontSize: 10, fontFamily: fonts.medium },
+  /** Meta line plus the photo marker, so the camera glyph lines up with the text. */
+  dayRowMetaRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  photoMarker: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
+  dayRowPill: { borderRadius: metrics.radiusChip, paddingHorizontal: 8, paddingVertical: 2 },
+  dayRowPillText: { fontSize: 10, fontFamily: fonts.medium },
   legend: {
     flexDirection: 'row',
     // One row for all three states - the dot already carries the colour, so the

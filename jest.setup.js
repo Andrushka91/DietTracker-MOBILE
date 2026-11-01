@@ -38,6 +38,21 @@ jest.mock('expo-secure-store', () => ({
   WHEN_UNLOCKED_THIS_DEVICE_ONLY: 'whenUnlockedThisDeviceOnly',
 }));
 
+// @expo/vector-icons ships ESM (`Ionicons.js` is `import ...`), which Jest cannot
+// require without transforming all of node_modules. The icon is pure decoration
+// in the tests - the component tests assert content and behaviour, and the icon
+// NAMES are already checked at build time by TypeScript - so it renders as an
+// empty Text carrying the name as its accessibility label.
+jest.mock('@expo/vector-icons/Ionicons', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props: { name: string }) =>
+      React.createElement(Text, { accessibilityLabel: `icon:${props.name}` }),
+  };
+});
+
 jest.mock('expo-modules-core', () => ({
   requireNativeModule: jest.fn(() => ({
     playServicesAvailable: jest.fn(async () => true),

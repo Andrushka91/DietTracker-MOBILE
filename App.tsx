@@ -19,7 +19,6 @@ import {
   Platform,
   StatusBar,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import {
@@ -32,10 +31,12 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import {
   OpenSans_400Regular,
   OpenSans_600SemiBold,
+  OpenSans_700Bold,
   useFonts,
 } from '@expo-google-fonts/open-sans';
 
 import { AppProvider, useApp } from './src/ui/appContext';
+import { Icon, type IconName } from './src/ui/components/icons';
 import { BusyOverlay } from './src/ui/components/shell';
 import { StatusCaption } from './src/ui/components/dialogs';
 import { DashboardScreen } from './src/ui/screens/DashboardScreen';
@@ -43,7 +44,7 @@ import { CalendarScreen } from './src/ui/screens/CalendarScreen';
 import { StatisticsScreen } from './src/ui/screens/StatisticsScreen';
 import { TemplatesScreen } from './src/ui/screens/TemplatesScreen';
 import { SettingsScreen } from './src/ui/screens/SettingsScreen';
-import { argb, fonts, themeColors } from './src/ui/theme';
+import { fonts, raisedShadow, themeColors } from './src/ui/theme';
 import {
   TAB_BAR_HEIGHT,
   TAB_BAR_SIDE_INSET,
@@ -85,12 +86,12 @@ function loadGoogleConfig(): void {
 }
 
 /**
- * Bottom-tab icon (spec 6.2): the Windows app draws a Segoe Fluent glyph, the
- * phone uses the equivalent emoji so the five tabs stay recognisable without a
- * bundled icon font.
+ * Bottom-tab icon (spec 6.2): ONE icon family for the five tabs, filled while
+ * the tab is active and outlined while it is not. The navigator's tint already
+ * carries the accent / muted colours, so the glyph itself never hardcodes one.
  */
-function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }): React.JSX.Element {
-  return <Text style={[styles.tabIcon, { opacity: focused ? 1 : 0.55 }]}>{glyph}</Text>;
+function TabIcon({ name, color }: { name: IconName; color: string }): React.JSX.Element {
+  return <Icon name={name} size={22} color={color} />;
 }
 
 function Tabs(): React.JSX.Element {
@@ -117,20 +118,23 @@ function Tabs(): React.JSX.Element {
           height: TAB_BAR_HEIGHT,
           paddingTop: 7,
           paddingBottom: 7,
-          borderRadius: 20,
+          borderRadius: 22,
           backgroundColor: colors.surface,
           borderTopWidth: 0,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: colors.border,
-          shadowColor: '#000000',
-          shadowOpacity: isDark ? 0.5 : 0.16,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 14,
+          // The bar floats above the page: raiseShadow keeps the depth order
+          // page < card < bar in both themes.
+          ...raisedShadow,
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: { fontSize: 10, fontFamily: fonts.regular, marginTop: 1 },
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontFamily: fonts.medium,
+          letterSpacing: 0.1,
+          marginTop: 1,
+        },
         tabBarIconStyle: { marginTop: 2 },
         tabBarItemStyle: { paddingVertical: 2 },
       }}>
@@ -138,7 +142,9 @@ function Tabs(): React.JSX.Element {
         name="DashboardTab"
         options={{
           title: t('Nav_Dashboard'),
-          tabBarIcon: ({ focused }) => <TabIcon glyph="🏠" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'home' : 'home-outline'} color={color} />
+          ),
         }}
         component={DashboardScreen as unknown as React.ComponentType<object>}
       />
@@ -146,7 +152,9 @@ function Tabs(): React.JSX.Element {
         name="CalendarTab"
         options={{
           title: t('Nav_Calendar'),
-          tabBarIcon: ({ focused }) => <TabIcon glyph="📅" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} />
+          ),
         }}>
         {({ navigation }) => (
           <CalendarScreen
@@ -161,7 +169,9 @@ function Tabs(): React.JSX.Element {
         component={StatisticsScreen}
         options={{
           title: t('Nav_Statistics'),
-          tabBarIcon: ({ focused }) => <TabIcon glyph="📊" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} />
+          ),
         }}
       />
       <Tab.Screen
@@ -169,7 +179,9 @@ function Tabs(): React.JSX.Element {
         component={TemplatesScreen}
         options={{
           title: t('Nav_Templates'),
-          tabBarIcon: ({ focused }) => <TabIcon glyph="📋" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'albums' : 'albums-outline'} color={color} />
+          ),
         }}
       />
       <Tab.Screen
@@ -177,7 +189,9 @@ function Tabs(): React.JSX.Element {
         component={SettingsScreen}
         options={{
           title: t('Nav_Settings'),
-          tabBarIcon: ({ focused }) => <TabIcon glyph="⚙️" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon name={focused ? 'settings' : 'settings-outline'} color={color} />
+          ),
         }}
       />
     </Tab.Navigator>
@@ -251,7 +265,7 @@ function Root(): React.JSX.Element {
   if (!ready) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color={argb('#FF007AFF')} />
+        <ActivityIndicator size="large" color={themeColors(isDark).accent} />
       </View>
     );
   }
@@ -282,11 +296,15 @@ function App(): React.JSX.Element {
   // late load would flash the system font and swap it while the user watches.
   // A failed load (a corrupted asset) falls through to the system font instead
   // of pinning the app on its spinner forever.
-  const [fontsLoaded, fontError] = useFonts({ OpenSans_400Regular, OpenSans_600SemiBold });
+  const [fontsLoaded, fontError] = useFonts({
+    OpenSans_400Regular,
+    OpenSans_600SemiBold,
+    OpenSans_700Bold,
+  });
   if (!fontsLoaded && fontError === null) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color={argb('#FF007AFF')} />
+        <ActivityIndicator size="large" color={themeColors(false).accent} />
       </View>
     );
   }
@@ -307,9 +325,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: argb('#FFF3F3F3'),
+    backgroundColor: themeColors(false).background,
   },
-  tabIcon: { fontSize: 20 },
 });
 
 export default App;

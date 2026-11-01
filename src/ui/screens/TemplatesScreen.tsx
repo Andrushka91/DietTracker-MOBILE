@@ -16,7 +16,7 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
-import { fonts, cardShadow, themeColors, typeScale } from '../theme';
+import { fonts, metrics, pageTitleStyle, cardShadow, themeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
 import { t, tFmt } from '../strings';
 
@@ -140,14 +140,14 @@ export function TemplatesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, rowGap: 10 },
-  pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
+  content: { padding: metrics.pagePadding, rowGap: metrics.gridGap },
+  pageTitle: { ...pageTitleStyle },
   notice: { fontSize: 12, fontStyle: 'italic' },
   panel: { borderRadius: 16, padding: 14 },
   empty: { fontSize: 14, textAlign: 'center', paddingVertical: 18 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: 8 },
   name: { fontSize: 16, fontFamily: fonts.medium, flex: 1 },
-  kind: { borderRadius: 5, paddingHorizontal: 8, paddingVertical: 3 },
+  kind: { borderRadius: metrics.radiusChip, paddingHorizontal: 8, paddingVertical: 3 },
   summary: { fontSize: 13, marginTop: 4 },
   updated: { fontSize: 11, marginTop: 4 },
   actions: { flexDirection: 'row', marginTop: 10 },

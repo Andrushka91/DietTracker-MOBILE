@@ -13,12 +13,14 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { fonts, type ThemeColors } from '../theme';
+import { fonts, metrics, type ThemeColors } from '../theme';
+import { Icon, type IconName } from './icons';
 import { t } from '../strings';
 
 export function IconButton(props: {
   label: string;
-  glyph: string;
+  /** Ionicons name - the app draws one icon family, never emoji. */
+  icon: IconName;
   onPress: () => void;
   disabled?: boolean;
   danger?: boolean;
@@ -29,7 +31,7 @@ export function IconButton(props: {
   const tint = props.disabled === true
     ? props.colors.textMuted
     : props.tint ?? (props.danger === true ? props.colors.missed : props.colors.text);
-  // Square control chrome: 1 px control stroke, control fill, 4 px corners.
+  // Neutral control chrome: 1 px control stroke, control fill, chip corners.
   return (
     <Pressable
       accessibilityRole="button"
@@ -38,15 +40,17 @@ export function IconButton(props: {
       disabled={props.disabled === true}
       onPress={props.onPress}
       hitSlop={4}
-      style={[
+      style={({ pressed }) => [
         styles.iconButton,
         {
           backgroundColor: props.colors.surfaceVariant,
           borderColor: props.colors.border,
-          opacity: props.disabled === true ? 0.4 : 1,
+          // Press feedback is a dim, never a colour change: the chrome and the
+          // glyph keep their meaning while the finger is down.
+          opacity: props.disabled === true ? 0.4 : pressed ? 0.65 : 1,
         },
       ]}>
-      <Text style={[styles.glyph, { color: tint }]}>{props.glyph}</Text>
+      <Icon name={props.icon} size={17} color={tint} />
     </Pressable>
   );
 }
@@ -64,8 +68,8 @@ export function BarButton(props: {
    * which keeps three labelled buttons on one row on a phone.
    */
   compact?: boolean;
-  /** Optional leading glyph (emoji / symbol) drawn before the label. */
-  glyph?: string;
+  /** Optional leading icon drawn before the label. */
+  icon?: IconName;
   /**
    * Optional layout tweak (e.g. flexShrink) merged after the base chrome.
    *
@@ -94,7 +98,7 @@ export function BarButton(props: {
       accessibilityLabel={props.label}
       disabled={props.disabled === true}
       onPress={props.onPress}
-      style={[
+      style={({ pressed }) => [
         styles.bar,
         props.compact === true && styles.barCompact,
         {
@@ -103,15 +107,13 @@ export function BarButton(props: {
             props.accent === true || props.danger === true
               ? background
               : props.colors.border,
-          opacity: props.disabled === true ? 0.4 : 1,
+          opacity: props.disabled === true ? 0.4 : pressed ? 0.7 : 1,
         },
         props.style,
       ]}>
       {/* One line: a compressed button ellipsizes its label instead of wrapping
           taller, so rows that must stay on one line never break. */}
-      {props.glyph !== undefined && (
-        <Text style={[styles.barGlyph, { color: foreground }]}>{props.glyph}</Text>
-      )}
+      {props.icon !== undefined && <Icon name={props.icon} size={15} color={foreground} />}
       <Text
         style={[styles.barLabel, props.compact === true && styles.barLabelCompact, { color: foreground }]}
         numberOfLines={1}>
@@ -185,15 +187,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 4,
+    borderRadius: metrics.radiusChip,
   },
-  glyph: { fontSize: 15 },
   bar: {
     flexDirection: 'row',
     columnGap: 6,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 4,
+    borderRadius: metrics.radiusSmall,
     minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
@@ -205,20 +206,24 @@ const styles = StyleSheet.create({
    * the medium cut made them look like headings instead of controls.
    */
   barLabel: { fontFamily: fonts.regular, fontSize: 14 },
-  /** Leading symbol of a labelled button (account card, wide actions). */
-  barGlyph: { fontSize: 14 },
   /** SettingsPage.xaml draws the privacy/backup buttons at FontSize 13 / Padding 8,4. */
   barCompact: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32 },
   barLabelCompact: { fontSize: 13 },
-  /** Segmented control: squared track with a raised selected segment. */
-  segment: { flexDirection: 'row', borderRadius: 6, padding: 2 },
-  segmentItem: { flex: 1, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
+  /** Segmented control: rounded track with a raised selected segment. */
+  segment: { flexDirection: 'row', borderRadius: metrics.radiusSmall, padding: 2 },
+  segmentItem: {
+    flex: 1,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: metrics.radiusChip,
+  },
   segmentSelected: {
-    shadowColor: '#000000',
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    shadowColor: '#0B1220',
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
   segmentLabel: { fontFamily: fonts.regular, fontSize: 13 },
   segmentLabelSelected: { fontFamily: fonts.medium },

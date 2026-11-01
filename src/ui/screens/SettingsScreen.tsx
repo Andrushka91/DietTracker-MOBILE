@@ -28,7 +28,8 @@ import { getQuota } from '../../cloud/driveProvider';
 import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
-import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
+import { Icon } from '../components/icons';
+import { fonts, metrics, pageTitleStyle, cardShadow, themeColors, typeScale } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
 import { formatMegabytes, t, tFmt } from '../strings';
 
@@ -376,7 +377,7 @@ export function SettingsScreen(): React.JSX.Element {
             {accountIdentity.photoUrl !== '' ? (
               <Image source={{ uri: accountIdentity.photoUrl }} style={styles.avatarImage} />
             ) : (
-              <Text style={[styles.avatarGlyph, { color: colors.textMuted }]}>👤</Text>
+              <Icon name="person-circle-outline" size={46} color={colors.textMuted} />
             )}
           </View>
           <View style={styles.accountText}>
@@ -570,8 +571,8 @@ function ToggleRow(props: {
 
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { padding: 12, rowGap: 12 },
-  pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
+  content: { padding: metrics.pagePadding, rowGap: metrics.spacingSmall },
+  pageTitle: { ...pageTitleStyle },
   /** Grouped card: no stroke - the card floats on the grouped background. */
   card: { borderRadius: metrics.radius, padding: 16, rowGap: 10 },
   /** iOS grouped-list section header: small uppercase caption above the card. */
@@ -607,7 +608,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarGlyph: { fontSize: 34 },
   avatarImage: { width: '100%', height: '100%' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
   /**

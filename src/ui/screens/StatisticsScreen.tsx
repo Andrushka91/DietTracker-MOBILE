@@ -22,7 +22,7 @@ import { getMealsInRange } from '../../data/repositories';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
-import { fonts, cardShadow, themeColors, typeScale, type ThemeColors } from '../theme';
+import { fonts, metrics, pageTitleStyle, cardShadow, themeColors, type ThemeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
 import { t, tFmt } from '../strings';
 
@@ -280,8 +280,8 @@ function VerticalBars(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12 },
-  pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium, marginBottom: 8 },
+  content: { padding: metrics.pagePadding },
+  pageTitle: { ...pageTitleStyle, marginBottom: 8 },
   panel: { borderRadius: 16, padding: 16 },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },
   periodLabel: { fontSize: 15, fontFamily: fonts.medium },

@@ -20,8 +20,9 @@ import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
-import { argb, fonts, metrics, themeColors } from '../theme';
+import { argb, cardShadow, fonts, metrics, themeColors } from '../theme';
 import { BarButton, IconButton, localizedCode } from './buttons';
+import { Icon, type IconName } from './icons';
 import { PhotoGallery } from './PhotoGallery';
 
 export interface MealCardProps {
@@ -94,8 +95,13 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       : meal.status === MealStatus.Missed
         ? colors.missed
         : colors.pending;
-  const statusGlyph =
-    meal.status === MealStatus.Done ? '✓' : meal.status === MealStatus.Missed ? '✕' : '•';
+  /**
+   * Redundant state cue next to the word: ✓ for done, ✕ for missed, and nothing
+   * for pending - the pill always spells the state out, so the colour is never
+   * the only signal.
+   */
+  const statusIcon: IconName | null =
+    meal.status === MealStatus.Done ? 'checkmark' : meal.status === MealStatus.Missed ? 'close' : null;
   const effectiveTime =
     meal.plannedTime ?? (category.defaultTime !== '' ? category.defaultTime : null);
 
@@ -233,8 +239,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
           </Text>
         </View>
         <View style={[styles.pill, { backgroundColor: statusColor }]}>
-          <Text style={styles.pillGlyph}>{statusGlyph}</Text>
-          <Text style={styles.pillText}>{statusLabel}</Text>
+          {statusIcon !== null && <Icon name={statusIcon} size={11} color={colors.onState} />}
+          <Text style={[styles.pillText, { color: colors.onState }]}>{statusLabel}</Text>
         </View>
       </View>
 
@@ -312,11 +318,11 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             />
             <View style={styles.actions}>
               <View style={styles.actionRow}>
-                <IconButton label={t('Photo_Add')} glyph="📷" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
-                <IconButton label={t('Common_Edit')} glyph="✏️" onPress={startEdit} colors={colors} />
-                <IconButton label={t('Meal_Clear')} glyph="🗑" onPress={() => props.onClear(meal)} disabled={empty} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkMissed')} glyph="✕" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkDone')} glyph="✓" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} tint={colors.done} colors={colors} />
+                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
+                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} colors={colors} />
+                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} tint={colors.done} colors={colors} />
               </View>
             </View>
           </View>
@@ -336,19 +342,15 @@ const styles = StyleSheet.create({
     borderWidth: metrics.cardBorder,
     flexGrow: 1,
     flexBasis: '100%',
-    // iOS grouped card: no stroke - a soft shadow carries the elevation.
-    shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    // White card on the tinted page: the shadow carries the elevation.
+    ...cardShadow,
   },
   /**
-   * Compact card body: the 2 px frame plus an even inner padding keeps the same
+   * Compact card body: the frame plus an even inner padding keeps the same
    * distance from the card's edges on all four sides, so the header, the status
    * pill and the action buttons each sit in a corner at the same inset.
    */
-  cardContent: { paddingHorizontal: 9, paddingTop: 7, paddingBottom: 9, flexGrow: 1 },
+  cardContent: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, flexGrow: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -356,7 +358,7 @@ const styles = StyleSheet.create({
   },
   icon: { fontSize: 26 },
   headerText: { flexShrink: 1 },
-  headerTitle: { fontSize: 16, fontFamily: fonts.medium },
+  headerTitle: { fontSize: 16, fontFamily: fonts.medium, letterSpacing: -0.2 },
   headerTime: { fontSize: 12 },
   /**
    * Top-aligned like the iOS calendar badge: the 4 px margin plus the 7 px the
@@ -371,12 +373,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 3,
-    borderRadius: 5,
+    borderRadius: metrics.radiusChip,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  pillGlyph: { color: argb('#FFFFFFFF'), fontSize: 11, fontFamily: fonts.medium },
-  pillText: { color: argb('#FFFFFFFF'), fontSize: 11, fontFamily: fonts.medium },
+  pillText: { fontSize: 11, fontFamily: fonts.medium },
   error: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 8 },
   errorText: { color: argb('#FFFFFFFF'), fontSize: 12 },
   title: { fontSize: 16, marginTop: 4 },

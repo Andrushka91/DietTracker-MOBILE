@@ -48,7 +48,7 @@ import { PhotoViewer } from '../components/PhotoViewer';
 const Bar = BarButton;
 
 import { t, tFmt, formatLongDate } from '../strings';
-import { fonts, metrics, themeColors, typeScale, type ThemeColors } from '../theme';
+import { fonts, metrics, pageTitleStyle, themeColors, typeScale, type ThemeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
 
 export function DashboardScreen({
@@ -534,7 +534,7 @@ export function DashboardScreen({
               cards use, so the pair reads identically everywhere. */}
           <IconButton
             label="Mark all meals as MISSED"
-            glyph="✕"
+            icon="close"
             onPress={() => void handleMarkAllMissed()}
             disabled={!canMarkMissed}
             tint={colors.missed}
@@ -542,7 +542,7 @@ export function DashboardScreen({
           />
           <IconButton
             label="Mark all meals as DONE"
-            glyph="✓"
+            icon="checkmark"
             onPress={() => void handleMarkAllDone()}
             disabled={!canMarkDone}
             tint={colors.done}
@@ -622,15 +622,17 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   header: { paddingBottom: 2 },
-  dateTitle: { fontSize: typeScale.title2, fontFamily: fonts.medium, marginBottom: 6 },
+  /** The date is the page title: 700 with a little negative tracking. */
+  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, marginBottom: 6 },
   navRow: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.controlGap },
-  track: { height: 6, borderRadius: 3, marginTop: 10, overflow: 'hidden' },
-  fill: { height: 6, borderRadius: 3 },
-  counters: { flexDirection: 'row', alignItems: 'center', columnGap: 20, marginTop: 10 },
+  track: { height: 8, borderRadius: 4, marginTop: 10, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4 },
+  counters: { flexDirection: 'row', alignItems: 'center', columnGap: 18, marginTop: 12 },
   counter: { alignItems: 'center', flexDirection: 'row', columnGap: 7 },
   /** iOS-style round counter dot. */
   chip: { width: 10, height: 10, borderRadius: 5 },
-  counterValue: { fontFamily: fonts.medium, fontSize: 18 },
+  /** Tabular figures keep the three counters aligned as the numbers change. */
+  counterValue: { fontFamily: fonts.medium, fontSize: 18, fontVariant: ['tabular-nums'] },
   counterLabel: { fontSize: 12 },
   /** The right padding lines the ✓ / ✕ pair up with the same pair on the cards. */
   actionsRow: {

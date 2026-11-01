@@ -7,7 +7,8 @@ import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { MealPhoto } from '../../domain/models';
 import { fileUri } from '../../data/photoStore';
 import { t } from '../strings';
-import { fonts, argb, themeColors } from '../theme';
+import { argb, themeColors } from '../theme';
+import { Icon } from './icons';
 
 export function PhotoViewer(props: {
   photo: MealPhoto;
@@ -23,7 +24,7 @@ export function PhotoViewer(props: {
           accessibilityLabel={t('Common_Close')}
           onPress={props.onClose}
           style={[styles.close, { backgroundColor: colors.accent }]}>
-          <Text style={styles.closeText}>✕</Text>
+          <Icon name="close" size={18} color={colors.accentText} />
         </Pressable>
         <Image
           source={{ uri: fileUri(props.photo.localFileId) }}
@@ -40,18 +41,18 @@ export function PhotoViewer(props: {
 
 const styles = StyleSheet.create({
   host: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
+  /** Round dial in the corner: the same chip language the rest of the app uses. */
   close: {
     position: 'absolute',
-    top: 48,
+    top: 44,
     right: 20,
-    width: 38,
-    height: 38,
-    borderRadius: 6,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
   },
-  closeText: { color: argb('#FFFFFFFF'), fontSize: 16, fontFamily: fonts.medium },
   image: { width: '100%', height: '80%' },
   caption: { marginTop: 12, fontSize: 13, textAlign: 'center' },
 });
