@@ -129,28 +129,36 @@ and the whole release round runs, with **no version bump anywhere**:
 | 2. Bundle both APKs | `npm run apk` (`scripts\build-apk.bat`) | rewrites `release\DietTracker-1.0.0.0-arm64-v8a.apk` + `-universal.apk` |
 | 3. Commit | `git add -A` + `git commit -m "<what changed>"` (one message in English, no `--amend`) | working tree of the previous round is clean |
 | 4. Push | `git push origin main` | remote `https://github.com/Andrushka91/DietTracker-MOBILE.git` |
-| 5. Report | APK names, sizes, SHA-256 from the build log | taken from `release-build.log` / build output |
+| 5. **Publish on the release page** | `gh release upload v1.0.0.0 release\DietTracker-1.0.0.0-arm64-v8a.apk release\DietTracker-1.0.0.0-universal.apk --clobber` | the SAME `v1.0.0.0` release is reused, its two assets are replaced |
+| 6. Report | APK names, sizes, SHA-256 (local `sha256sum` **and** the asset digest from `gh release view v1.0.0.0 --json assets`) | the digests must match |
 
 Rules that make this reproducible:
 
+* **Steps 2 and 5 always run together.** A build that only sits in `release\`
+  is not a release: the APKs are uploaded to the `v1.0.0.0` release with
+  `--clobber`, which replaces the previous files of the same name
+  ([releases/tag/v1.0.0.0](https://github.com/Andrushka91/DietTracker-MOBILE/releases/tag/v1.0.0.0)).
 * **The version never changes in this flow.** `android/app/build.gradle`
   (`versionName "1.0.0.0"`, `versionCode 1`) and `app.json` (`version: "1.0.0"`)
   stay exactly as they are — the new APKs replace the previous files of the
-  same name, and `adb install -r` / sideloading updates the installed app
-  because the debug key is unchanged.
+  same name on disk and on the release page, and `adb install -r` /
+  sideloading updates the installed app because the debug key is unchanged.
 * A **new** version (`1.0.0.1`, `versionCode 2`, …) is only ever produced when
-  the request explicitly says *new version*.
+  the request explicitly says *new version* — that is also the only case where
+  a new tag and a new release are created (`git tag v1.0.0.1` +
+  `gh release create v1.0.0.1 …`).
 * The build is done **before** the commit, so the commit contains the code the
   shipped APK was built from. Build logs (`release-build.log`,
   `android-build.log`) stay untracked.
-* Nothing is force-pushed, no tag is moved, no history is rewritten.
+* Nothing is force-pushed, no tag is moved, no history is rewritten; existing
+  release assets are replaced, never the release itself.
 
-Expected artifacts after a run:
+Expected artifacts after a run (both on disk and on the release page):
 
-| File | ~Size | SHA-256 |
+| File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | printed by the build |
-| `release\DietTracker-1.0.0.0-universal.apk` | 87 MB | printed by the build |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `b07eff2e…d83a8d0ce` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 87 MB | `6e588b17…acf92db1b1` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
