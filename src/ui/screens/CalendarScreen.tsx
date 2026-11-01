@@ -36,13 +36,13 @@ import { Icon } from '../components/icons';
 import {
   fonts,
   metrics,
-  statusColors,
+  statusPillColors,
   themeColors,
   cardShadow,
   typeScale,
 } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
-import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
+import { formatLongDate, formatMediumDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
 
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
@@ -141,22 +141,20 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   const weekdays = t('Calendar_Weekdays').split(/\s+/).filter((name) => name !== '');
 
 
-  /** Palette colours are #RRGGBBAA - swap the alpha channel for a cell wash. */
-  const tint = (color: string, alpha: string): string => color.slice(0, 7) + alpha;
-
   /**
-   * iOS calendar day state: a soft wash of the state colour behind the cell
-   * (green = every meal eaten, red = at least one missed, quiet gray =
-   * nothing decided yet) - no stroke, the tint itself carries the state.
+   * Calendar day state. A decided day keeps a quiet dot in its state colour (a
+   * full-cell green/red wash on all 42 cells turned the grid into a wall of
+   * tiles); today paints the whole cell with the accent, and a selected day gets
+   * the accent outline. Nothing is decided => no fill at all.
    */
-  const dayState = (progress?: DayProgress): { fill: string } => {
+  const dayState = (progress?: DayProgress): { dot: string | null } => {
     if (progress !== undefined && progress.isFullyCompleted) {
-      return { fill: tint(colors.done, '24') };
+      return { dot: colors.done };
     }
     if (progress !== undefined && progress.missed > 0) {
-      return { fill: tint(colors.missed, '24') };
+      return { dot: colors.missed };
     }
-    return { fill: tint(colors.cellPending, '55') };
+    return { dot: null };
   };
 
   return (
@@ -208,7 +206,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
           <Text
             style={[styles.selectedDate, { color: colors.textSecondary }]}
             numberOfLines={2}>
-            {formatLongDate(selected)}
+            {formatMediumDate(selected)}
           </Text>
         </View>
 
@@ -230,14 +228,6 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                 const hasPhoto = progress !== undefined && progress.slots.some((s) => s.photoCount > 0);
                 const hasFigure = progress !== undefined && progress.decided > 0;
                 const state = dayState(progress);
-                // Today is a solid accent SQUARE (the whole day cell, not a
-                // circle around the number); a selected day keeps its
-                // translucent accent wash, anything else its state tint.
-                const background = isToday
-                  ? colors.accent
-                  : isSelected
-                    ? tint(colors.accent, '2E')
-                    : state.fill;
                 /** White ink on the solid accent fill of today. */
                 const onToday = isToday ? colors.accentFillText : null;
                 return (
@@ -257,7 +247,9 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                       style={[
                         styles.cell,
                         {
-                          backgroundColor: background,
+                          backgroundColor: isToday ? colors.accent : 'transparent',
+                          borderWidth: isSelected && !isToday ? 1.5 : 0,
+                          borderColor: colors.accent,
                           opacity: cell.inMonth ? 1 : 0.35,
                         },
                       ]}>
@@ -269,30 +261,38 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                             style={[
                               styles.dayNumber,
                               { color: onToday ?? colors.text },
-                            ]}>
+                            ]}
+                            maxFontSizeMultiplier={1.2}>
                             {cell.date.slice(8)}
                           </Text>
                         </View>
-                        {/* Photo marker of the day, right above the count. */}
-                        <Text
-                          style={[styles.cellFigure, { color: onToday ?? colors.textMuted }]}
-                          numberOfLines={1}>
-                          {hasPhoto ? '\u{1F4F7}' : ''}
-                        </Text>
+                        {/* Photo marker of the day: one glyph, right-aligned. */}
+                        {hasPhoto && (
+                          <Icon
+                            name="camera-outline"
+                            size={11}
+                            color={onToday ?? colors.textMuted}
+                          />
+                        )}
                       </View>
                       {/*
-                       * Confirmed share of the five slots ("1/5"), empty while
-                       * nothing was decided - a pending meal never produces a
-                       * figure. The percentage of the day lives in the summary
-                       * line above the grid, where it fits next to the counts.
+                       * The day's state: a 6 pt dot in the state colour plus the
+                       * confirmed share of the five slots ("3/5"). Untouched days
+                       * show nothing - a pending meal never produces a figure.
                        */}
-                      <Text
-                        style={[styles.cellCount, { color: onToday ?? colors.textMuted }]}
-                        numberOfLines={1}>
-                        {hasFigure && progress !== undefined
-                          ? `${progress.completed}/${progress.totalSlots}`
-                          : ''}
-                      </Text>
+                      <View style={styles.cellBottomRow}>
+                        {state.dot !== null && (
+                          <View style={[styles.cellDot, { backgroundColor: onToday ?? state.dot }]} />
+                        )}
+                        <Text
+                          style={[styles.cellCount, { color: onToday ?? colors.textMuted }]}
+                          numberOfLines={1}
+                          maxFontSizeMultiplier={1.2}>
+                          {hasFigure && progress !== undefined
+                            ? `${progress.completed}/${progress.totalSlots}`
+                            : ''}
+                        </Text>
+                      </View>
                     </Pressable>
                   </View>
                 );
@@ -307,7 +307,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
         <View style={styles.dayList}>
           {(progressByDate[selected]?.slots ?? []).map((slot) => {
             const category = categories.find((c) => c.fixedCategoryKey === slot.mealCategoryKey);
-            const pill = statusColors(colors)[slot.status];
+            const pillColors = statusPillColors(colors, slot.status);
             const name = category !== undefined && category.name !== ''
               ? category.name
               : t(mealNameKey(slot.mealCategoryKey));
@@ -326,9 +326,13 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                 // height stays, because the day list needs the space.
                 style={[
                   styles.dayRow,
-                  cardShadow,
-                  { backgroundColor: colors.cardFill, borderColor: pill },
+                  { backgroundColor: colors.cardFill, borderColor: colors.border },
                 ]}>
+                {/* Same state rail as the dashboard cards, compact height. A
+                    pending row has no rail, exactly like a pending meal card. */}
+                {slot.status !== MealStatus.Pending && (
+                  <View style={[styles.dayRowRail, { backgroundColor: pillColors.dot }]} />
+                )}
                 <Text style={styles.dayRowIcon}>{category?.icon !== '' ? category?.icon : '🍽️'}</Text>
                 <View style={styles.dayRowText}>
                   <Text style={[styles.dayRowTitle, { color: colors.text }]} numberOfLines={1}>
@@ -349,8 +353,16 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                     )}
                   </View>
                 </View>
-                <View style={[styles.dayRowPill, { backgroundColor: pill }]}>
-                  <Text style={[styles.dayRowPillText, { color: colors.onState }]}>
+                <View
+                  style={[
+                    styles.dayRowPill,
+                    {
+                      backgroundColor: pillColors.fill,
+                      borderWidth: pillColors.solid ? 0 : 1,
+                      borderColor: colors.border,
+                    },
+                  ]}>
+                  <Text style={[styles.dayRowPillText, { color: pillColors.ink }]}>
                     {statusLabel(slot.status)}
                   </Text>
                 </View>
@@ -362,9 +374,9 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
         <View style={styles.legend}>
           {/* The dot uses the STATE colour, not the pale cell wash, so all three
               dots stay equally legible on the white panel. */}
-          <Legend color={colors.pending} label={t('Calendar_LegendPending')} textColor={colors.textMuted} />
-          <Legend color={colors.done} label={t('Calendar_LegendGreen')} textColor={colors.textMuted} />
-          <Legend color={colors.missed} label={t('Calendar_LegendRed')} textColor={colors.textMuted} />
+          <Legend color={colors.pending} label={t('Calendar_LegendPending')} textColor={colors.textSecondary} />
+          <Legend color={colors.done} label={t('Calendar_LegendGreen')} textColor={colors.textSecondary} />
+          <Legend color={colors.missed} label={t('Calendar_LegendRed')} textColor={colors.textSecondary} />
         </View>
       </View>
     </ScrollView>
@@ -396,8 +408,8 @@ function statusLabel(status: MealStatus): string {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: metrics.pagePadding },
-  panel: { borderRadius: 16, padding: 14 },
+  content: { paddingHorizontal: 12, paddingTop: 8 },
+  panel: { borderRadius: 16, padding: 10 },
   /**
    * The arrows sit on the two edges of the panel (space-between) with the month
    * label filling what is left: both arrows have the same chrome, so the label
@@ -426,14 +438,19 @@ const styles = StyleSheet.create({
   weekHeader: { flexDirection: 'row', marginTop: 12 },
   weekday: { flex: 1, textAlign: 'center', fontSize: 12, fontFamily: fonts.medium },
   /** Day grid: whole weeks of seven equal flex cells (no percentage drift). */
-  grid: { marginTop: 6, rowGap: 2 },
+  grid: { marginTop: 4, rowGap: 2 },
   gridRow: { flexDirection: 'row' },
-  cellHost: { flex: 1, aspectRatio: 1, padding: 2 },
-  /** Soft state wash instead of a frame - the iOS calendar look. */
+  cellHost: { flex: 1, aspectRatio: 1 },
+  /**
+   * A day cell is mostly AIR: plain number, a state dot and the confirmed count.
+   * Only today (accent fill) and the selected day (accent outline) draw chrome -
+   * 42 grey tiles made the month look like a keyboard.
+   */
   cell: {
     flex: 1,
     borderRadius: 12,
-    padding: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
     justifyContent: 'space-between',
   },
   cellTopRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 2 },
@@ -441,14 +458,21 @@ const styles = StyleSheet.create({
   dayBadge: {
     minWidth: 22,
     height: 22,
-    paddingHorizontal: 3,
+    paddingHorizontal: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dayNumber: { fontSize: 14, fontFamily: fonts.medium },
-  cellFigure: { marginLeft: 'auto', fontSize: 10, marginTop: 1 },
-  /** "1/5" - the confirmed share of the day's five slots. */
-  cellCount: { fontSize: 10, fontFamily: fonts.medium },
+  cellBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 4,
+    minHeight: 14,
+  },
+  /** State dot of a decided day (green = all eaten, red = something missed). */
+  cellDot: { width: 6, height: 6, borderRadius: 3 },
+  /** "3/5" - the confirmed share of the day's five slots. */
+  cellCount: { fontSize: 10, fontFamily: fonts.medium, marginLeft: 'auto' },
   /** The five meal rows of the selected day. */
   dayList: { marginTop: 12, rowGap: 6 },
   /**
@@ -463,17 +487,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: metrics.radius,
     borderWidth: metrics.cardBorder,
-    paddingHorizontal: 9,
+    paddingLeft: 13,
+    paddingRight: 10,
     columnGap: 8,
   },
-  dayRowIcon: { fontSize: 18, paddingVertical: 8 },
-  dayRowText: { flex: 1, paddingVertical: 6 },
-  dayRowTitle: { fontSize: 13, fontFamily: fonts.medium },
-  dayRowMeta: { fontSize: 11, marginTop: 1 },
+  /** Compact state rail: the three state colours mean the same here. */
+  dayRowRail: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: metrics.statusRail,
+    borderTopRightRadius: metrics.statusRail,
+    borderBottomRightRadius: metrics.statusRail,
+  },
+  dayRowIcon: { fontSize: 18, paddingVertical: 9 },
+  dayRowText: { flex: 1, paddingVertical: 7 },
+  dayRowTitle: { fontSize: 14, fontFamily: fonts.medium },
+  dayRowMeta: { fontSize: 12, marginTop: 1 },
   /** Meta line plus the photo marker, so the camera glyph lines up with the text. */
   dayRowMetaRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
   photoMarker: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
-  dayRowPill: { borderRadius: metrics.radiusChip, paddingHorizontal: 8, paddingVertical: 2 },
+  dayRowPill: {
+    borderRadius: metrics.radiusPill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
   dayRowPillText: { fontSize: 10, fontFamily: fonts.medium },
   legend: {
     flexDirection: 'row',
@@ -488,5 +527,5 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', columnGap: 5, flexShrink: 1 },
   /** Small solid state dot, like the iOS calendar legend. */
   legendChip: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 11, flexShrink: 1 },
+  legendText: { fontSize: 12, flexShrink: 1 },
 });
