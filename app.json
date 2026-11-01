@@ -6,12 +6,17 @@
     "slug": "diet-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "platforms": [
       "android",
       "ios"
     ],
     "android": {
       "package": "com.diettracker.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1A7AC5"
+      },
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.POST_NOTIFICATIONS",
@@ -21,6 +26,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.diettracker.app",
+      "icon": "./assets/icon.png",
       "infoPlist": {
         "NSCameraUsageDescription": "Attach photographs of your meals to the tracker.",
         "NSPhotoLibraryUsageDescription": "Select meal photographs from your library."

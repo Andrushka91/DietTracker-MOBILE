@@ -157,8 +157,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `b07eff2e…d83a8d0ce` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 87 MB | `6e588b17…acf92db1b1` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 29 MB | `8922f3ec…eaf5c8f4d` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 84 MB | `33a10a62…7f4a6dc1d` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -384,11 +384,12 @@ npm start
 
 ## Status & honesty statement
 
-* `npm run check` (strict TypeScript + ESLint) is green and **31 domain unit
-  tests** pass (completion rules, five-slot permanence, validators, photo
+* `npm run check` (strict TypeScript + ESLint) is green and **63 unit tests**
+  pass (completion rules, five-slot permanence, validators, photo
   rules, copy rules, analytics incl. the “–” case, DST-safe calendar day
   stepping, sync frequency/backoff, payload + envelope round-trip, Drive
-  addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask).
+  addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask, and the
+  sign-out boundary: forced upload, progress frames, refusal that keeps data).
 * Verified on the local Android emulator (API 37, x86_64 debug build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
   the five permanent cards, inline edit + save,
@@ -436,8 +437,9 @@ npm start
     are borderless and float on a soft shadow (`cardShadow` in `src/ui/theme.ts`), the
     typography follows the iOS text styles (`typeScale`: largeTitle 34 → caption2 11),
     buttons are capsules, the dialogs are iOS alerts (hairline action strip) and the
-    calendar paints soft state washes with a circular "today" badge instead of the
-    Windows 2 px day frames. All logic, data flow and wording stay identical.
+    calendar paints soft state washes with the **whole day square** of today filled in
+    the accent blue (no circle around the number) instead of the Windows 2 px day
+    frames. All logic, data flow and wording stay identical.
   * Cards and counters use the exact iOS state colours of the palette in `src/ui/theme.ts`
     (done `#34C759`, missed `#FF3B30`, pending `#8E8E93`; calendar cells `#E5E5EA`), and
     `MealCategory.Color` is not painted as a card fill — the card keeps its neutral
@@ -461,3 +463,23 @@ npm start
     count instead of the miniature meal cards: a phone cell is about 44 pt wide, so
     the five meals of the selected day are listed as full rows under the grid (title,
     category, time, photo count, status pill) - same information, legible size.
+  * **Signing out cannot skip the upload.** The account card opens the iOS-style
+    confirmation, then the global overlay shows a determinate bar from 0 % to 100 %
+    (`busyProgress` in `src/ui/appContext.tsx`, painted by `ProgressOverlay` in
+    `src/ui/components/shell.tsx`): every settled outbox document moves it, the
+    failed-operation backoff window is ignored (`ignoreBackoff` in
+    `src/cloud/syncEngine.ts`) and up to four deadline-bounded attempts ride out a
+    short network drop. There is no "sign out anyway"/discard button any more - if
+    the outbox still cannot be emptied, the sign-out is **refused** with one
+    acknowledgement dialog and the cache stays untouched, because those changes are
+    only on this device. (The `discardChanges` flag of `signOutGoogle` survives for
+    the unit test only.)
+  * The **launcher icon is the Windows app icon** (the blue tile with the white disc
+    and the green fork/knife): `scripts/make-icons.py` derives every Android asset
+    from `WINDOWS_APPS/src/DietTracker.App/Assets/DietTracker.ico` - legacy
+    `mipmap-*dpi/ic_launcher.png`, the circular `ic_launcher_round.png`, the
+    `mipmap-anydpi-v26` adaptive icon (72 dp safe zone over the same blue
+    `#1A7AC5`) and `assets/icon.png` / `assets/adaptive-icon.png` for Expo.
+  * Every scrolling page leaves `metrics.floatingTabBarClearance` (110 pt) plus the
+    bottom safe-area inset below its last card, so the floating tab bar never covers
+    it (dashboard, calendar, statistics, templates and settings share the constant).

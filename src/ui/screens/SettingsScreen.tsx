@@ -7,7 +7,9 @@
 //
 // Signing in and out runs behind the GLOBAL busy overlay (shell.tsx), not a
 // button spinner: the account change touches the whole database, so no other
-// control of the app may be pressed while it runs.
+// control of the app may be pressed while it runs. A sign-out first uploads
+// every pending change behind a 0-100 % bar ("busyProgress") and cannot be
+// skipped - the local cache is the only copy of those records until then.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -29,11 +31,11 @@ import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
 import { formatMegabytes, t, tFmt } from '../strings';
 
 /**
- * Height the floating tab bar needs at the bottom of a scrolling page: the bar
- * itself (66 pt) plus its 10 pt margin plus breathing room, so the last card of
- * a page is never hidden behind it.
+ * RN-only wording: the sign-out can no longer be forced past a failed upload,
+ * so the refusal says what happens instead of offering a discard path.
  */
-const FLOATING_TAB_BAR_CLEARANCE = 110;
+const SIGN_OUT_UPLOAD_FAILED =
+  'Sign-out was cancelled so nothing is lost: those changes are only on this device. Check the connection and try again in a moment.';
 
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
@@ -42,10 +44,11 @@ export function SettingsScreen(): React.JSX.Element {
   const [dbPath, setDbPath] = useState('');
   const [storageMb, setStorageMb] = useState('0.00');
   const [quotaLine, setQuotaLine] = useState<string | null>(null);
-  const [accountIdentity, setAccountIdentity] = useState<{ email: string; photoUrl: string }>({
-    email: '',
-    photoUrl: '',
-  });
+  const [accountIdentity, setAccountIdentity] = useState<{
+    name: string;
+    email: string;
+    photoUrl: string;
+  }>({ name: '', email: '', photoUrl: '' });
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
   const [integrityText, setIntegrityText] = useState<string | null>(null);
   /** True while the explicit "Synchronize now" cycle runs (inline spinner). */
@@ -63,14 +66,17 @@ export function SettingsScreen(): React.JSX.Element {
   useEffect(() => {
     if (!app.signedIn) {
       setQuotaLine(null);
-      setAccountIdentity({ email: '', photoUrl: '' });
+      setAccountIdentity({ name: '', email: '', photoUrl: '' });
       return;
     }
     void (async () => {
       try {
         const account = await getActiveAccount();
         const tokens = await readTokens();
+        // The full identity of the connected account: the display name, the
+        // e-mail and the Google profile photo (the panel shows all three).
         setAccountIdentity({
+          name: account?.displayName ?? tokens?.displayName ?? '',
           email: account?.email ?? tokens?.email ?? '',
           photoUrl: tokens?.photoUrl ?? '',
         });
@@ -242,7 +248,9 @@ export function SettingsScreen(): React.JSX.Element {
       onConfirm: async () => {
         setDialog(null);
         // The global overlay blocks the whole screen (every other button, the
-        // tab bar and the back key) until the account change is done.
+        // tab bar and the back key) until the account change is done. Sign-out
+        // first uploads every pending change behind a 0-100 % bar - there is no
+        // "skip" route, because the local cache is the only copy until then.
         app.setBusy('signingOut');
         let result: Awaited<ReturnType<typeof app.signOut>>;
         try {
@@ -256,29 +264,25 @@ export function SettingsScreen(): React.JSX.Element {
           app.setBusy(null);
         }
         if (!result.ok) {
-          // Pending-changes refusal: offer the explicit discard path.
+          // The upload could not be finished, so the sign-out was REFUSED and
+          // nothing was deleted: one acknowledgement, no force/discard option
+          // (deleting the cache would delete the only copy of those changes).
+          const detail =
+            result.error !== undefined && result.error.startsWith('Auth_')
+              ? t(result.error)
+              : tFmt('Account_SignOutPendingDetail', String(result.pending ?? 0)).replace(
+                  ' Sign out anyway?',
+                  '.',
+                );
           setDialog({
             title: t('Account_SignOutPendingTitle'),
-            message: `${t('Account_SignOutPendingDetail').replace('{0}', String(result.pending ?? 0))}\n\n${t('Account_SignOutPendingMessage')}`,
-            cancelText: t('Common_No'),
-            confirmText: t('Account_SignOut'),
-            destructive: true,
-            onCancel: () => {
+            message: `${detail}\n\n${SIGN_OUT_UPLOAD_FAILED}`,
+            confirmText: t('Common_Ok'),
+            singleAction: true,
+            onCancel: () => setDialog(null),
+            onConfirm: () => {
               setDialog(null);
               app.showStatus(t('Account_SignOutPendingKept'));
-            },
-            onConfirm: async () => {
-              setDialog(null);
-              app.setBusy('signingOut');
-              try {
-                await app.signOut(true);
-                app.showStatus(t('Account_SignOutDiscarded'));
-              } catch (error) {
-                console.warn('[settings] sign-out failed', error);
-                app.showStatus(t('Auth_Unknown'));
-              } finally {
-                app.setBusy(null);
-              }
             },
           });
           return;
@@ -335,7 +339,7 @@ export function SettingsScreen(): React.JSX.Element {
         styles.content,
         // The floating tab bar sits ON TOP of the page; the extra room keeps the
         // About card (the last one) fully readable above it.
-        { paddingBottom: FLOATING_TAB_BAR_CLEARANCE + Math.max(insets.bottom, 10) },
+        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
       {!app.signedIn && (
@@ -348,9 +352,11 @@ export function SettingsScreen(): React.JSX.Element {
       {/* 2. Account card */}
       <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Account')}</Text>
       <View style={cardStyle}>
-        {/* One user tile: avatar, identity and the account action at the end of
-            the same row - no second row of buttons under the identity. */}
-        <View style={styles.accountRow}>
+        {/* Profile panel: a large framed photo, the full display name and the
+            e-mail (nothing is clipped to one line any more), the provider line
+            under them and the account action as a full-width button below the
+            identity - the classic account settings arrangement. */}
+        <View style={styles.accountPanel}>
           <View
             style={[
               styles.avatar,
@@ -363,42 +369,51 @@ export function SettingsScreen(): React.JSX.Element {
             )}
           </View>
           <View style={styles.accountText}>
-            <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={1} selectable>
+            <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={2}>
               {app.signedIn
-                ? accountIdentity.email !== ''
-                  ? accountIdentity.email
-                  : t('Account_SignedIn')
+                ? accountIdentity.name !== ''
+                  ? accountIdentity.name
+                  : accountIdentity.email !== ''
+                    ? accountIdentity.email
+                    : t('Account_SignedIn')
                 : t('Account_NoEmail')}
             </Text>
-            <Text style={[styles.accountMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+            {app.signedIn && accountIdentity.email !== '' && accountIdentity.name !== '' && (
+              <Text
+                style={[styles.accountEmail, { color: colors.textSecondary }]}
+                numberOfLines={2}
+                ellipsizeMode="middle"
+                selectable>
+                {accountIdentity.email}
+              </Text>
+            )}
+            <Text style={[styles.accountMeta, { color: colors.textMuted }]} numberOfLines={2}>
               {app.signedIn
                 ? quotaLine ?? t('Account_ProviderGoogle')
                 : t('Account_ProviderNone')}
             </Text>
           </View>
-          {/* The buttons never carry a spinner: the global busy overlay covers
-              the whole screen while Google runs, so the card keeps its layout -
-              no label swap, no size jump, and no second tap can slip through. */}
-          {app.signedIn ? (
-            <BarButton
-              compact
-              danger
-              label={t('Account_SignOut')}
-              style={styles.accountAction}
-              onPress={confirmSignOut}
-              colors={colors}
-            />
-          ) : (
-            <BarButton
-              compact
-              accent
-              label={t('Account_Google')}
-              style={styles.accountAction}
-              onPress={() => void signIn()}
-              colors={colors}
-            />
-          )}
         </View>
+        {/* The buttons never carry a spinner: the global busy overlay covers
+            the whole screen while Google runs, so the card keeps its layout -
+            no label swap, no size jump, and no second tap can slip through. */}
+        {app.signedIn ? (
+          <BarButton
+            danger
+            label={t('Account_SignOut')}
+            style={styles.accountAction}
+            onPress={confirmSignOut}
+            colors={colors}
+          />
+        ) : (
+          <BarButton
+            accent
+            label={t('Account_Google')}
+            style={styles.accountAction}
+            onPress={() => void signIn()}
+            colors={colors}
+          />
+        )}
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Account_CloudSaveHint')}</Text>
       </View>
 
@@ -560,23 +575,28 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: typeScale.headline, fontFamily: fonts.medium },
   body: { fontSize: 13, lineHeight: 18 },
   hint: { fontSize: 11, lineHeight: 15 },
-  /** User tile: avatar + identity + the account action, all on one row. */
-  accountRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12 },
-  accountText: { flex: 1, rowGap: 2 },
-  accountName: { fontSize: 14, fontFamily: fonts.medium },
-  accountMeta: { fontSize: 12 },
-  /** Wide enough for "Sign in with Google" - the action never ellipsizes. */
-  accountAction: { minWidth: 112, minHeight: 36, justifyContent: 'center' },
+  /**
+   * Account panel: a 84 pt framed photo beside the identity column. The name and
+   * the e-mail may wrap to two lines each - the old single row cut both of them
+   * off at the same width the button needed.
+   */
+  accountPanel: { flexDirection: 'row', alignItems: 'center', columnGap: 14 },
+  accountText: { flex: 1, rowGap: 3 },
+  accountName: { fontSize: 20, lineHeight: 26, fontFamily: fonts.medium },
+  accountEmail: { fontSize: 14, lineHeight: 19 },
+  accountMeta: { fontSize: 12, lineHeight: 16, marginTop: 2 },
+  /** Full-width account action under the identity (sign in / sign out). */
+  accountAction: { minHeight: 44, justifyContent: 'center', marginTop: 4 },
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarGlyph: { fontSize: 22 },
+  avatarGlyph: { fontSize: 34 },
   avatarImage: { width: '100%', height: '100%' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
   /**

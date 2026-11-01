@@ -19,6 +19,12 @@ export interface ConfirmRequest {
   /** True = red confirm button (destructive). */
   destructive?: boolean;
   /**
+   * True = only the confirm button is drawn (an acknowledgement, not a choice).
+   * Used when the app must state an outcome the user cannot change - e.g. a
+   * sign-out that was refused because the changes could not be uploaded.
+   */
+  singleAction?: boolean;
+  /**
    * Name prompt (spec 6.5 "Save-as-template name prompt"): when set the dialog
    * shows a single-line text field pre-filled with this value (default
    * `yyyy-MM-dd`) and hands the typed name to `onConfirm`.
@@ -62,18 +68,24 @@ export function ConfirmDialog({
               width; the tint marks both buttons, a destructive confirm in red,
               the default action in medium weight. */}
           <View style={[styles.actions, { borderTopColor: colors.border }]}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={request.onCancel}
-              style={styles.action}>
-              <Text style={[styles.actionText, { color: colors.accent }]}>
-                {request.cancelText ?? t('Common_No')}
-              </Text>
-            </Pressable>
+            {request.singleAction === true ? null : (
+              <Pressable
+                accessibilityRole="button"
+                onPress={request.onCancel}
+                style={styles.action}>
+                <Text style={[styles.actionText, { color: colors.accent }]}>
+                  {request.cancelText ?? t('Common_No')}
+                </Text>
+              </Pressable>
+            )}
             <Pressable
               accessibilityRole="button"
               onPress={() => request.onConfirm(value)}
-              style={[styles.action, styles.actionDivider, { borderLeftColor: colors.border }]}>
+              style={[
+                styles.action,
+                request.singleAction === true ? null : styles.actionDivider,
+                request.singleAction === true ? null : { borderLeftColor: colors.border },
+              ]}>
               <Text
                 style={[
                   styles.actionText,

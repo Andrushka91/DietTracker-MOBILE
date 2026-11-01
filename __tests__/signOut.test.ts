@@ -1,17 +1,14 @@
-// Regression tests for the sign-out stall: signing out must never sit on a
-// spinner while the network is contacted for nothing.
-//
-// The defect: sign-out uploaded the outbox first, and that upload began with a
-// FULL Drive listing. With any journalled operation - including one merely
-// waiting out its exponential backoff - the spinner stayed for as long as that
-// listing (plus a stalled, timeout-less fetch) took: 30-50 seconds on a phone.
+// Regression tests for the sign-out boundary: the local cache is the only copy
+// of a change until it reaches the account, so signing out uploads the outbox
+// first and NEVER offers a way to skip that upload.
 //
 // Covered:
 //  - a guest session signs out instantly and never calls the provider,
-//  - an outbox that can only wait (failed + backoff window) is NOT uploaded and
-//    is reported at once as "pending changes" - the user gets the
-//    "sign out anyway" dialog instead of a hang,
-//  - discarding removes the cache and the account without any network call.
+//  - a change waiting out its backoff IS uploaded (the barrier ignores the
+//    backoff window) and the sign-out finishes with a 0-100 % progress report,
+//  - an upload that cannot finish REFUSES the sign-out and keeps every record -
+//    no "sign out anyway" path exists any more,
+//  - the internal discard flag still clears the cache without any network call.
 
 jest.mock('expo-sqlite', () => {
   // Minimal expo-sqlite surface on top of node:sqlite (in-memory database).
@@ -160,6 +157,9 @@ const listObjects = drive.listObjects as jest.Mock;
 beforeEach(async () => {
   await closeDb();
   listObjects.mockClear();
+  listObjects.mockImplementation(async () => {
+    throw new Error('the drive must not be listed during sign-out');
+  });
   await seedProfile();
 });
 
@@ -167,7 +167,7 @@ afterAll(async () => {
   await closeDb();
 });
 
-describe('sign-out never waits on the cloud for nothing', () => {
+describe('sign-out uploads everything before it removes the account', () => {
   test('a guest session signs out with no provider call at all', async () => {
     const started = Date.now();
     const result = await signOutGoogle({ discardChanges: false });
@@ -176,29 +176,49 @@ describe('sign-out never waits on the cloud for nothing', () => {
     expect(listObjects).not.toHaveBeenCalled();
   });
 
-  test('an outbox waiting out its backoff is reported immediately (no listing)', async () => {
+  test('a change waiting out its backoff is uploaded before signing out', async () => {
     await seedAccount();
     await journalChange({
       status: SyncOperationStatus.Failed,
       nextAttemptAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     });
+    // The push pass lists the cloud folder once; an empty index is enough for a
+    // record the cloud has never seen.
+    listObjects.mockImplementation(async () => []);
+
+    const stages: string[] = [];
+    const result = await signOutGoogle({
+      onProgress: (progress) => stages.push(progress.stage),
+    });
+
+    expect(result.ok).toBe(true);
+    // The bar starts empty, reports the upload and ends on a full bar.
+    expect(stages[0]).toBe('preparing');
+    expect(stages).toContain('uploading');
+    expect(stages[stages.length - 1]).toBe('finishing');
+    // The backoff window did not keep the change in the outbox.
+    await expect(countPendingOperations(LOCAL_ACCOUNT)).resolves.toBe(0);
+    await expect(getActiveAccount()).resolves.toBeNull();
+  });
+
+  test('an upload that cannot finish refuses the sign-out and keeps the cache', async () => {
+    await seedAccount();
+    await journalChange({ status: SyncOperationStatus.Pending, nextAttemptAt: null });
 
     const started = Date.now();
-    const result = await signOutGoogle({ discardChanges: false });
+    const result = await signOutGoogle({ maxUploadAttempts: 1, retryDelayMs: 0 });
     const elapsed = Date.now() - started;
 
-    // Reported as pending: the dialog offers "sign out anyway" instead of a hang.
+    // Refused: there is no "sign out anyway" answer, nothing was purged.
     expect(result.ok).toBe(false);
     expect(result.pending).toBe(1);
     expect(result.error).toBe('Account_SignOutPendingDetail');
-    // No Drive listing, and far below the old 30-50 s stall.
-    expect(listObjects).not.toHaveBeenCalled();
-    expect(elapsed).toBeLessThan(1000);
-    // Nothing was purged: the account is still connected.
+    expect(elapsed).toBeLessThan(3000);
     await expect(getActiveAccount()).resolves.not.toBeNull();
+    await expect(countPendingOperations(LOCAL_ACCOUNT)).resolves.toBe(1);
   });
 
-  test('discarding signs out at once and clears the cache without the network', async () => {
+  test('the internal discard flag signs out at once without the network', async () => {
     await seedAccount();
     await journalChange({ status: SyncOperationStatus.Pending, nextAttemptAt: null });
 

@@ -191,6 +191,12 @@ export const metrics = {
   /** Minimum height of a meal card (the card only grows with its content). */
   cardMinHeight: 112,
   tabBarHeight: 56,
+  /**
+   * Room a scrolling page leaves below its last card so the FLOATING tab bar
+   * (66 pt tall, 10 pt above the bottom edge) never covers it. Pages add the
+   * safe-area inset on top of this value.
+   */
+  floatingTabBarClearance: 110,
 };
 
 /**

@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MealTemplate } from '../../domain/models';
 import { formatDate, parseDate } from '../../domain/analytics';
@@ -16,7 +17,7 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
-import { fonts, cardShadow, themeColors, typeScale } from '../theme';
+import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
 import { t, tFmt } from '../strings';
 
 /**
@@ -30,6 +31,7 @@ const DATE_PROMPT = 'Enter the target date (yyyy-MM-dd)';
 export function TemplatesScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  const insets = useSafeAreaInsets();
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
@@ -83,7 +85,12 @@ export function TemplatesScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={[
+        styles.content,
+        // Same bottom room as the other pages: the floating tab bar never
+        // covers the last template row.
+        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+      ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Templates')}</Text>
       <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>
 
@@ -133,7 +140,7 @@ export function TemplatesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 104, rowGap: 10 },
+  content: { padding: 12, rowGap: 10 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium },
   notice: { fontSize: 12, fontStyle: 'italic' },
   panel: { borderRadius: 16, padding: 14 },

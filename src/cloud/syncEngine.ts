@@ -518,18 +518,26 @@ async function pushOperation(
 }
 
 /** Push phase: drain the durable outbox (order = CreatedAt). */
-async function pushPending(accountId: string, epoch: number): Promise<number> {
+async function pushPending(
+  accountId: string,
+  epoch: number,
+  onProgress?: (uploaded: number, total: number) => void,
+  ignoreBackoff = false,
+): Promise<number> {
   const pending = await getPendingOperations(accountId);
   if (pending.length === 0) {
     return 0;
   }
+  // 0 of N is the first frame of the sign-out bar: the bar starts empty and
+  // moves one step per settled document.
+  onProgress?.(0, pending.length);
   const fileIndex = await buildFileIndex();
   let uploaded = 0;
   for (const op of pending) {
     if (cycleIsStale(epoch)) {
       return uploaded; // the session ended: stop uploading its records
     }
-    if (op.status === SyncOperationStatus.Failed && op.nextAttemptAt !== null) {
+    if (!ignoreBackoff && op.status === SyncOperationStatus.Failed && op.nextAttemptAt !== null) {
       if (Date.parse(op.nextAttemptAt) > Date.now()) {
         continue; // still inside the backoff window
       }
@@ -537,6 +545,7 @@ async function pushPending(accountId: string, epoch: number): Promise<number> {
     try {
       await pushOperation(op, fileIndex);
       uploaded += 1;
+      onProgress?.(uploaded, pending.length);
     } catch (error) {
       const message = error instanceof AuthError ? error.code : String(error);
       const retryCount = op.retryCount + 1;
@@ -1171,6 +1180,17 @@ export interface RunCycleOptions {
    * current anyway.
    */
   pushOnly?: boolean;
+  /**
+   * Called once with 0/total and then after every document the outbox settles,
+   * so the sign-out barrier can paint a real 0-100 % bar instead of a spinner.
+   */
+  onUploadProgress?: (uploaded: number, total: number) => void;
+  /**
+   * Ignores the exponential-backoff window of a failed operation. The sign-out
+   * barrier cannot wait a minute for the next retry: the user asked for the
+   * upload now and the whole screen is already blocked behind the progress bar.
+   */
+  ignoreBackoff?: boolean;
 }
 
 /**
@@ -1290,7 +1310,14 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
     emitState(SyncState.Syncing);
   }
   try {
-    const uploaded = pullOnly ? 0 : await pushPending(account.id, epoch);
+    const uploaded = pullOnly
+      ? 0
+      : await pushPending(
+          account.id,
+          epoch,
+          options.onUploadProgress,
+          options.ignoreBackoff === true,
+        );
     // A push-only pass stops when the outbox is empty: no listing, no downloads,
     // no watermark. The account boundaries (sign in / sign out) use it and would
     // otherwise wait for a full pull nobody asked for.

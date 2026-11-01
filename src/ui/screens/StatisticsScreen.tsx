@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   PeriodProgress,
@@ -22,7 +23,7 @@ import { getMealsInRange } from '../../data/repositories';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
-import { fonts, cardShadow, themeColors, typeScale, type ThemeColors } from '../theme';
+import { fonts, metrics, cardShadow, themeColors, typeScale, type ThemeColors } from '../theme';
 import { t, tFmt } from '../strings';
 
 type Mode = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -33,6 +34,7 @@ const MODES: Mode[] = ['daily', 'weekly', 'monthly', 'yearly'];
 export function StatisticsScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  const insets = useSafeAreaInsets();
   const today = formatDate(new Date());
   const [mode, setMode] = useState<Mode>('weekly');
   const [anchor, setAnchor] = useState(today);
@@ -133,7 +135,12 @@ export function StatisticsScreen(): React.JSX.Element {
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={[
+        styles.content,
+        // Same bottom room as the other pages: the floating tab bar never
+        // covers the last panel or the disclaimer caption.
+        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+      ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Statistics')}</Text>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill }]}>
         {/* iOS segmented control for the four periods (same mode switching). */}
@@ -273,7 +280,7 @@ function VerticalBars(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 12, paddingBottom: 104 },
+  content: { padding: 12 },
   pageTitle: { fontSize: typeScale.title, fontFamily: fonts.medium, marginBottom: 8 },
   panel: { borderRadius: 16, padding: 16 },
   navRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 },

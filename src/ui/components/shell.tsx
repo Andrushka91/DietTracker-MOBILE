@@ -1,11 +1,16 @@
 // Cross-cutting shell component (spec 6): the busy overlay (6.4), the ONE wall
 // the app raises while an operation the user started is still running.
 //
-// Two presentations:
-//   account (sign in / sign out)  a transparent, centred spinner + sentence
+// Three presentations:
+//   account (sign in)             a transparent, centred spinner + sentence
 //                                 straight on the dimmed page - the screen stays
 //                                 recognisable and nothing else can be pressed
 //                                 until the account change is finished
+//   sign-out upload               the same wall with a DETERMINATE bar from 0 %
+//                                 to 100 %: every change the app saves to the
+//                                 account moves it, and there is deliberately no
+//                                 "skip" control - the records must reach the
+//                                 cloud before this device gives them up
 //   heavy work (restore, preview) the same scrim with a card that adds the
 //                                 "this can take a few seconds" hint
 //
@@ -16,6 +21,7 @@ import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 
 import { fonts, cardShadow, themeColors } from '../theme';
 import { useApp, type BusyStage } from '../appContext';
+import type { SignOutProgress } from '../../cloud/session';
 import { t } from '../strings';
 
 /**
@@ -25,13 +31,32 @@ import { t } from '../strings';
  */
 const SIGNING_IN = 'Signing in…';
 
+/** RN-only wording of the sign-out upload bar (no Windows resource exists). */
+const UPLOAD_HINT = 'Please keep the app open until every change is saved on your account.';
+const UPLOAD_WAITING = 'Waiting for the connection… retrying';
+const UPLOAD_COUNT = '{0} of {1} change(s) saved';
+
+/** 0-1 of the bar; `finishing` is the full bar, `preparing` is an empty one. */
+function progressRatio(progress: SignOutProgress): number {
+  if (progress.stage === 'finishing') {
+    return 1;
+  }
+  if (progress.total <= 0) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, progress.uploaded / progress.total));
+}
+
 /** Dark translucent scrim + spinner + stage sentence + hint (spec 6.4). */
 export function BusyOverlay(): React.JSX.Element | null {
-  const { busy, isDark } = useApp();
+  const { busy, busyProgress, isDark } = useApp();
   if (busy === null) {
     return null;
   }
   const colors = themeColors(isDark);
+  if (busyProgress !== null) {
+    return <ProgressOverlay busy={busy} progress={busyProgress} />;
+  }
   // The account flow is short and purely informational: spinner + sentence sit
   // directly on the dimmed page (no card), with white ink because the scrim is
   // the same dark wash in both themes.
@@ -60,6 +85,51 @@ export function BusyOverlay(): React.JSX.Element | null {
     </Modal>
   );
 }
+/**
+ * The sign-out barrier: a blocking card with a bar that fills from 0 % to 100 %
+ * as every pending change reaches the account. No cancel/skip button exists on
+ * purpose - the data must be uploaded before the local cache is deleted, so the
+ * only way out is to let it finish (or to wait for the refusal, which keeps all
+ * data and returns to the page).
+ */
+function ProgressOverlay({
+  busy,
+  progress,
+}: {
+  busy: BusyStage;
+  progress: SignOutProgress;
+}): React.JSX.Element {
+  const { isDark } = useApp();
+  const colors = themeColors(isDark);
+  const ratio = progressRatio(progress);
+  const percent = Math.round(ratio * 100);
+  const title = progress.stage === 'finishing' ? t('Busy_SigningOut') : t('Busy_UploadingChanges');
+  const detail =
+    progress.stage === 'waiting'
+      ? UPLOAD_WAITING
+      : UPLOAD_COUNT.replace('{0}', String(progress.uploaded)).replace('{1}', String(progress.total));
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
+      <View style={[styles.scrim, { backgroundColor: colors.overlay }]}>
+        <View style={[styles.progressCard, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.progressTitle, { color: colors.text }]}>{title}</Text>
+          <View style={[styles.track, { backgroundColor: colors.surfaceVariant }]}>
+            <View style={[styles.fill, { width: `${percent}%`, backgroundColor: colors.accent }]} />
+          </View>
+          <View style={styles.progressMeta}>
+            <Text style={[styles.percent, { color: colors.text }]}>{`${percent}%`}</Text>
+            <Text style={[styles.progressDetail, { color: colors.textMuted }]} numberOfLines={1}>
+              {detail}
+            </Text>
+          </View>
+          <Text style={[styles.hint, { color: colors.textMuted }]}>{UPLOAD_HINT}</Text>
+          <Text style={[styles.stageCaption, { color: colors.textMuted }]}>{stageText(busy)}</Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 
 function stageText(stage: BusyStage): string {
   switch (stage) {
@@ -97,6 +167,33 @@ const styles = StyleSheet.create({
   },
   stage: { marginTop: 16, fontSize: 16, fontFamily: fonts.medium, textAlign: 'center' },
   hint: { marginTop: 6, fontSize: 13, textAlign: 'center' },
+  /**
+   * Sign-out upload bar: iOS alert proportions, a 8 pt rounded track and the
+   * accent fill - wide enough to read the percentage from arm's length.
+   */
+  progressCard: {
+    borderRadius: 20,
+    padding: 22,
+    alignItems: 'stretch',
+    width: '100%',
+    maxWidth: 330,
+    ...cardShadow,
+    elevation: 8,
+  },
+  progressTitle: { fontSize: 17, fontFamily: fonts.medium, textAlign: 'center' },
+  track: { height: 8, borderRadius: 4, marginTop: 18, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4 },
+  progressMeta: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    columnGap: 10,
+    marginTop: 8,
+  },
+  percent: { fontSize: 20, fontFamily: fonts.medium },
+  progressDetail: { flexShrink: 1, fontSize: 12, textAlign: 'right' },
+  /** The stage sentence repeats the operation under the bar (e.g. "Signing out…"). */
+  stageCaption: { marginTop: 10, fontSize: 12, textAlign: 'center' },
   /** Transparent presentation: only the spinner and its sentence. */
   transparentHost: { alignItems: 'center', justifyContent: 'center', rowGap: 14 },
   transparentStage: {

@@ -1,4 +1,6 @@
 <resources>
   <color name="splashscreen_background">#FFFFFF</color>
   <color name="colorPrimary">#023c69</color>
+  <!-- The blue of the Windows app icon: the adaptive icon's background layer. -->
+  <color name="ic_launcher_background">#1A7AC5</color>
 </resources>

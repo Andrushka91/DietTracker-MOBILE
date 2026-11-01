@@ -23,6 +23,7 @@ import {
   signInWithGoogle,
   signOutGoogle,
   type SignInResult,
+  type SignOutProgress,
   type SignOutResult,
 } from '../cloud/session';
 import { t } from './strings';
@@ -49,6 +50,11 @@ export interface AppState {
   syncState: SyncState;
   lastSyncSuccess: string | null;
   busy: BusyStage;
+  /**
+   * Determinate progress of the running busy stage (sign-out uploads). Null
+   * means "no measurable progress" - the overlay then shows the spinner.
+   */
+  busyProgress: SignOutProgress | null;
   /** Floating status caption (spec 6.6). */
   status: string | null;
   isDark: boolean;
@@ -80,6 +86,7 @@ const DEFAULT_STATE: AppState = {
   syncState: SyncState.NotConfigured,
   lastSyncSuccess: null,
   busy: null,
+  busyProgress: null,
   status: null,
   isDark: false,
   use12HourClock: false,
@@ -152,7 +159,12 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
     });
   }, [patch, state.profile]);
 
-  const setBusy = useCallback((stage: BusyStage) => patch({ busy: stage }), [patch]);
+  // A new stage always starts without a leftover bar; closing the overlay
+  // (null) drops both the stage and its progress.
+  const setBusy = useCallback(
+    (stage: BusyStage) => patch({ busy: stage, busyProgress: null }),
+    [patch],
+  );
 
   const showStatus = useCallback(
     (message: string) => {
@@ -229,13 +241,20 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
 
   const signOut = useCallback(
     async (discardChanges: boolean): Promise<SignOutResult> => {
-      const result = await signOutGoogle({ discardChanges });
+      // The account boundary reports every uploaded document, so the busy
+      // overlay paints a real 0-100 % bar: the user sees that the app is working
+      // through the outbox instead of guessing why the sign-out is "stuck".
+      const result = await signOutGoogle({
+        discardChanges,
+        onProgress: (progress) => patch({ busyProgress: progress }),
+      });
+      patch({ busyProgress: null });
       if (result.ok) {
         await boot();
       }
       return result;
     },
-    [boot],
+    [boot, patch],
   );
 
   const notifyChanged = useCallback(() => notifyLocalChange(), []);

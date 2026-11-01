@@ -3,9 +3,10 @@
 // summary, 7-column weekday header (Monday first) and the grid of day cells.
 //
 // Day cell colors: gray = untouched/pending, green = every meal eaten,
-// red = at least one missed; today keeps the accent fill around its day
-// number; tapping a cell selects it, long press / "Open day" opens the
-// Dashboard for that date. A decided day shows its confirmed share of the five
+// red = at least one missed; today paints its whole cell with the accent
+// colour (a blue square, no circle around the number); tapping a cell selects
+// it, long press / "Open day" opens
+// the Dashboard for that date. A decided day shows its confirmed share of the five
 // slots ("1/5") and, when it holds pictures, the photo marker - an untouched day
 // shows its number and nothing else, because a pending meal never produces a
 // figure.
@@ -18,6 +19,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DayProgress, addDays, formatDate, forDay, parseDate } from '../../domain/analytics';
 import { MealStatus } from '../../domain/enums';
@@ -40,6 +42,7 @@ import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t, tFmt } fr
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  const insets = useSafeAreaInsets();
   const today = formatDate(new Date());
   const [month, setMonth] = useState(today.slice(0, 7));
   const [selected, setSelected] = useState(today);
@@ -153,7 +156,12 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
-      contentContainerStyle={styles.content}>
+      contentContainerStyle={[
+        styles.content,
+        // The floating tab bar sits on top of the page: the last row of the
+        // selected day must stay readable above it.
+        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+      ]}>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
         {/* Month header: the arrows hug both edges and the month sits centered
             between them, iOS-calendar style. */}
@@ -207,9 +215,16 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                 const hasPhoto = progress !== undefined && progress.slots.some((s) => s.photoCount > 0);
                 const hasFigure = progress !== undefined && progress.decided > 0;
                 const state = dayState(progress);
-                // The state tint fills the cell; the selected day wears a
-                // translucent accent wash so the selection stays visible.
-                const background = isSelected ? tint(colors.accent, '2E') : state.fill;
+                // Today is a solid accent SQUARE (the whole day cell, not a
+                // circle around the number); a selected day keeps its
+                // translucent accent wash, anything else its state tint.
+                const background = isToday
+                  ? colors.accent
+                  : isSelected
+                    ? tint(colors.accent, '2E')
+                    : state.fill;
+                /** White ink on the solid accent fill of today. */
+                const onToday = isToday ? colors.accentFillText : null;
                 return (
                   <View key={cell.date} style={styles.cellHost}>
                     <Pressable
@@ -232,18 +247,21 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                         },
                       ]}>
                       <View style={styles.cellTopRow}>
-                        {/* Today keeps the accent fill around its day number only. */}
-                        <View style={[styles.dayBadge, isToday && { backgroundColor: colors.accent }]}>
+                        {/* The day number sits plainly in the cell - no badge,
+                            no circle; today is marked by the accent square. */}
+                        <View style={styles.dayBadge}>
                           <Text
                             style={[
                               styles.dayNumber,
-                              { color: isToday ? argb('#FFFFFFFF') : colors.text },
+                              { color: onToday ?? colors.text },
                             ]}>
                             {cell.date.slice(8)}
                           </Text>
                         </View>
                         {/* Photo marker of the day, right above the count. */}
-                        <Text style={[styles.cellFigure, { color: colors.textMuted }]} numberOfLines={1}>
+                        <Text
+                          style={[styles.cellFigure, { color: onToday ?? colors.textMuted }]}
+                          numberOfLines={1}>
                           {hasPhoto ? '\u{1F4F7}' : ''}
                         </Text>
                       </View>
@@ -253,7 +271,9 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                        * figure. The percentage of the day lives in the summary
                        * line above the grid, where it fits next to the counts.
                        */}
-                      <Text style={[styles.cellCount, { color: colors.textMuted }]} numberOfLines={1}>
+                      <Text
+                        style={[styles.cellCount, { color: onToday ?? colors.textMuted }]}
+                        numberOfLines={1}>
                         {hasFigure && progress !== undefined
                           ? `${progress.completed}/${progress.totalSlots}`
                           : ''}
@@ -342,7 +362,7 @@ function statusLabel(status: MealStatus): string {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: metrics.pagePadding, paddingBottom: 104 },
+  content: { padding: metrics.pagePadding },
   panel: { borderRadius: 16, padding: 14 },
   /** The arrows sit next to the centered month label, as one group. */
   monthRow: {
@@ -368,12 +388,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cellTopRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 2 },
-  /** Accent circle behind the day number of today (transparent otherwise). */
+  /** Plain host of the day number: no badge, no circle (today paints the cell). */
   dayBadge: {
     minWidth: 22,
     height: 22,
     paddingHorizontal: 3,
-    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -6,10 +6,12 @@
 //    a cancelled or offline sign-in costs nothing.
 //  - After a sign-in: the dataset of the account is downloaded at once
 //    (RebuildFromCloud), so the screens show that account only.
-//  - Sign-out: pending changes are uploaded first; if they cannot be uploaded
-//    the operation is REFUSED (deleting the cache would delete the only copy)
-//    unless the user explicitly discards them. Then credentials are removed
-//    and the whole local cache is deleted.
+//  - Sign-out: pending changes are uploaded first and the user WAITS for that
+//    upload: a progress bar reports every document (0-100 %) and there is no
+//    "sign out anyway" escape, because leaving the account would delete the
+//    only copy of those records. When the upload cannot be finished (offline,
+//    provider down, revoked credentials) the sign-out is REFUSED and the cache
+//    stays exactly where it is; the user simply tries again later.
 
 import { ProviderType, SyncOperationStatus, SyncStatus } from '../domain/enums';
 import { SyncTrigger } from '../domain/enums';
@@ -40,14 +42,22 @@ import {
 } from './syncEngine';
 
 /**
- * Upper bound for the upload that runs before a session change. The phone may be
+ * Upper bound for ONE upload attempt of the sign-out barrier. The phone may be
  * on a dying connection, and Google's endpoints are only bounded because the
- * Drive client now aborts its own requests - this deadline keeps the SIGN-OUT
- * spinner short even when that abort has not fired yet. When it wins, the
- * pending count decides: the user is offered "sign out anyway" instead of
- * watching a spinner.
+ * Drive client aborts its own requests - this deadline keeps the bar moving.
+ * Whatever an attempt did not settle is retried (the bar keeps the progress it
+ * already reported), and after the last attempt the sign-out is refused.
  */
 const ACCOUNT_FLUSH_DEADLINE_MS = 8000;
+
+/**
+ * How many times the sign-out barrier retries the outbox, and how long it waits
+ * between two attempts. Four attempts with a growing pause ride out a short
+ * network drop; a device that is truly offline ends the barrier in ~10 s with a
+ * clear message instead of hiding the user behind a modal forever.
+ */
+const SIGN_OUT_UPLOAD_ATTEMPTS = 4;
+const SIGN_OUT_UPLOAD_RETRY_MS = 1500;
 
 /** Resolves to null when `ms` elapses first; never leaves a dangling rejection. */
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
@@ -97,6 +107,103 @@ async function flushOutbox(accountId: string): Promise<void> {
     runCycle({ trigger: SyncTrigger.Manual, pushOnly: true }),
     ACCOUNT_FLUSH_DEADLINE_MS,
   );
+}
+
+/** Waits `ms` without blocking the JS thread (the progress bar keeps moving). */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * One frame of the sign-out barrier, consumed by the busy overlay (shell.tsx):
+ *
+ *   preparing   the outbox is being counted          (bar at 0 %)
+ *   uploading   every settled document moves the bar (uploaded / total)
+ *   waiting     an attempt failed, the next is queued (bar holds its position)
+ *   finishing   everything is uploaded, the cache is cleared (bar at 100 %)
+ */
+export interface SignOutProgress {
+  stage: 'preparing' | 'uploading' | 'waiting' | 'finishing';
+  uploaded: number;
+  total: number;
+}
+
+/**
+ * Sign-in errors that waiting cannot repair: a rejected/removed grant or a
+ * missing client configuration ends the sign-out barrier at once.
+ */
+const FATAL_AUTH_ERRORS = new Set([
+  'Auth_google_unauthorized',
+  'Auth_google_insufficient_permissions',
+  'Auth_google_refresh_rejected',
+  'Auth_google_refresh_token_missing',
+  'Auth_google_not_configured',
+  'Auth_auth_no_account',
+]);
+
+/**
+ * Empties the outbox before a sign-out, and never gives up while a change is
+ * still only on this device:
+ *
+ *  - the backoff window of a failed operation is ignored (the user is already
+ *    waiting behind the progress bar, a minute-long wait is unacceptable),
+ *  - each attempt is deadline-bounded, and whatever it did not settle is retried
+ *    with the progress it already reached - the bar never jumps backwards,
+ *  - an outbox that keeps shrinking is allowed to take as long as it needs (a
+ *    first sign-out can hold hundreds of photographs): only `attempts` rounds in
+ *    a row WITHOUT any progress end the barrier,
+ *  - a rejected grant ends it at once (retrying revoked credentials only burns
+ *    time): the caller then REFUSES the sign-out instead of deleting the only
+ *    copy of those records.
+ */
+async function uploadOutboxBeforeSignOut(
+  accountId: string,
+  initialPending: number,
+  options: SignOutOptions,
+  report: (progress: SignOutProgress) => void,
+): Promise<{ pending: number; error?: string }> {
+  const attempts = Math.max(1, options.maxUploadAttempts ?? SIGN_OUT_UPLOAD_ATTEMPTS);
+  const retryDelay = Math.max(0, options.retryDelayMs ?? SIGN_OUT_UPLOAD_RETRY_MS);
+  const total = initialPending;
+  let pending = initialPending;
+  let stalledAttempts = 0;
+
+  while (pending > 0 && stalledAttempts < attempts) {
+    // Every attempt starts where the previous one stopped: the bar only moves
+    // forward, even when a retry sends the same document again.
+    const alreadySent = total - pending;
+    report({ stage: 'uploading', uploaded: alreadySent, total });
+    const cycle = await withDeadline(
+      runCycle({
+        trigger: SyncTrigger.Manual,
+        pushOnly: true,
+        ignoreBackoff: true,
+        onUploadProgress: (uploaded) => {
+          // A retry sends the remaining documents: `alreadySent` keeps the
+          // bar where the previous attempt left it and never lets it rewind.
+          const sent = Math.min(alreadySent + uploaded, total);
+          report({ stage: 'uploading', uploaded: sent, total });
+        },
+      }),
+      ACCOUNT_FLUSH_DEADLINE_MS,
+    );
+    const remaining = await countPendingOperations(accountId);
+    if (cycle !== null && cycle.error !== undefined && FATAL_AUTH_ERRORS.has(cycle.error)) {
+      return { pending: remaining, error: cycle.error };
+    }
+    // Progress resets the budget: the barrier only counts rounds that achieved
+    // nothing, which is what a dead connection looks like.
+    stalledAttempts = remaining < pending ? 0 : stalledAttempts + 1;
+    pending = remaining;
+    if (pending > 0 && stalledAttempts < attempts) {
+      report({ stage: 'waiting', uploaded: Math.max(0, total - pending), total });
+      await delay(retryDelay);
+    }
+  }
+
+  return { pending, error: pending > 0 ? 'Account_SignOutPendingDetail' : undefined };
 }
 
 export interface SignInResult {
@@ -281,14 +388,29 @@ export interface SignOutResult {
   error?: string;
 }
 
+export interface SignOutOptions {
+  /**
+   * Internal escape hatch used only by the unit tests (there is NO user-facing
+   * "sign out without uploading"): true skips the upload barrier entirely.
+   */
+  discardChanges?: boolean;
+  /** Progress frames for the 0-100 % bar of the busy overlay. */
+  onProgress?: (progress: SignOutProgress) => void;
+  /** Test tuning: how many upload attempts / how long between them. */
+  maxUploadAttempts?: number;
+  retryDelayMs?: number;
+}
+
 /**
- * Sign-out: upload pending -> credentials removed -> local cache deleted.
- * When changes cannot be uploaded the operation is refused unless the user
- * explicitly discards them (spec 1.2 / Account_SignOutPending*).
+ * Sign-out: upload pending (0-100 % bar, no way to skip) -> credentials removed
+ * -> local cache deleted.
+ *
+ * The upload is NOT optional: nothing on this phone may be deleted while it is
+ * still the only copy of a record. When the outbox cannot be emptied the whole
+ * operation is refused and the cache stays untouched - the user retries later.
  */
-export async function signOutGoogle(options: {
-  discardChanges: boolean;
-}): Promise<SignOutResult> {
+export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignOutResult> {
+  const report = options.onProgress ?? (() => undefined);
   const account = await getActiveAccount();
   if (account === null) {
     // Guest/local session: nothing to upload, just clear local auth state.
@@ -297,22 +419,21 @@ export async function signOutGoogle(options: {
     return { ok: true, pending: 0 };
   }
 
-  if (!options.discardChanges) {
-    // Upload only what is actually still waiting, and only for as long as a tap
-    // can reasonably keep a spinner on screen (ACCOUNT_FLUSH_DEADLINE_MS). An
-    // idle account - or one whose only entries wait out their backoff - never
-    // touches the network at all, which is what made this feel stuck before:
-    // the flush began with a full Drive listing.
-    if ((await countPendingOperations(account.id)) > 0) {
-      await flushOutbox(account.id);
-    }
-    const pending = await countPendingOperations(account.id);
+  const pending = await countPendingOperations(account.id);
+  if (options.discardChanges !== true) {
+    report({ stage: 'preparing', uploaded: 0, total: pending });
     if (pending > 0) {
-      // Nothing was purged yet: the upload may still complete in the background,
-      // so the user can simply try again, or explicitly discard.
-      return { ok: false, pending, error: 'Account_SignOutPendingDetail' };
+      const upload = await uploadOutboxBeforeSignOut(account.id, pending, options, report);
+      if (upload.pending > 0) {
+        // Nothing was purged yet: the local copy is intact and the user can try
+        // again as soon as the connection (or the account) is back.
+        return { ok: false, pending: upload.pending, error: upload.error };
+      }
     }
   }
+  // The bar reads 100 % while the credentials and the cache are removed - the
+  // last step of the operation the user started.
+  report({ stage: 'finishing', uploaded: pending, total: pending });
 
   // The cache of this account ends here. Whatever cycle is still in flight (a
   // flush that hit the deadline, the periodic pull) must stop before the purge
