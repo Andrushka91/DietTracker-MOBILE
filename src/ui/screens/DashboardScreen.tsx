@@ -498,20 +498,44 @@ export function DashboardScreen({
           actions and the status caption (spec 8.2). */}
       <View style={styles.header}>
         <Text style={[styles.dateTitle, { color: colors.text }]}>{formatLongDate(date)}</Text>
+        {/* Day navigation: the arrows say which way, the words say what moves.
+            One compact row, so the date stays the page title. */}
         <View style={styles.navRow}>
-          <Bar label={t('Dashboard_PreviousDay')} onPress={() => setDate(addDays(date, -1))} colors={colors} />
-          <Bar label={t('Common_Today')} onPress={() => setDate(formatDate(new Date()))} colors={colors} />
-          <Bar label={t('Dashboard_NextDay')} onPress={() => setDate(addDays(date, 1))} colors={colors} />
+          <IconButton
+            label={t('Dashboard_PreviousDay')}
+            icon="chevron-back"
+            onPress={() => setDate(addDays(date, -1))}
+            colors={colors}
+          />
+          <Bar
+            compact
+            label={t('Common_Today')}
+            onPress={() => setDate(formatDate(new Date()))}
+            colors={colors}
+          />
+          <IconButton
+            label={t('Dashboard_NextDay')}
+            icon="chevron-forward"
+            onPress={() => setDate(addDays(date, 1))}
+            colors={colors}
+          />
         </View>
         {progress !== null && (
           <>
-            <View style={[styles.track, { backgroundColor: colors.border }]}>
-              <View
-                style={[
-                  styles.fill,
-                  { width: `${progress.percentage}%`, backgroundColor: colors.accent },
-                ]}
-              />
+            {/* Progress: the bar AND its number, so the width is never the only
+                way to read the day. */}
+            <View style={styles.progressRow}>
+              <View style={[styles.track, { backgroundColor: colors.hairline }]}>
+                <View
+                  style={[
+                    styles.fill,
+                    { width: `${progress.percentage}%`, backgroundColor: colors.accent },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.progressValue, { color: colors.textSecondary }]}>
+                {`${progress.percentage}%`}
+              </Text>
             </View>
             <View style={styles.counters}>
               <Counter label={t('Dashboard_CountDone')} value={progress.completed} color={colors.done} colors={colors} />
@@ -521,36 +545,43 @@ export function DashboardScreen({
           </>
         )}
         <View style={styles.actionsRow}>
-          {/* Save actions on the left, the two day-wide confirmations on the right. */}
-          <Bar label={t('Dashboard_SaveDayTemplate')} onPress={handleSaveDayTemplate} colors={colors} />
+          <Bar compact label={t('Dashboard_SaveDayTemplate')} onPress={handleSaveDayTemplate} colors={colors} />
           <Bar
+            compact
             label={t('Dashboard_SaveAll')}
             onPress={handleSaveAll}
             disabled={openEditors.length === 0}
             colors={colors}
           />
-          <View style={styles.actionsGap} />
-          {/* Cross on the left, check on the right - the same order the meal
-              cards use, so the pair reads identically everywhere. */}
-          <IconButton
-            label="Mark all meals as MISSED"
+        </View>
+        {/* Day-wide confirmations on their own right-aligned line: two labelled
+            buttons that used to be two unlabelled ✕ / ✓ chips. */}
+        <View style={styles.dayActions}>
+          <Bar
+            compact
             icon="close"
+            iconColor={colors.missed}
+            label={t('Rn_MarkAllMissed')}
             onPress={() => void handleMarkAllMissed()}
             disabled={!canMarkMissed}
-            tint={colors.missed}
             colors={colors}
           />
-          <IconButton
-            label="Mark all meals as DONE"
+          <Bar
+            compact
             icon="checkmark"
+            iconColor={colors.done}
+            label={t('Rn_MarkAllDone')}
             onPress={() => void handleMarkAllDone()}
             disabled={!canMarkDone}
-            tint={colors.done}
             colors={colors}
           />
         </View>
         {status !== null && <Text style={[styles.caption, { color: colors.textMuted }]}>{status}</Text>}
       </View>
+
+      {/* A quiet section caption groups the five cards (and separates them from
+          the day header) without wrapping them in another container. */}
+      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('Rn_Meals')}</Text>
 
       {/* five permanent cards - order always preserved */}
       <View style={styles.grid}>
@@ -623,29 +654,48 @@ const styles = StyleSheet.create({
   },
   header: { paddingBottom: 2 },
   /** The date is the page title: 700 with a little negative tracking. */
-  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, marginBottom: 6 },
+  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, marginBottom: 10 },
   navRow: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.controlGap },
-  track: { height: 8, borderRadius: 4, marginTop: 10, overflow: 'hidden' },
-  fill: { height: 8, borderRadius: 4 },
+  /** Bar plus its percentage, so the day can be read without measuring a bar. */
+  progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginTop: 12 },
+  track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 3 },
+  progressValue: { fontSize: 12, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
   counters: { flexDirection: 'row', alignItems: 'center', columnGap: 18, marginTop: 12 },
-  counter: { alignItems: 'center', flexDirection: 'row', columnGap: 7 },
+  counter: { alignItems: 'center', flexDirection: 'row', columnGap: 6 },
   /** iOS-style round counter dot. */
-  chip: { width: 10, height: 10, borderRadius: 5 },
+  chip: { width: 8, height: 8, borderRadius: 4 },
   /** Tabular figures keep the three counters aligned as the numbers change. */
-  counterValue: { fontFamily: fonts.medium, fontSize: 18, fontVariant: ['tabular-nums'] },
+  counterValue: { fontFamily: fonts.medium, fontSize: 17, fontVariant: ['tabular-nums'] },
   counterLabel: { fontSize: 12 },
-  /** The right padding lines the ✓ / ✕ pair up with the same pair on the cards. */
+  /** Day actions wrap naturally instead of squeezing four labels into one line. */
   actionsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: metrics.controlGap,
-    marginTop: 10,
-    paddingRight: metrics.spacingSmall,
+    marginTop: 12,
   },
-  /** Pushes the check / cross pair to the right edge of the action row. */
-  actionsGap: { flex: 1, minWidth: metrics.controlGap },
+  /** Day-wide confirmations: one right-aligned line under the save actions. */
+  dayActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: metrics.controlGap,
+    marginTop: 6,
+  },
   caption: { marginTop: 8, fontSize: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.gridGap, marginTop: metrics.gridGap },
+  /** Small caps section caption between the day header and the meal cards. */
+  sectionLabel: {
+    fontSize: 12,
+    fontFamily: fonts.medium,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+    marginTop: 18,
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.gridGap },
   cell: { flexBasis: '48.5%', flexGrow: 1 },
   spanFull: { flexBasis: '100%', flexGrow: 1 },
 });
