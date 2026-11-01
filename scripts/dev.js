@@ -5,6 +5,7 @@
  *   npm run dev              emulator + build + install + Metro + launch
  *   npm run dev:fast         Metro + relaunch only (JS/TS-only changes)
  *   npm run emulator         only start the AVD and wait until it is booted
+ *   npm run emulator:apk     emulator + install the release APK + launch it (no Metro)
  *   npm run emulator:stop    graceful shutdown (adb emu kill, snapshot-safe)
  *
  * This replaces the old scripts\dev.bat -> build-android.bat -> expo run:android
@@ -21,10 +22,17 @@
  *                      in THIS window so `r` / `j` keys and red boxes work
  *   [5/5] Launch       adb reverse tcp:8081 + am start com.diettracker.app
  *
+ * `npm run emulator:apk` is the same sequence without a build and without Metro:
+ * it installs the APK that is already in release\ (the one the release page
+ * ships, universal on an emulator because x86_64 cannot run the arm64 build) and
+ * starts it - i.e. exactly what a user gets after sideloading the download.
+ *
  * Flags (all optional):
  *   -h, --help          this text
  *   -s, --skip-build    no Gradle install (fast loop for JS changes)
  *       --emulator-only only start / wait for the emulator
+ *       --apk           install the release APK from release\ and launch it
+ *                       (implies --skip-build; Metro is not started)
  *       --stop          gracefully shut the emulator down
  *       --cold          cold boot the AVD (-no-snapshot)
  *       --avd <name>    AVD to start (default: Medium_Phone_API_37.0, else first)
@@ -45,6 +53,8 @@ const ROOT = path.resolve(__dirname, '..');
 const ANDROID_DIR = path.join(ROOT, 'android');
 const LOG_FILE = path.join(ROOT, 'android-build.log');
 const APK_FILE = path.join(ANDROID_DIR, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+/** `npm run apk` writes the two standalone APKs here (ignored by git, published on the release page). */
+const RELEASE_DIR = path.join(ROOT, 'release');
 const PACKAGE_ID = 'com.diettracker.app';
 const MAIN_ACTIVITY = `${PACKAGE_ID}/.MainActivity`;
 /** URL scheme from app.json - the prefix of the dev client deep link. */
@@ -88,6 +98,7 @@ const opts = {
   help: has('--help', '-h'),
   skipBuild: has('--skip-build', '-s'),
   emulatorOnly: has('--emulator-only'),
+  apk: has('--apk', '--release-apk'),
   stop: has('--stop'),
   cold: has('--cold'),
   reset: has('--reset'),
@@ -627,6 +638,104 @@ async function buildAndInstall(tools, target) {
 
 
 // ---------------------------------------------------------------------------
+// [3/4] --apk : install the standalone release APK from release\ and launch it
+// ---------------------------------------------------------------------------
+
+/**
+ * `versionName` of the Android build (e.g. "1.0.0.0") - the same string
+ * scripts\build-apk.bat puts in the file name, so a version bump needs no edit
+ * here. Null when it cannot be read.
+ */
+function releaseVersion() {
+  try {
+    const gradle = fs.readFileSync(path.join(ANDROID_DIR, 'app', 'build.gradle'), 'utf8');
+    const match = /versionName\s+"([^"]+)"/.exec(gradle);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Picks the release APK that THIS device can run: the arm64 build only on an
+ * arm64 device (an x86_64 emulator cannot install it - the package simply
+ * refuses with INSTALL_FAILED_NO_MATCHING_ABIS), the universal one everywhere
+ * else.
+ */
+function releaseApkFor(tools, target) {
+  const abi = deviceAbi(tools, target.serial);
+  const version = releaseVersion();
+  if (version === null) {
+    fail('android/app/build.gradle has no versionName.');
+  }
+  const arm64 = path.join(RELEASE_DIR, `DietTracker-${version}-arm64-v8a.apk`);
+  const universal = path.join(RELEASE_DIR, `DietTracker-${version}-universal.apk`);
+  const preferred = abi.startsWith('arm64') ? [arm64, universal] : [universal, arm64];
+  const found = preferred.find((file) => fs.existsSync(file));
+  if (!found) {
+    fail(`no release APK for version ${version} in release\\.`, [
+      'Build it first:  npm run apk',
+      `Expected:  ${path.relative(ROOT, preferred[0])}`,
+    ]);
+  }
+  return { file: found, abi, version };
+}
+
+async function installReleaseApk(tools, target) {
+  step('Install');
+  const { file, abi, version } = releaseApkFor(tools, target);
+  const name = path.basename(file);
+  const size = megabytes(fs.statSync(file).size);
+
+  // A release APK is signed with the debug key too, so `-r` updates an installed
+  // debug build and vice versa; `-d` keeps that true across version codes.
+  const install = run(tools.adb, ['-s', target.serial, 'install', '-r', '-d', file], {
+    env: tools.env,
+    timeoutMs: 180000,
+  });
+  const output = `${install.stdout || ''}${install.stderr || ''}`;
+  if (install.code !== 0 || !/Success/i.test(output)) {
+    const hints = [
+      output.trim(),
+      `Retry:  adb -s ${target.serial} install -r -d "${file}"`,
+    ];
+    if (/INSTALL_FAILED_UPDATE_INCOMPATIBLE|signatures do not match/i.test(output)) {
+      hints.push('An APK with another signature is installed - remove it once:');
+      hints.push(`  adb -s ${target.serial} uninstall ${PACKAGE_ID}`);
+    }
+    if (/INSTALL_FAILED_NO_MATCHING_ABIS/i.test(output)) {
+      hints.push(`${name} does not contain the ABI of ${target.serial} (${abi || 'unknown'}) - use the universal APK.`);
+    }
+    fail(`adb install failed for ${name}.`, hints);
+  }
+  ok(`${name} (${size}, ${abi || 'unknown ABI'}, version ${version}) installed`);
+  return { file, version };
+}
+
+/** Starts the installed release app: its JavaScript is bundled, so no Metro and no deep link. */
+function launchReleaseApp(tools, target) {
+  step('Launch');
+  const adb = (adbArgs) => run(tools.adb, ['-s', target.serial, ...adbArgs], { env: tools.env });
+
+  if (opts.reset) {
+    adb(['shell', 'pm', 'clear', PACKAGE_ID]);
+    info('app data cleared - the next start is a first run');
+  }
+  adb(['shell', 'am', 'force-stop', PACKAGE_ID]);
+  const started = adb(['shell', 'am', 'start', '-W', '-n', MAIN_ACTIVITY]);
+  if (started.code !== 0 || /Error/i.test(started.stdout)) {
+    fail('could not launch the release app.', [
+      started.stdout || '',
+      started.stderr || '',
+      `adb -s ${target.serial} shell am start -n ${MAIN_ACTIVITY}`,
+    ]);
+  }
+  const pid = adb(['shell', 'pidof', PACKAGE_ID]).stdout.trim();
+  ok(`${PACKAGE_ID}${pid ? ` (pid ${pid})` : ''} started from the release APK`);
+}
+
+
+// ---------------------------------------------------------------------------
 // [4/..] Metro - reuse a running server, otherwise own one in this window
 // ---------------------------------------------------------------------------
 
@@ -775,6 +884,18 @@ function printSummary(target, ownsMetro) {
   console.log('');
 }
 
+/** Summary of `--apk`: the shipped build, so the reload lines of a dev session do not apply. */
+function printApkSummary(target, release) {
+  console.log('');
+  console.log(`Ready - the release build runs on ${target.serial}.`);
+  info('this is the APK from the release page: bundled JavaScript, no Metro, no dev menu');
+  info(`${path.basename(release.file)}  (version ${release.version})`);
+  info('npm run emulator:stop   shut the emulator down gracefully (snapshot-safe)');
+  info('npm run emulator:apk    install / relaunch it again');
+  info('npm run dev             development session with hot reload instead');
+  console.log('');
+}
+
 
 
 // ---------------------------------------------------------------------------
@@ -838,6 +959,9 @@ function computeSteps() {
   if (opts.emulatorOnly) {
     return 2; // toolchain, device
   }
+  if (opts.apk) {
+    return 4; // toolchain, device, install, launch
+  }
   return opts.skipBuild ? 4 : 5; // + Metro + launch (+ build)
 }
 
@@ -861,6 +985,15 @@ async function main() {
     console.log(`Emulator ${target.serial} is ready - start a session with:  npm run dev`);
     return;
   }
+
+  // --apk: the shipped build, installed and launched as a user would run it.
+  if (opts.apk) {
+    const release = await installReleaseApk(tools, target);
+    launchReleaseApp(tools, target);
+    printApkSummary(target, release);
+    return;
+  }
+
   if (!opts.skipBuild) {
     await buildAndInstall(tools, target);
   }

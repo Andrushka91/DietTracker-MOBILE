@@ -6,6 +6,7 @@
     "dev": "node scripts/dev.js",
     "dev:fast": "node scripts/dev.js --skip-build",
     "emulator": "node scripts/dev.js --emulator-only",
+    "emulator:apk": "node scripts/dev.js --apk",
     "emulator:stop": "node scripts/dev.js --stop",
     "apk": "scripts\\build-apk.bat",
     "start": "expo start",

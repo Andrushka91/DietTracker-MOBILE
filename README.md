@@ -85,6 +85,7 @@ Something not working? Jump to [Troubleshooting](#troubleshooting).
 | `npm run dev:fast` | Same session without Gradle (Metro + relaunch) — for JS/TS changes | Android SDK + an installed debug build |
 | `npm run apk` | **Standalone release APKs** (JavaScript bundled, no Metro) into `release\` | Android SDK |
 | `npm run emulator` | Start the AVD and wait until Android is booted (no build, no Metro) | Android SDK |
+| `npm run emulator:apk` | **Run the shipped build**: boot/reuse the AVD, install the APK from `release\` (universal on an emulator) and launch it — no Gradle, no Metro | Android SDK + `npm run apk` once |
 | `npm run emulator:stop` | Gracefully stop the emulator (snapshot-safe `adb emu kill`) | Android SDK |
 | `npm run ios` | Local build + install (`expo run:ios`) | macOS + Xcode |
 | `npm run generate` | Re-embed migrations + English strings from the Windows sources | Windows repo one level up |
@@ -174,8 +175,42 @@ without Expo Go.
 ```bash
 npm install                # once per machine
 npm run dev                # emulator + build + install + Metro + app, in one go
+npm run emulator:apk       # OR: emulator + the shipped release APK + app (no Metro)
 npm run emulator:stop      # when done: graceful, snapshot-safe shutdown
 ```
+
+### Try the APK that users download — `npm run emulator:apk`
+
+`npm run apk` builds the standalone APKs into `release\`; `npm run emulator:apk`
+does the rest in one command, exactly as a user would experience the download:
+
+```
+[1/4] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
+[2/4] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - already running
+[3/4] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[4/4] Launch      OK    com.diettracker.app (pid 13112) started from the release APK
+
+Ready - the release build runs on emulator-5554.
+       this is the APK from the release page: bundled JavaScript, no Metro, no dev menu
+       npm run emulator:stop   shut the emulator down gracefully (snapshot-safe)
+```
+
+What it does, and why it is a separate command from `npm run dev`:
+
+* **The emulator is booted or reused for you** — the same device step (`--avd`,
+  `--device`, `--cold`, a still-booting serial is waited for) as `npm run dev`.
+* **It installs `release\DietTracker-<version>-*.apk`**, picking the file the
+  device can actually run: the **universal** APK on an x86_64 emulator (the
+  arm64 build is refused with `INSTALL_FAILED_NO_MATCHING_ABIS`), the arm64 one
+  on an arm64 phone. The version comes from `android/app/build.gradle`, so a
+  version bump needs no change here.
+* **No Metro and no dev client**: the JavaScript is bundled inside the APK, so
+  the app is opened with a plain `am start` and has no reload/dev menu — this is
+  the build the release page ships. `--reset` clears the data first for a
+  first-run check.
+* **It updates instead of replacing**: the release APK is signed with the same
+  debug key, so `adb install -r -d` keeps the app's data (a signature mismatch
+  prints the one `adb uninstall` line that fixes it).
 
 `npm run dev` (`scripts/dev.js`) is the whole flow in one readable sequence —
 every step prints the value it used, or the exact command that fixes it:
@@ -219,6 +254,7 @@ corrupts quick-boot snapshots.
 |---|---|
 | `npm run dev:fast` | `--skip-build`: Metro + relaunch only — the loop for JS/TS changes |
 | `npm run emulator` | `--emulator-only`: just start the AVD and wait for boot |
+| `npm run emulator:apk` | `--apk`: install the APK from `release\` and launch it (no build, no Metro) |
 | `npm run emulator:stop` | `--stop`: `adb emu kill`, waits for the emulator to disappear |
 | `--cold` | cold boot (`-no-snapshot`) when a saved snapshot is corrupt |
 | `--avd <name>` | start another AVD (default `Medium_Phone_API_37.0`, else the first) |
