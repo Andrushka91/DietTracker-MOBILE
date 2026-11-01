@@ -12,7 +12,8 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'rea
 import { MealPhoto } from '../../domain/models';
 import { thumbnailUri } from '../../data/photoStore';
 import { t } from '../strings';
-import { fonts, argb, type ThemeColors } from '../theme';
+import { argb, type ThemeColors, metrics } from '../theme';
+import { Icon } from './icons';
 
 /**
  * Tile edge in points. The strip has its own row above the action buttons, so
@@ -55,17 +56,17 @@ export function PhotoGallery(props: {
                 accessibilityRole="button"
                 accessibilityLabel={`${t('Photo_Show')} ${photo.originalFileName}`}
                 onPress={() => props.onOpen(photo)}
-                hitSlop={8}
+                hitSlop={10}
                 style={styles.expand}>
-                <Text style={styles.expandText}>{'\u2922'}</Text>
+                <Icon name="expand-outline" size={12} color={argb('#FFFFFFFF')} />
               </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('Common_Close')}
                 onPress={() => props.onRemove(photo)}
-                hitSlop={8}
+                hitSlop={10}
                 style={styles.remove}>
-                <Text style={styles.removeText}>{'\u2715'}</Text>
+                <Icon name="close" size={12} color={argb('#FFFFFFFF')} />
               </Pressable>
             </View>
           ))}
@@ -90,43 +91,40 @@ const styles = StyleSheet.create({
   tileHost: {
     width: TILE,
     height: TILE,
-    borderRadius: 8,
+    borderRadius: metrics.radiusSmall,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
   tile: { width: '100%', height: '100%' },
   /**
-   * Small dark badges over the photograph - readable on any picture, and the
-   * whole 20 pt square is the touch target (hitSlop adds 8 pt around it).
-   * The X keeps its corner (top-right, where it always was) and "Show" sits in
-   * the opposite one, so a thumb never removes a picture while aiming for the
-   * full-screen viewer.
+   * Small dark badges over the photograph - readable on any picture. 24 pt with
+   * a 10 pt hitSlop gives a 44 pt touch target; the X keeps its top-right corner
+   * and "Show" the opposite one, so a thumb never removes a picture while
+   * aiming for the full-screen viewer.
    */
   expand: {
     position: 'absolute',
     bottom: 3,
     left: 3,
-    width: 20,
-    height: 20,
-    borderRadius: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: argb('#99000000'),
   },
-  expandText: { color: argb('#FFFFFFFF'), fontSize: 12, lineHeight: 14 },
   remove: {
     position: 'absolute',
     top: 3,
     right: 3,
-    width: 20,
-    height: 20,
-    borderRadius: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: argb('#99000000'),
   },
-  removeText: { color: argb('#FFFFFFFF'), fontSize: 11, fontFamily: fonts.medium, lineHeight: 13 },
   /** Compact progress line under the thumbnails (no extra tile in the row). */
   uploadRow: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginTop: 6 },
-  caption: { fontSize: 11 },
+  caption: { fontSize: 12 },
 });

@@ -4,11 +4,34 @@
 import { STRINGS } from './strings.generated';
 
 /**
+ * Wording that only the phone UI needs. The generated table mirrors the Windows
+ * `Resources.resw`, so a key that has no Windows counterpart lives here instead
+ * of being edited into the generated file (which `npm run generate` overwrites).
+ * These are presentation labels only - no business string is defined here.
+ */
+export const RN_STRINGS: Record<string, string> = {
+  /** Section caption above the five meal cards on the dashboard. */
+  Rn_Meals: 'Meals',
+  /** Placeholder on a meal card that has neither a title nor a description. */
+  Rn_MealEmpty: 'No meal recorded yet',
+  /** Short labels for the day-wide confirmations (accessible names stay verbose). */
+  Rn_MarkAllDone: 'All done',
+  Rn_MarkAllMissed: 'All missed',
+  /** Segmented periods on the statistics page (the full labels are sentences). */
+  Rn_PeriodDay: 'Day',
+  Rn_PeriodWeek: 'Week',
+  Rn_PeriodMonth: 'Month',
+  Rn_PeriodYear: 'Year',
+  /** Metadata caption on a template row. */
+  Rn_Updated: 'Updated',
+};
+
+/**
  * Looks up a resource key. Missing keys return the key itself so a typo is
  * visible in the UI instead of a crash.
  */
 export function t(key: string): string {
-  return STRINGS[key] ?? key;
+  return STRINGS[key] ?? RN_STRINGS[key] ?? key;
 }
 
 /**
@@ -92,6 +115,19 @@ export function formatLongDate(date: string): string {
 }
 
 /**
+ * The same date without the weekday: "30 October 2026". Used where the weekday
+ * is noise (a template's updated-at line, a template named after its day) and
+ * where the full form would be truncated by a narrow row.
+ */
+export function formatMediumDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day || month < 1 || month > 12) {
+    return date;
+  }
+  return `${day} ${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+/**
  * The Windows calendar month header: "October 2026". The month argument is the
  * 'yyyy-MM' key the calendar grid works with, so an unparsable value falls back
  * to that key instead of blanking the header.
@@ -104,6 +140,18 @@ export function formatMonthLabel(month: string): string {
     return month;
   }
   return `${MONTH_NAMES[monthIndex]} ${year}`;
+}
+
+/**
+ * Three-letter month caption for the yearly chart ("Jan" ... "Dec"). Twelve
+ * two-digit numbers on a chart scale force the reader to count columns; the
+ * abbreviation is the same width and says which month it is.
+ */
+export function formatMonthShort(month: number): string {
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return String(month);
+  }
+  return MONTH_NAMES[month - 1].slice(0, 3);
 }
 
 /** Meal display name for a permanent slot key. */

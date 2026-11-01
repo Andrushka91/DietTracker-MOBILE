@@ -69,6 +69,15 @@ export interface ThemeColors {
   cardFill: string;
   surfaceVariant: string;
   border: string;
+  /**
+   * Hairline between a card's content and its action row. One step lighter than
+   * `border`, so a divider separates without drawing a second frame.
+   */
+  hairline: string;
+  /** Fill of a disabled control (never a washed accent - see buttons.tsx). */
+  disabledFill: string;
+  /** Ink of a disabled control: muted, but still readable. */
+  disabledText: string;
   text: string;
   textSecondary: string;
   textMuted: string;
@@ -97,12 +106,13 @@ export interface ThemeColors {
 }
 
 /**
- * State colours - ONE definition shared by every card frame, pill and counter,
- * so "done" looks identical on the dashboard, the calendar and the statistics.
- * Muted on purpose: a screen full of meal cards must not shout.
+ * State colours - ONE definition shared by every card rail, pill, counter and
+ * calendar day, so "done" looks identical on the dashboard, the calendar and
+ * the statistics. Muted on purpose: a screen full of meals must not shout.
+ * The light values are deep enough to keep white pill text above 4.5:1.
  */
-export const DONE_COLOR = argb('#FF1F9D63');
-export const MISSED_COLOR = argb('#FFD64545');
+export const DONE_COLOR = argb('#FF157A4C');
+export const MISSED_COLOR = argb('#FFC43A3A');
 export const PENDING_COLOR = argb('#FF8A93A3');
 /** Calendar cells keep a quiet wash for a day with nothing decided. */
 export const CELL_PENDING_COLOR = argb('#FFE9EEF5');
@@ -123,12 +133,17 @@ export const lightColors: ThemeColors = {
   cardFill: argb('#FFFFFFFF'),
   // Controls, segments, inputs and icon-button chrome: a touch deeper than the
   // page tint so a chip reads as a chip on both the page and a white card.
-  surfaceVariant: argb('#FFE6EBF2'),
-  border: argb('#FFD7DEE8'),
+  surfaceVariant: argb('#FFE9EEF5'),
+  border: argb('#FFDCE3EC'),
+  hairline: argb('#FFEDF1F6'),
+  disabledFill: argb('#FFE9EEF5'),
+  disabledText: argb('#FF7C8798'),
   // Ink: near-black with a blue cast, then two quiet steps for meta text.
+  // Both secondary steps keep at least 4.5:1 on the page AND on a white card -
+  // the previous muted grey (#98A2B3) was ~2.6:1 and failed for 11-12 pt text.
   text: argb('#FF101828'),
-  textSecondary: argb('#FF475467'),
-  textMuted: argb('#FF98A2B3'),
+  textSecondary: argb('#FF3F4A5A'),
+  textMuted: argb('#FF667085'),
   onCardHeader: argb('#FFFFFFFF'),
   onState: argb('#FFFFFFFF'),
   done: DONE_COLOR,
@@ -157,9 +172,14 @@ export const darkColors: ThemeColors = {
   cardFill: argb('#FF151B23'),
   surfaceVariant: argb('#FF1F2833'),
   border: argb('#FF2A3542'),
+  hairline: argb('#FF222B36'),
+  disabledFill: argb('#FF1B222B'),
+  disabledText: argb('#FF8B98A9'),
   text: argb('#FFF5F7FA'),
-  textSecondary: argb('#B3E8EDF5'),
-  textMuted: argb('#73E8EDF5'),
+  // Opaque secondary inks: alpha-on-near-black drifted below 4.5:1 in the
+  // small captions, so both steps are solid colours now.
+  textSecondary: argb('#FFC6D0DC'),
+  textMuted: argb('#FF9AA8BA'),
   onCardHeader: argb('#FFFFFFFF'),
   // Dark state colours are bright, so the pill ink flips to the page colour.
   onState: argb('#FF0B0F14'),
@@ -189,26 +209,37 @@ export const metrics = {
   radiusSmall: 10,
   /** Status pills and small kind chips. */
   radiusChip: 8,
-  /** The state frame drawn around every meal card (thin, not a hard outline). */
-  cardBorder: 1.5,
+  /** Capsule radius for status pills and the segmented track. */
+  radiusPill: 999,
+  /**
+   * Width of the state rail on a meal card / calendar day row. The rail carries
+   * the state in the same three colours everywhere; the card itself keeps a
+   * neutral hairline, so five meals in a row no longer read as five glowing
+   * boxes and the meal content stays the loudest thing on the card.
+   */
+  statusRail: 3,
+  /** Neutral hairline around every card (the rail/pill carries the state). */
+  cardBorder: 1,
   spacing: 16,
   spacingSmall: 10,
+  /** Minimum square a finger needs - the tab bar and every icon button. */
+  minTouch: 44,
   /**
    * Gap between two adjacent icon buttons. The Dashboard puts the ✓ / ✕ pair
    * on its action row and every meal card puts the same pair in its bottom
    * right corner, so both read them from here and keep the exact same distance.
    */
-  controlGap: 6,
+  controlGap: 4,
   /**
    * Distance between two cards in the dashboard grid (and the gap between
    * stacked cards on every other page), so the vertical breathing room matches
    * the horizontal page margin.
    */
-  gridGap: 10,
+  gridGap: 12,
   /** Page padding around a scrolling screen. */
-  pagePadding: 14,
+  pagePadding: 16,
   /** Minimum height of a meal card (the card only grows with its content). */
-  cardMinHeight: 112,
+  cardMinHeight: 104,
 };
 
 /**
@@ -275,5 +306,32 @@ export function statusColors(theme: ThemeColors): Record<number, string> {
     0: theme.pending,
     1: theme.done,
     2: theme.missed,
+  };
+}
+
+/**
+ * Fill + ink of a status pill.
+ *
+ * Done and missed keep their solid state colour with `onState` ink (white on the
+ * deep light hues, near-black on the bright dark ones). Pending is an OUTLINE
+ * pill: a pale control fill with secondary ink, because white text on mid-grey
+ * never reached 4.5:1 and a solid grey pill looked like a disabled button. The
+ * colour is still carried by the rail, the dot and the word.
+ */
+export function statusPillColors(
+  theme: ThemeColors,
+  status: number,
+): { fill: string; ink: string; dot: string; solid: boolean } {
+  if (status === 1) {
+    return { fill: theme.done, ink: theme.onState, dot: theme.done, solid: true };
+  }
+  if (status === 2) {
+    return { fill: theme.missed, ink: theme.onState, dot: theme.missed, solid: true };
+  }
+  return {
+    fill: theme.surfaceVariant,
+    ink: theme.textSecondary,
+    dot: theme.pending,
+    solid: false,
   };
 }

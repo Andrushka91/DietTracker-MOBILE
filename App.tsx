@@ -19,6 +19,7 @@ import {
   Platform,
   StatusBar,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import {
@@ -91,7 +92,7 @@ function loadGoogleConfig(): void {
  * carries the accent / muted colours, so the glyph itself never hardcodes one.
  */
 function TabIcon({ name, color }: { name: IconName; color: string }): React.JSX.Element {
-  return <Icon name={name} size={22} color={color} />;
+  return <Icon name={name} size={23} color={color} />;
 }
 
 function Tabs(): React.JSX.Element {
@@ -129,14 +130,18 @@ function Tabs(): React.JSX.Element {
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontFamily: fonts.medium,
-          letterSpacing: 0.1,
-          marginTop: 1,
-        },
+        /**
+         * A custom label so the five single-word captions stay whole on a 360 pt
+         * phone with large system text. This is the one place where the scale is
+         * capped (1.15); every page keeps following the system font scale.
+         */
+        tabBarLabel: ({ color, children }) => (
+          <Text numberOfLines={1} maxFontSizeMultiplier={1.15} style={[styles.tabLabel, { color }]}>
+            {children}
+          </Text>
+        ),
         tabBarIconStyle: { marginTop: 2 },
-        tabBarItemStyle: { paddingVertical: 2 },
+        tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
       }}>
       <Tab.Screen
         name="DashboardTab"
@@ -326,6 +331,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: themeColors(false).background,
+  },
+  /** Tab caption: one line, capped scale, regular weight (see the navigator). */
+  tabLabel: {
+    fontSize: 10.5,
+    fontFamily: fonts.regular,
+    letterSpacing: 0,
+    marginTop: 1,
+    textAlign: 'center',
   },
 });
 

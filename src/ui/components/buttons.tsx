@@ -29,9 +29,14 @@ export function IconButton(props: {
   colors: ThemeColors;
 }): React.JSX.Element {
   const tint = props.disabled === true
-    ? props.colors.textMuted
-    : props.tint ?? (props.danger === true ? props.colors.missed : props.colors.text);
-  // Neutral control chrome: 1 px control stroke, control fill, chip corners.
+    ? props.colors.disabledText
+    : props.tint ?? (props.danger === true ? props.colors.missed : props.colors.textSecondary);
+  /**
+   * A toolbar-style icon button: no permanent chip, just the glyph on the card.
+   * Five filled 32 pt chips per meal made the action row louder than the meal
+   * itself; the 44 pt square (with hitSlop) is still a full touch target, and
+   * the pressed state paints the chip so the tap is acknowledged.
+   */
   return (
     <Pressable
       accessibilityRole="button"
@@ -43,14 +48,11 @@ export function IconButton(props: {
       style={({ pressed }) => [
         styles.iconButton,
         {
-          backgroundColor: props.colors.surfaceVariant,
-          borderColor: props.colors.border,
-          // Press feedback is a dim, never a colour change: the chrome and the
-          // glyph keep their meaning while the finger is down.
-          opacity: props.disabled === true ? 0.4 : pressed ? 0.65 : 1,
+          backgroundColor: pressed ? props.colors.surfaceVariant : 'transparent',
+          opacity: props.disabled === true ? 0.45 : 1,
         },
       ]}>
-      <Icon name={props.icon} size={17} color={tint} />
+      <Icon name={props.icon} size={20} color={tint} />
     </Pressable>
   );
 }
@@ -70,6 +72,8 @@ export function BarButton(props: {
   compact?: boolean;
   /** Optional leading icon drawn before the label. */
   icon?: IconName;
+  /** Glyph colour when the chip itself must stay neutral (e.g. day actions). */
+  iconColor?: string;
   /**
    * Optional layout tweak (e.g. flexShrink) merged after the base chrome.
    *
@@ -80,40 +84,55 @@ export function BarButton(props: {
    */
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
+  /**
+   * Disabled controls are a distinct state, not a faded primary: a washed accent
+   * with the accent's ink (the old look) read as a broken button. They now use
+   * the neutral disabled pair, which is unambiguous in both themes.
+   */
   const background =
-    props.accent === true
-      ? props.colors.accentFill
-      : props.danger === true
-        ? props.colors.missed
-        : props.colors.surfaceVariant;
+    props.disabled === true
+      ? props.colors.disabledFill
+      : props.accent === true
+        ? props.colors.accentFill
+        : props.danger === true
+          ? props.colors.missed
+          : props.colors.surfaceVariant;
   const foreground =
-    props.accent === true
-      ? props.colors.accentFillText
-      : props.danger === true
-        ? props.colors.accentText
-        : props.colors.text;
+    props.disabled === true
+      ? props.colors.disabledText
+      : props.accent === true
+        ? props.colors.accentFillText
+        : props.danger === true
+          ? props.colors.accentText
+          : props.colors.text;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled === true }}
       disabled={props.disabled === true}
       onPress={props.onPress}
+      hitSlop={4}
       style={({ pressed }) => [
         styles.bar,
         props.compact === true && styles.barCompact,
         {
           backgroundColor: background,
           borderColor:
-            props.accent === true || props.danger === true
-              ? background
-              : props.colors.border,
-          opacity: props.disabled === true ? 0.4 : pressed ? 0.7 : 1,
+            props.disabled === true
+              ? props.colors.disabledFill
+              : props.accent === true || props.danger === true
+                ? background
+                : props.colors.border,
+          opacity: props.disabled === true ? 1 : pressed ? 0.7 : 1,
         },
         props.style,
       ]}>
       {/* One line: a compressed button ellipsizes its label instead of wrapping
           taller, so rows that must stay on one line never break. */}
-      {props.icon !== undefined && <Icon name={props.icon} size={15} color={foreground} />}
+      {props.icon !== undefined && (
+        <Icon name={props.icon} size={16} color={props.disabled === true ? foreground : props.iconColor ?? foreground} />
+      )}
       <Text
         style={[styles.barLabel, props.compact === true && styles.barLabelCompact, { color: foreground }]}
         numberOfLines={1}>
@@ -158,6 +177,7 @@ export function Segmented(props: {
             accessibilityLabel={label}
             accessibilityState={{ selected }}
             onPress={() => props.onChange(index)}
+            hitSlop={4}
             style={[
               styles.segmentItem,
               selected && [
@@ -182,20 +202,19 @@ export function Segmented(props: {
 
 const styles = StyleSheet.create({
   iconButton: {
-    minWidth: 36,
-    height: 32,
-    paddingHorizontal: 8,
+    width: metrics.minTouch,
+    height: metrics.minTouch,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: metrics.radiusChip,
+    borderRadius: metrics.radiusSmall,
   },
   bar: {
     flexDirection: 'row',
     columnGap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 9,
     borderRadius: metrics.radiusSmall,
-    minHeight: 38,
+    minHeight: metrics.minTouch,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -207,13 +226,19 @@ const styles = StyleSheet.create({
    */
   barLabel: { fontFamily: fonts.regular, fontSize: 14 },
   /** SettingsPage.xaml draws the privacy/backup buttons at FontSize 13 / Padding 8,4. */
-  barCompact: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32 },
+  barCompact: { paddingHorizontal: 10, paddingVertical: 7, minHeight: 36, columnGap: 5 },
   barLabelCompact: { fontSize: 13 },
-  /** Segmented control: rounded track with a raised selected segment. */
-  segment: { flexDirection: 'row', borderRadius: metrics.radiusSmall, padding: 2 },
+  /** Segmented control: a pill track with a raised selected segment. */
+  segment: {
+    flexDirection: 'row',
+    borderRadius: metrics.radiusSmall,
+    padding: 3,
+    columnGap: 2,
+  },
   segmentItem: {
     flex: 1,
-    height: 32,
+    height: 40,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: metrics.radiusChip,
