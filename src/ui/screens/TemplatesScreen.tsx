@@ -16,9 +16,10 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
+import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, cardShadow, themeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
-import { t, tFmt } from '../strings';
+import { formatMediumDate, t, tFmt } from '../strings';
 
 /**
  * Date prompt for "Apply to date" (spec 8.7). The Windows app shows a
@@ -27,6 +28,23 @@ import { t, tFmt } from '../strings';
  * needed. RN-only wording until the Windows resw gains the same key.
  */
 const DATE_PROMPT = 'Enter the target date (yyyy-MM-dd)';
+
+/**
+ * Stored ISO timestamp -> "30 October 2026 · 20:43". A value that does not look
+ * like an ISO timestamp is shown untouched, so nothing is lost if the shape ever
+ * changes.
+ */
+function formatUpdated(value: string, sameDay: boolean): string {
+  const datePart = value.slice(0, 10);
+  const timePart = value.slice(11, 16);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart) || timePart === '') {
+    return value;
+  }
+  // A template named after its day does not need the date twice in one row.
+  return sameDay
+    ? `${t('Rn_Updated')} ${timePart}`
+    : `${t('Rn_Updated')} ${formatMediumDate(datePart)} · ${timePart}`;
+}
 
 export function TemplatesScreen(): React.JSX.Element {
   const app = useApp();
@@ -95,7 +113,10 @@ export function TemplatesScreen(): React.JSX.Element {
       <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>
 
       {templates.length === 0 && (
-        <View style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill }]}>
+        <View style={[styles.panel, styles.emptyPanel, cardShadow, { backgroundColor: colors.cardFill }]}>
+          <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceVariant }]}>
+            <Icon name="layers-outline" size={24} color={colors.textMuted} />
+          </View>
           <Text style={[styles.empty, { color: colors.textSecondary }]}>{t('Template_Empty')}</Text>
         </View>
       )}
@@ -103,13 +124,25 @@ export function TemplatesScreen(): React.JSX.Element {
       {templates.map((template) => (
         <View
           key={template.id}
-          style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill }]}>
+          style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill, borderColor: colors.border }]}>
           <View style={styles.row}>
-            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
-              {template.name}
-            </Text>
+            <View style={[styles.tile, { backgroundColor: colors.surfaceVariant }]}>
+              <Icon
+                name={template.isFullDay ? 'calendar-outline' : 'restaurant-outline'}
+                size={20}
+                color={colors.textSecondary}
+              />
+            </View>
+            <View style={styles.heading}>
+              <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+                {isDate(template.name) ? formatMediumDate(template.name) : template.name}
+              </Text>
+              <Text style={[styles.updated, { color: colors.textMuted }]} numberOfLines={1}>
+                {formatUpdated(template.updatedAt, isDate(template.name))}
+              </Text>
+            </View>
             <View style={[styles.kind, { backgroundColor: colors.surfaceVariant }]}>
-              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: fonts.medium }}>
                 {template.isFullDay ? t('Template_KindDay') : t('Template_KindMeal')}
               </Text>
             </View>
@@ -119,11 +152,9 @@ export function TemplatesScreen(): React.JSX.Element {
               ? tFmt('Template_DaySummary', template.templateDay.length)
               : (template.templateMeal?.title ?? '')}
           </Text>
-          <Text style={[styles.updated, { color: colors.textMuted }]}>
-            {template.updatedAt.slice(0, 16).replace('T', ' ')}
-          </Text>
           <View style={styles.actions}>
             <BarButton
+              compact
               label={t('Template_Apply')}
               accent
               onPress={() => requestApply(template)}
@@ -142,14 +173,37 @@ export function TemplatesScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   content: { padding: metrics.pagePadding, rowGap: metrics.gridGap },
   pageTitle: { ...pageTitleStyle },
-  notice: { fontSize: 12, fontStyle: 'italic' },
-  panel: { borderRadius: 16, padding: 14 },
-  empty: { fontSize: 14, textAlign: 'center', paddingVertical: 18 },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', columnGap: 8 },
-  name: { fontSize: 16, fontFamily: fonts.medium, flex: 1 },
-  kind: { borderRadius: metrics.radiusChip, paddingHorizontal: 8, paddingVertical: 3 },
-  summary: { fontSize: 13, marginTop: 4 },
-  updated: { fontSize: 11, marginTop: 4 },
-  actions: { flexDirection: 'row', marginTop: 10 },
+  notice: { fontSize: 12, fontStyle: 'italic', lineHeight: 17 },
+  panel: {
+    borderRadius: metrics.radius,
+    borderWidth: metrics.cardBorder,
+    padding: 16,
+    ...cardShadow,
+  },
+  /** Empty state: an icon in a soft tile, then the sentence, centred together. */
+  emptyPanel: { alignItems: 'center', paddingVertical: 28, rowGap: 10 },
+  emptyIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  empty: { fontSize: 14, textAlign: 'center', lineHeight: 19 },
+  row: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
+  /** Soft tile behind the template kind glyph - same treatment as a meal icon. */
+  tile: {
+    width: 38,
+    height: 38,
+    borderRadius: metrics.radiusSmall,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heading: { flex: 1 },
+  name: { fontSize: 16, fontFamily: fonts.medium, letterSpacing: -0.1 },
+  kind: { borderRadius: metrics.radiusPill, paddingHorizontal: 9, paddingVertical: 4 },
+  summary: { fontSize: 14, lineHeight: 19, marginTop: 10 },
+  updated: { fontSize: 12, marginTop: 2 },
+  actions: { flexDirection: 'row', marginTop: 12 },
   status: { fontSize: 13, fontFamily: fonts.medium },
 });

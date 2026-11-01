@@ -354,15 +354,9 @@ export function SettingsScreen(): React.JSX.Element {
         { paddingBottom: bottomClearance },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
-      {!app.signedIn && (
-        <View style={cardStyle}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>{t('Account_GuestInfo')}</Text>
-          <Text style={[styles.body, { color: colors.textSecondary }]}>{t('Account_PrivacySummary')}</Text>
-        </View>
-      )}
 
       {/* 2. Account card */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Account')}</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_Account')}</Text>
       <View style={cardStyle}>
         {/* Profile panel: a large framed photo, the full display name and the
             e-mail (nothing is clipped to one line any more), the provider line
@@ -426,11 +420,13 @@ export function SettingsScreen(): React.JSX.Element {
             colors={colors}
           />
         )}
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Account_CloudSaveHint')}</Text>
+        <Text style={[styles.hint, { color: colors.textMuted }]}>
+          {app.signedIn ? t('Account_CloudSaveHint') : t('Account_PrivacySummary')}
+        </Text>
       </View>
 
       {/* 3. General card */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_General')}</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_General')}</Text>
       <View style={cardStyle}>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_AutoSaveHint')}</Text>
         <ToggleRow
@@ -442,7 +438,7 @@ export function SettingsScreen(): React.JSX.Element {
       </View>
 
       {/* 4. Synchronization card */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_Sync')}</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_Sync')}</Text>
       <View style={cardStyle}>
         {/* One calm line: the last successful synchronization, or the state of
             the explicit cycle. No spinner and no "pending changes" alarm - the
@@ -491,7 +487,7 @@ export function SettingsScreen(): React.JSX.Element {
       </View>
 
       {/* 5. Privacy and backup card */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_PrivacyAndBackup')}</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_PrivacyAndBackup')}</Text>
       <View style={cardStyle}>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_PrivacyHint')}</Text>
         <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_PrivacyLocalHint')}</Text>
@@ -513,7 +509,7 @@ export function SettingsScreen(): React.JSX.Element {
       </View>
 
       {/* 6. About card */}
-      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>{t('Settings_About')}</Text>
+      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_About')}</Text>
       <View style={cardStyle}>
         <Text style={[styles.body, { color: colors.textSecondary }]}>
           {tFmt('Settings_AboutText', '1.0.0', 'React Native')}
@@ -571,22 +567,22 @@ function ToggleRow(props: {
 
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { padding: metrics.pagePadding, rowGap: metrics.spacingSmall },
+  content: { padding: metrics.pagePadding, rowGap: 14 },
   pageTitle: { ...pageTitleStyle },
   /** Grouped card: no stroke - the card floats on the grouped background. */
-  card: { borderRadius: metrics.radius, padding: 16, rowGap: 10 },
+  card: { borderRadius: metrics.radius, padding: 16, rowGap: 12 },
   /** iOS grouped-list section header: small uppercase caption above the card. */
   sectionHeader: {
-    fontSize: typeScale.footnote,
+    fontSize: typeScale.caption,
     fontFamily: fonts.medium,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: 0.7,
     marginLeft: 4,
-    marginBottom: -4,
+    marginBottom: -2,
   },
   cardTitle: { fontSize: typeScale.headline, fontFamily: fonts.medium },
-  body: { fontSize: 13, lineHeight: 18 },
-  hint: { fontSize: 11, lineHeight: 15 },
+  body: { fontSize: 14, lineHeight: 20 },
+  hint: { fontSize: 12, lineHeight: 17 },
   /**
    * Account panel: a 84 pt framed photo beside the identity column. The name and
    * the e-mail may wrap to two lines each - the old single row cut both of them
