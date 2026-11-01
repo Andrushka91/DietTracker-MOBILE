@@ -12,7 +12,7 @@ import {
   markMissed as markMissedRule,
 } from '../domain/rules/completionRules';
 import { applyTemplateContent, createDayTemplate, createTemplate, newGuid } from '../domain';
-import { hasUserContent } from '../domain/rules/mealContentRules';
+import { hasMealText, hasUserContent } from '../domain/rules/mealContentRules';
 import { ALL_SLOTS, normalize } from '../domain/rules/mealSlotRules';
 import { ValidationResult, validateMealEntry, validateTemplate } from '../domain/validation';
 import { journalEntity } from '../cloud/journal';
@@ -206,8 +206,15 @@ export interface MarkAllResult {
 }
 
 /**
- * Mark all DONE for a date. Empty cards are skipped and reported so the UI
- * can show the "some meals were skipped" dialog once (spec 8.2).
+ * Mark all DONE for a date.
+ *
+ * Only cards that were actually written are touched: a slot without a title and
+ * without a description is a placeholder, so it can neither be "eaten" nor be
+ * confirmed - it keeps its PENDING (grey) frame and is counted in
+ * `skippedEmpty` so the page can say what it skipped. Without this rule a card
+ * that a previous "Mark all MISSED" had turned red (or one that only carried a
+ * photograph) was flipped to green by the bulk action, which is exactly the
+ * "only the edited cards should be done" report.
  */
 export async function markAllDone(
   profileId: string,
@@ -219,11 +226,11 @@ export async function markAllDone(
   let changed = 0;
   let skippedEmpty = 0;
   for (const meal of day.meals) {
-    if (meal.status === MealStatus.Done) {
+    if (!hasMealText(meal)) {
+      skippedEmpty += 1;
       continue;
     }
-    if (!hasUserContent(meal)) {
-      skippedEmpty += 1;
+    if (meal.status === MealStatus.Done) {
       continue;
     }
     const outcome = await completeMeal(meal, accountId, now);
@@ -240,7 +247,13 @@ export async function markAllDone(
   };
 }
 
-/** Mark all MISSED for a date (disabled on future days by the caller). */
+/**
+ * Mark all MISSED for a date (disabled on future days by the caller).
+ *
+ * Like the DONE direction it only touches cards with a title or a description:
+ * turning an untouched placeholder red would store a state nobody chose (and it
+ * would stop being a placeholder, so it would also travel to the cloud).
+ */
 export async function markAllMissed(
   profileId: string,
   date: string,
@@ -249,7 +262,12 @@ export async function markAllMissed(
 ): Promise<MarkAllResult> {
   const day = await loadDay(profileId, date);
   let changed = 0;
+  let skippedEmpty = 0;
   for (const meal of day.meals) {
+    if (!hasMealText(meal)) {
+      skippedEmpty += 1;
+      continue;
+    }
     if (meal.status === MealStatus.Missed) {
       continue;
     }
@@ -258,7 +276,11 @@ export async function markAllMissed(
       changed += 1;
     }
   }
-  return { changed, skippedEmpty: 0, futureLocked: isFutureMeal({ ...day.meals[0], date }, now) };
+  return {
+    changed,
+    skippedEmpty,
+    futureLocked: isFutureMeal({ ...day.meals[0], date }, now),
+  };
 }
 
 /**

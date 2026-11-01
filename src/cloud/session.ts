@@ -41,6 +41,7 @@ import {
   pushAllLocalRecords,
   refreshStateAsync,
   runCycle,
+  runCycleAndWait,
   uploadOutbox,
   type OutboxUploadResult,
 } from './syncEngine';
@@ -131,18 +132,27 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * One frame of the sign-out barrier, consumed by the busy overlay (shell.tsx):
+ * One frame of the account boundary bar, consumed by the busy overlay
+ * (shell.tsx). Both directions use the SAME bar:
  *
- *   preparing   the outbox is being counted          (bar at 0 %)
- *   uploading   every settled document moves the bar (uploaded / total)
+ *   mode        which side of the boundary runs (decides the sentences)
+ *   preparing   the boundary is being prepared      (bar empty)
+ *   uploading   every settled document moves the bar (sign-out, adoption)
+ *   downloading every applied document moves it     (sign-in: the dataset)
  *   waiting     an attempt failed, the next is queued (bar holds its position)
- *   finishing   everything is uploaded, the cache is cleared (bar at 100 %)
+ *   finishing   everything settled, the last step runs (bar full)
  */
-export interface SignOutProgress {
-  stage: 'preparing' | 'uploading' | 'waiting' | 'finishing';
-  uploaded: number;
+export interface AccountSyncProgress {
+  mode: 'signIn' | 'signOut';
+  stage: 'preparing' | 'uploading' | 'downloading' | 'waiting' | 'finishing';
+  /** Documents settled so far in this stage. */
+  settled: number;
+  /** Documents this stage has to settle (0 = nothing to count yet). */
   total: number;
 }
+
+/** Kept as the historical name of the sign-out frames (same shape). */
+export type SignOutProgress = AccountSyncProgress;
 
 /**
  * Sign-in errors that waiting cannot repair: a rejected/removed grant or a
@@ -198,14 +208,14 @@ async function uploadOutboxBeforeSignOut(
     // Every round starts where the previous one stopped: the bar only moves
     // forward, even when a retry sends the same document again.
     const alreadySent = total - pending;
-    report({ stage: 'uploading', uploaded: alreadySent, total });
+    report({ mode: 'signOut', stage: 'uploading', settled: alreadySent, total });
     const round = await uploadOutbox({
       ignoreBackoff: true,
       deadlineAt,
       fileIndex,
       onProgress: (settled) => {
         const sent = Math.min(alreadySent + settled, total);
-        report({ stage: 'uploading', uploaded: sent, total });
+        report({ mode: 'signOut', stage: 'uploading', settled: sent, total });
       },
     });
     fileIndex = round.fileIndex;
@@ -217,7 +227,7 @@ async function uploadOutboxBeforeSignOut(
     stalledAttempts = round.pending < pending ? 0 : stalledAttempts + 1;
     pending = round.pending;
     if (pending > 0 && stalledAttempts < attempts && Date.now() < deadlineAt) {
-      report({ stage: 'waiting', uploaded: Math.max(0, total - pending), total });
+      report({ mode: 'signOut', stage: 'waiting', settled: Math.max(0, total - pending), total });
       await delay(retryDelay);
     }
   }
@@ -234,7 +244,11 @@ export interface SignInResult {
   ok: boolean;
   /** Localized failure code (Auth_* / Account_*) when ok = false. */
   error?: string;
-  /** True while the account's dataset is still being pulled in the background. */
+  /**
+   * True when the first synchronization could not finish inside the bar (the
+   * deadline or the connection ran out): the account is connected, the records
+   * keep arriving in the background and the regular triggers retry.
+   */
   pendingData?: boolean;
   downloaded?: number;
   adopted?: number;
@@ -243,6 +257,26 @@ export interface SignInResult {
   /** Records whose two versions were both preserved. */
   conflicts?: number;
 }
+
+export interface SignInOptions {
+  consentGranted: boolean;
+  /**
+   * Frames of the blocking sign-in bar: 'preparing' while the account is
+   * switched, 'uploading' for the adoption, 'downloading' for every document of
+   * the account's dataset and 'finishing' for the last step.
+   */
+  onProgress?: (progress: AccountSyncProgress) => void;
+  /** Test tuning: how long the bar waits for the first synchronization. */
+  syncBudgetMs?: number;
+}
+
+/**
+ * How long the sign-in bar may wait for the account's first synchronization
+ * before it lets the user in and leaves the rest to the background triggers.
+ * A populated account with photographs needs a while on a phone connection; the
+ * deadline only exists so a dying network cannot trap the user behind the wall.
+ */
+const SIGN_IN_SYNC_BUDGET_MS = 90000;
 
 /**
  * Interactive sign-in with consent (spec 8.1/8.8). 'consentGranted' must be
@@ -257,11 +291,16 @@ export interface SignInResult {
  *  3. re-authenticating the SAME Google account keeps the account row, the
  *     journal and the cursor (no purge, nothing is downloaded twice),
  *  4. a DIFFERENT account gets a .dtbackup of the cache first, then the cache is
- *     emptied and the new account's dataset is downloaded.
+ *     emptied and the new account's dataset is downloaded,
+ *  5. the FIRST synchronization runs INSIDE this call, behind the blocking bar
+ *     (`onProgress`): the user may only use the app once the dataset is on the
+ *     device. Handing out the screens while the download still ran in the
+ *     background showed empty cards and an incomplete calendar for a minute -
+ *     "my data is gone" was the only thing that could be read from that.
  */
-export async function signInWithGoogle(options: {
-  consentGranted: boolean;
-}): Promise<SignInResult> {
+export async function signInWithGoogle(options: SignInOptions): Promise<SignInResult> {
+  const report = options.onProgress ?? (() => undefined);
+  report({ mode: 'signIn', stage: 'preparing', settled: 0, total: 0 });
   if (!options.consentGranted) {
     return { ok: false, error: 'Account_ConsentRequired' };
   }
@@ -274,6 +313,7 @@ export async function signInWithGoogle(options: {
     if (pending > 0) {
       // Push only and time-boxed: the gate is "is the outbox empty?", not "pull
       // the cloud", and a dying connection must not hold the account switch.
+      report({ mode: 'signIn', stage: 'uploading', settled: 0, total: pending });
       await flushOutbox(existing.id);
       if ((await countPendingOperations(existing.id)) > 0) {
         return { ok: false, error: 'Account_SignInPendingChanges' };
@@ -374,20 +414,52 @@ export async function signInWithGoogle(options: {
     }
   }
 
-  // Adopt everything the cloud has never seen (spec 1.2 - first sign-in).
+  // Adopt everything the cloud has never seen (spec 1.2 - first sign-in). The
+  // records written before this account existed have to reach it BEFORE the
+  // first download, otherwise a guest meal would look "missing" to the user.
   const adopted = await pushAllLocalRecords();
+  if (adopted > 0) {
+    report({ mode: 'signIn', stage: 'uploading', settled: adopted, total: adopted });
+  }
 
-  // Pull this account's dataset at once - but not on the user's clock. On a
-  // populated account the first download touches every meal document and every
-  // photograph, which kept the "Sign in" spinner on screen for a minute. The
-  // account is connected immediately and the pull runs in the background; the
-  // screens refill themselves as the records land (subscribeDataChange), and a
-  // failure is retried by the regular triggers.
-  void runCycle({ trigger: SyncTrigger.PostSignIn }).catch((error) => {
-    console.warn('[session] the first download after sign-in failed', error);
+  // Pull this account's dataset NOW, inside the blocking bar. The screens may
+  // only be used once the records are on the device: running this in the
+  // background (as before) let the user open an empty Today tab and an empty
+  // calendar and conclude that signing in had wiped the account.
+  report({ mode: 'signIn', stage: 'downloading', settled: 0, total: 0 });
+  const cycle = await withDeadline(
+    runCycleAndWait({
+      trigger: SyncTrigger.PostSignIn,
+      onDownloadProgress: (settled, total) => {
+        report({ mode: 'signIn', stage: 'downloading', settled, total });
+      },
+    }),
+    Math.max(1, options.syncBudgetMs ?? SIGN_IN_SYNC_BUDGET_MS),
+  );
+
+  if (cycle === null) {
+    // The deadline fired: the account is connected, the cycle keeps running and
+    // the regular triggers retry whatever is left. Nothing is lost - the records
+    // simply appear a little later.
+    console.warn('[session] the first synchronization is still running after the bar');
+    return { ok: true, pendingData: true, adopted, downloaded: 0, failed: 0, conflicts: 0 };
+  }
+
+  report({
+    mode: 'signIn',
+    stage: 'finishing',
+    settled: cycle.downloaded,
+    total: cycle.downloaded,
   });
-
-  return { ok: true, pendingData: true, adopted, downloaded: 0 };
+  return {
+    ok: true,
+    pendingData: cycle.failed > 0 || cycle.conflicts > 0,
+    adopted,
+    downloaded: cycle.downloaded,
+    failed: cycle.failed,
+    conflicts: cycle.conflicts,
+    ...(cycle.error === undefined ? {} : { error: cycle.error }),
+  };
 }
 
 /**
@@ -450,7 +522,7 @@ export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignO
     // began concurrently would list and download an account that is about to be
     // removed, and it would compete with the barrier for the same documents.
     cancelScheduledCycle();
-    report({ stage: 'preparing', uploaded: 0, total: pending });
+    report({ mode: 'signOut', stage: 'preparing', settled: 0, total: pending });
     // Safety net BEFORE the count is trusted: every record this phone still
     // holds as "not confirmed by the provider" is queued, so the cloud copy is
     // complete even when a change never reached the outbox (the screens cache
@@ -463,7 +535,7 @@ export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignO
     }
     pending = await countPendingOperations(account.id);
     if (pending > 0) {
-      report({ stage: 'uploading', uploaded: 0, total: pending });
+      report({ mode: 'signOut', stage: 'uploading', settled: 0, total: pending });
       const upload = await uploadOutboxBeforeSignOut(account.id, pending, options, report);
       if (upload.pending > 0) {
         // Nothing was purged yet: the local copy is intact and the user can try
@@ -474,7 +546,7 @@ export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignO
   }
   // The bar reads 100 % while the credentials and the cache are removed - the
   // last step of the operation the user started.
-  report({ stage: 'finishing', uploaded: pending, total: pending });
+  report({ mode: 'signOut', stage: 'finishing', settled: pending, total: pending });
 
   // The cache of this account ends here. Whatever cycle is still in flight (a
   // flush that hit the deadline, the periodic pull) must stop before the purge

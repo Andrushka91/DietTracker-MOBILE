@@ -280,8 +280,13 @@ describe('the sign-out barrier uploads instead of waiting for a cycle', () => {
     expect(elapsed).toBeLessThan(2000);
     expect(uploadObject).toHaveBeenCalledTimes(5);
     const uploadedFrames = frames.filter((frame) => frame.stage === 'uploading');
-    expect(uploadedFrames.some((frame) => frame.uploaded > 0)).toBe(true);
-    expect(frames[frames.length - 1]).toEqual({ stage: 'finishing', uploaded: 5, total: 5 });
+    expect(uploadedFrames.some((frame) => frame.settled > 0)).toBe(true);
+    expect(frames[frames.length - 1]).toEqual({
+      mode: 'signOut',
+      stage: 'finishing',
+      settled: 5,
+      total: 5,
+    });
     await expect(getActiveAccount()).resolves.toBeNull();
 
     release();
@@ -342,7 +347,7 @@ describe('a failure is handled by the standard, not by a stuck bar', () => {
     expect(elapsed).toBeLessThan(2000);
     // The bar never claims to have finished, and nothing was deleted.
     expect(frames[frames.length - 1].stage).not.toBe('finishing');
-    expect(frames.every((frame) => frame.uploaded === 0)).toBe(true);
+    expect(frames.every((frame) => frame.settled === 0)).toBe(true);
     await expect(getActiveAccount()).resolves.not.toBeNull();
     await expect(countPendingOperations(LOCAL_ACCOUNT)).resolves.toBe(3);
   });

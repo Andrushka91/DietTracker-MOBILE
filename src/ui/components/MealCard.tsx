@@ -17,7 +17,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { isFutureMeal } from '../../domain/rules/completionRules';
-import { hasUserContent } from '../../domain/rules/mealContentRules';
+import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
 import { argb, fonts, metrics, themeColors } from '../theme';
@@ -73,7 +73,15 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   const saveBusyRef = useRef(false);
 
   const future = isFutureMeal(meal, now);
+  /** Nothing at all: the Clear button is dead and the card is a placeholder. */
   const empty = !hasUserContent(meal, photos.length);
+  /**
+   * A title or a description exists - the only content the DONE rule accepts. A
+   * card with just a photograph, a planned time or an old state keeps its ✓
+   * disabled: confirming a meal that was never described is what flipped
+   * untouched cards to green.
+   */
+  const canConfirm = hasMealText(meal);
   const statusLabel =
     meal.status === MealStatus.Done
       ? t('Status_Done')
@@ -307,8 +315,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 <IconButton label={t('Photo_Add')} glyph="📷" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
                 <IconButton label={t('Common_Edit')} glyph="✏️" onPress={startEdit} colors={colors} />
                 <IconButton label={t('Meal_Clear')} glyph="🗑" onPress={() => props.onClear(meal)} disabled={empty} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkMissed')} glyph="✕" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkDone')} glyph="✓" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || empty} tint={colors.done} colors={colors} />
+                <IconButton label={t('Meal_MarkMissed')} glyph="✕" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkDone')} glyph="✓" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} tint={colors.done} colors={colors} />
               </View>
             </View>
           </View>

@@ -1197,6 +1197,7 @@ async function pullChanges(
   accountId: string,
   options: { acceptOwnDevice: boolean },
   epoch: number,
+  onProgress?: (settled: number, total: number) => void,
 ): Promise<PullResult> {
   const metadata = await getMetadata(accountId);
   const since = metadata?.lastSyncCursor ?? null;
@@ -1226,8 +1227,15 @@ async function pullChanges(
   const entityDocuments = managed.filter((change) => change.path.startsWith('entities/'));
   const photos = entityDocuments.filter((change) => isPhotoDocument(change.path));
   const others = entityDocuments.filter((change) => !isPhotoDocument(change.path));
+  const queue = [...others, ...photos];
 
-  for (const change of [...others, ...photos]) {
+  // The sign-in barrier paints this: 0 of N first, then one step per document
+  // that was read and applied (a failed document still moves the bar - it was
+  // tried, and the counter would otherwise never reach N).
+  let settled = 0;
+  onProgress?.(0, queue.length);
+
+  for (const change of queue) {
     if (cycleIsStale(epoch)) {
       // The session ended while the listing was in flight (sign-out): stop
       // before the first write - the cache it would touch no longer exists.
@@ -1241,12 +1249,16 @@ async function pullChanges(
         // never move the cursor past it silently.
         failed += 1;
         markRetry(change.modifiedAt);
+        settled += 1;
+        onProgress?.(settled, queue.length);
         continue;
       }
       const outcome = await applyRemoteDocument(json, options, change.revision);
       if (outcome === 'retry') {
         failed += 1;
         markRetry(change.modifiedAt);
+        settled += 1;
+        onProgress?.(settled, queue.length);
         continue;
       }
       if (outcome === 'conflict') {
@@ -1268,6 +1280,8 @@ async function pullChanges(
       failed += 1;
       markRetry(change.modifiedAt);
     }
+    settled += 1;
+    onProgress?.(settled, queue.length);
   }
 
   if (retryFrom !== null) {
@@ -1329,6 +1343,12 @@ export interface RunCycleOptions {
    */
   onUploadProgress?: (uploaded: number, total: number) => void;
   /**
+   * Called once with 0/total and then after every document the pull settles, so
+   * the sign-in barrier can keep the user behind a real 0-100 % bar until the
+   * account's dataset is on the device (no half-empty screens after signing in).
+   */
+  onDownloadProgress?: (settled: number, total: number) => void;
+  /**
    * Ignores the exponential-backoff window of a failed operation. The sign-out
    * barrier cannot wait a minute for the next retry: the user asked for the
    * upload now and the whole screen is already blocked behind the progress bar.
@@ -1374,6 +1394,22 @@ export function runCycle(options: RunCycleOptions): Promise<CycleResult> {
   );
   runningCycle = current;
   return current;
+}
+
+/**
+ * Runs ONE full cycle and WAITS for it, reporting the documents it settles.
+ *
+ * The account boundary after a sign-in must not hand the user a half-empty app:
+ * the screens may only be used once the account's dataset has landed, so the
+ * caller keeps its blocking bar up for exactly this promise. A cycle that is
+ * already running is awaited first - otherwise `runCycle` would return THAT one
+ * and the progress callbacks installed here would never fire.
+ */
+export async function runCycleAndWait(options: RunCycleOptions): Promise<CycleResult> {
+  if (runningCycle !== null) {
+    await runningCycle.catch(() => undefined);
+  }
+  return runCycle(options);
 }
 
 /** Starts the remembered pass, if any, without blocking the caller. */
@@ -1471,6 +1507,7 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
             acceptOwnDevice: options.acceptOwnDevice ?? false,
           },
           epoch,
+          options.onDownloadProgress,
         );
 
     if (cycleIsStale(epoch)) {

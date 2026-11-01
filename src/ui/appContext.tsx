@@ -23,7 +23,7 @@ import {
   signInWithGoogle,
   signOutGoogle,
   type SignInResult,
-  type SignOutProgress,
+  type AccountSyncProgress,
   type SignOutResult,
 } from '../cloud/session';
 import { t } from './strings';
@@ -54,7 +54,7 @@ export interface AppState {
    * Determinate progress of the running busy stage (sign-out uploads). Null
    * means "no measurable progress" - the overlay then shows the spinner.
    */
-  busyProgress: SignOutProgress | null;
+  busyProgress: AccountSyncProgress | null;
   /** Floating status caption (spec 6.6). */
   status: string | null;
   isDark: boolean;
@@ -228,15 +228,20 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
 
   const signInWithConsent = useCallback(
     async (consent: boolean): Promise<SignInResult> => {
-      // No blocking modal here: the Settings account card runs its own small
-      // spinner around this call, so the page stays visible while the Google
-      // picker and the first (background) download do their work.
-      const result = await signInWithGoogle({ consentGranted: consent });
+      // The account boundary reports every document it settles, so the busy
+      // overlay paints a real 0-100 % bar: after signing in the user WAITS for
+      // the account's dataset inside that bar instead of being dropped into
+      // half-empty screens and having to guess where the records went.
+      const result = await signInWithGoogle({
+        consentGranted: consent,
+        onProgress: (progress) => patch({ busyProgress: progress }),
+      });
+      patch({ busyProgress: null });
       await applyAccount();
       await reloadPreferences();
       return result;
     },
-    [applyAccount, reloadPreferences],
+    [applyAccount, patch, reloadPreferences],
   );
 
   const signOut = useCallback(

@@ -294,9 +294,10 @@ export function SettingsScreen(): React.JSX.Element {
 
   /**
    * Plain Google sign-in. The account card keeps its own buttons untouched: the
-   * GLOBAL overlay shows the spinner and its sentence, and nothing else on the
-   * page can be pressed while the picker, the adoption and the first download
-   * are running. No confirmation wall.
+   * GLOBAL overlay shows the determinate bar and its sentence, and nothing else
+   * on the page can be pressed while the picker, the adoption and the FIRST
+   * synchronization run. The user only gets the screens back once their records
+   * are on the device.
    */
   const signIn = async (): Promise<void> => {
     if (app.busy !== null) {
@@ -309,8 +310,18 @@ export function SettingsScreen(): React.JSX.Element {
         app.showStatus(t(result.error ?? 'Auth_Unknown'));
         return;
       }
-      app.showStatus(t('Account_SignedIn'));
       await refreshFacts();
+      if (result.error !== undefined) {
+        // The account is connected, but the first synchronization could not read
+        // the cloud (offline / provider down). The regular triggers retry it.
+        app.showStatus(t(result.error));
+      } else if (result.pendingData === true) {
+        app.showStatus(t('Account_CloudDataPending'));
+      } else if ((result.downloaded ?? 0) > 0) {
+        app.showStatus(tFmt('Account_CloudDataLoaded', result.downloaded ?? 0));
+      } else {
+        app.showStatus(t('Account_SignedIn'));
+      }
     } catch (error) {
       console.warn('[settings] sign-in failed', error);
       app.showStatus(t('Auth_Unknown'));

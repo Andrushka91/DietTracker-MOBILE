@@ -160,8 +160,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `2100e8cd…3d13c389` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `f4bdb1dd…bb70adcd` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `8fc42dff…f2ba5f` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `f11d6687…ccd894` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -348,9 +348,16 @@ Every module above was verified against Expo SDK 58's
    account needed. To synchronize, open **Settings → Account → Sign in with
    Google** (requires real ids in `google-client.json`, see *Google client
    configuration* above); records created as a guest are adopted by the account.
+   Signing in runs behind the **same determinate bar as signing out**: the whole
+   dataset of the account is pulled before the screens come back, so the Today
+   tab and the calendar are complete from the first frame instead of filling up
+   a minute later.
 2. **Today tab**: five permanent meal cards — type a title + description,
    Save, then ✓ DONE / ✕ MISSED; photographs via 📷 (the camera takes a new
-   picture, the gallery picks existing ones - up to three per meal).
+   picture, the gallery picks existing ones - up to three per meal). The ✓ / ✕
+   of a card, and the two day-wide "Mark all" buttons, only act on cards that
+   have a title or a description: an untouched card keeps its grey PENDING frame
+   and is never confirmed by accident.
 3. **Calendar / Statistics / Templates / Settings** tabs along the bottom;
    Settings → *Export data* writes a `.dtbackup` you can restore on Windows.
 
@@ -447,6 +454,35 @@ cloud had never received**:
   (meals, photographs, templates, reminders), then removes the cache. The bar's
   wording says *"Syncing with the cloud…"* and *"{0} of {1} change(s) synced
   with the cloud"* instead of talking about uploads.
+
+**The account boundary is now symmetric - the user waits in BOTH directions.**
+Signing in used to return immediately and pull the dataset in the background, so
+the Today tab and the calendar were empty for a minute and the account looked
+wiped. `signInWithGoogle` now runs the first synchronization INSIDE the call
+(`runCycleAndWait`, which first awaits a cycle that is already running so its own
+progress callbacks really fire) and reports it through the same blocking bar:
+`preparing` → `uploading` (adoption of guest records) → `downloading` (one step
+per document of the account's dataset, via the new `onDownloadProgress` of the
+pull) → `finishing`. The frames carry `mode: 'signIn' | 'signOut'`, so the same
+`ProgressOverlay` says *"Signing in…" / "Syncing your data with the cloud…" /
+"X of Y document(s) received from the cloud" / "Opening your account…"* on the
+way in and the sign-out sentences on the way out. A 90 s budget bounds the wait:
+when the connection dies the bar closes, the account stays connected and the
+regular triggers keep pulling (`__tests__/signInBarrier.test.ts`).
+
+**The bulk DONE / MISSED actions respect the same rule as the cards.** The skip
+test was `hasUserContent`, which counts a state, a photograph or a planned time -
+so an untouched card that a previous "Mark all MISSED" had turned red (or one
+that only carried a picture) was flipped to green while the dialog claimed only
+edited cards can be confirmed. `hasMealText` (a title **or** a description) is now
+the single gate for the card's ✓ / ✕, for `markAllDone`, for `markAllMissed` and
+for the two buttons' enabled state; an untouched card keeps its grey PENDING
+frame (and is not even written, so it stays a placeholder). The "nothing could be
+marked" acknowledgement is a **single-OK** alert (it used to pass the same label
+to cancel and confirm, drawing two identical "OK" buttons), and a partial result
+is reported in the floating caption ("2 meal(s) marked as done. 3 card(s) without
+a title or description were left as they are.") instead of interrupting the page
+(`__tests__/bulkDone.test.ts`).
 
 ## Troubleshooting
 

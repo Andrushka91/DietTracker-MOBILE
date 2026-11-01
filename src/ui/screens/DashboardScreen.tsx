@@ -20,6 +20,7 @@ import { EntityType, MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { formatDate, addDays, forDay } from '../../domain/analytics';
 import { isFutureMeal } from '../../domain/rules/completionRules';
+import { hasMealText } from '../../domain/rules/mealContentRules';
 import { MAX_PHOTOS_PER_MEAL } from '../../domain/rules/photoRules';
 import { ensureCategories } from '../../services/mealTracking';
 import { getPhotoCounts, getPhotosForMeal } from '../../data/repositories';
@@ -34,6 +35,7 @@ import {
   missMeal,
   saveDayAsTemplate,
   saveMeal,
+  type MarkAllResult,
 } from '../../services/mealTracking';
 import { useApp } from '../appContext';
 import { subscribeDataChange } from '../../cloud/syncEngine';
@@ -340,22 +342,48 @@ export function DashboardScreen({
     });
   };
 
+  /**
+   * One acknowledgement for a bulk action.
+   *
+   *  - nothing could be marked: a SINGLE-button dialog explains why (that is the
+   *    only case the user has to understand; the old one showed two identical
+   *    "OK" buttons),
+   *  - something was marked: the floating caption reports what happened and how
+   *    many untouched cards were left alone, so the page is not interrupted.
+   */
+  const reportBulkResult = (result: MarkAllResult, kind: 'done' | 'missed'): void => {
+    if (result.changed === 0) {
+      if (result.skippedEmpty > 0) {
+        setDialog({
+          title: t('Meal_EmptyDoneTitle'),
+          message: t(
+            kind === 'done' ? 'Meal_EmptyDoneSomeMessage' : 'Meal_EmptyMissedSomeMessage',
+          ),
+          confirmText: t('Common_Ok'),
+          singleAction: true,
+          onCancel: () => setDialog(null),
+          onConfirm: () => setDialog(null),
+        });
+      }
+      return;
+    }
+    setStatus(
+      result.skippedEmpty > 0
+        ? tFmt(
+            kind === 'done' ? 'Dashboard_AllDonePartial' : 'Dashboard_AllMissedPartial',
+            result.changed,
+            result.skippedEmpty,
+          )
+        : t(kind === 'done' ? 'Dashboard_AllDone' : 'Dashboard_AllMissed'),
+    );
+  };
+
   const handleMarkAllDone = async (): Promise<void> => {
     if (app.profile === null) {
       return;
     }
     const result = await markAllDone(app.profile.id, date, accountId, now);
-    if (result.skippedEmpty > 0) {
-      setDialog({
-        title: t('Meal_EmptyDoneTitle'),
-        message: t('Meal_EmptyDoneSomeMessage'),
-        cancelText: t('Common_Ok'),
-        confirmText: t('Common_Ok'),
-        onCancel: () => setDialog(null),
-        onConfirm: () => setDialog(null),
-      });
-    }
-    setStatus(t('Dashboard_AllDone'));
+    reportBulkResult(result, 'done');
     app.notifyChanged();
     await reload();
   };
@@ -364,8 +392,8 @@ export function DashboardScreen({
     if (app.profile === null) {
       return;
     }
-    await markAllMissed(app.profile.id, date, accountId, now);
-    setStatus(t('Dashboard_AllMissed'));
+    const result = await markAllMissed(app.profile.id, date, accountId, now);
+    reportBulkResult(result, 'missed');
     app.notifyChanged();
     await reload();
   };
@@ -437,12 +465,17 @@ export function DashboardScreen({
     );
   }
 
-  const future = isFutureMeal({ ...meals[0], date }, now);
+  /**
+   * A bulk action is offered only when at least one card can really take it: the
+   * DONE / MISSED rules need a title or a description, so a day of untouched
+   * placeholders keeps both buttons disabled (and nothing turns green by
+   * accident). A future day locks them too.
+   */
   const canMarkDone = meals.some(
-    (m) =>
-      m.status !== MealStatus.Done &&
-      !isFutureMeal(m, now) &&
-      (m.title.trim() !== '' || m.ingredients.trim() !== ''),
+    (m) => m.status !== MealStatus.Done && !isFutureMeal(m, now) && hasMealText(m),
+  );
+  const canMarkMissed = meals.some(
+    (m) => m.status !== MealStatus.Missed && !isFutureMeal(m, now) && hasMealText(m),
   );
 
   return (
@@ -503,7 +536,7 @@ export function DashboardScreen({
             label="Mark all meals as MISSED"
             glyph="✕"
             onPress={() => void handleMarkAllMissed()}
-            disabled={future}
+            disabled={!canMarkMissed}
             tint={colors.missed}
             colors={colors}
           />

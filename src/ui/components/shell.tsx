@@ -21,7 +21,7 @@ import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 
 import { fonts, cardShadow, themeColors } from '../theme';
 import { useApp, type BusyStage } from '../appContext';
-import type { SignOutProgress } from '../../cloud/session';
+import type { AccountSyncProgress } from '../../cloud/session';
 import { t } from '../strings';
 
 /**
@@ -32,24 +32,27 @@ import { t } from '../strings';
 const SIGNING_IN = 'Signing in…';
 
 /**
- * RN-only wording of the sign-out cloud-sync bar (no Windows resource exists).
+ * RN-only wording of the account boundary bar (no Windows resource exists).
  *
- * The bar is not an "upload" screen: it is the moment the phone proves that the
- * account already holds every change, so the wording says exactly that.
+ * The bar is not an "upload" screen: it is the moment the phone proves that it
+ * and the account hold the same records - in BOTH directions. Signing out
+ * pushes what is only here, signing in pulls the account's whole dataset, and
+ * the user waits behind the same wall until it is done.
  */
-const SYNC_HINT = 'Please keep the app open until every change is synced with the cloud.';
+const SYNC_HINT = 'Please keep the app open until it has synced with the cloud.';
 const SYNC_WAITING = 'Waiting for the connection… retrying';
 const SYNC_COUNT = '{0} of {1} change(s) synced with the cloud';
+const LOAD_COUNT = '{0} of {1} document(s) received from the cloud';
 
 /** 0-1 of the bar; `finishing` is the full bar, `preparing` is an empty one. */
-function progressRatio(progress: SignOutProgress): number {
+function progressRatio(progress: AccountSyncProgress): number {
   if (progress.stage === 'finishing') {
     return 1;
   }
   if (progress.total <= 0) {
     return 0;
   }
-  return Math.min(1, Math.max(0, progress.uploaded / progress.total));
+  return Math.min(1, Math.max(0, progress.settled / progress.total));
 }
 
 /** Dark translucent scrim + spinner + stage sentence + hint (spec 6.4). */
@@ -91,28 +94,29 @@ export function BusyOverlay(): React.JSX.Element | null {
   );
 }
 /**
- * The sign-out barrier: a blocking card with a bar that fills from 0 % to 100 %
- * as every pending change reaches the account. No cancel/skip button exists on
- * purpose - the data must be synced with the account before the local cache is
- * deleted, so the only way out is to let it finish (or to wait for the refusal,
- * which keeps all data and returns to the page).
+ * The account boundary bar: a blocking card with a bar that fills from 0 % to
+ * 100 %. Signing out: every pending change reaches the account. Signing in:
+ * every document of the account's dataset lands on the device - the user may
+ * only continue once the app really holds their records.
+ *
+ * No cancel/skip button exists on purpose: the data must travel before the local
+ * cache is deleted (sign-out) or shown (sign-in), so the only way out is to let
+ * it finish (or to wait for the refusal, which keeps all data and returns to the
+ * page).
  */
 function ProgressOverlay({
   busy,
   progress,
 }: {
   busy: BusyStage;
-  progress: SignOutProgress;
+  progress: AccountSyncProgress;
 }): React.JSX.Element {
   const { isDark } = useApp();
   const colors = themeColors(isDark);
   const ratio = progressRatio(progress);
   const percent = Math.round(ratio * 100);
-  const title = progress.stage === 'finishing' ? t('Busy_SigningOut') : t('Busy_SyncingChanges');
-  const detail =
-    progress.stage === 'waiting'
-      ? SYNC_WAITING
-      : SYNC_COUNT.replace('{0}', String(progress.uploaded)).replace('{1}', String(progress.total));
+  const title = progressTitle(progress);
+  const detail = progressDetail(progress);
   return (
     <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
       <View style={[styles.scrim, { backgroundColor: colors.overlay }]}>
@@ -133,6 +137,44 @@ function ProgressOverlay({
       </View>
     </Modal>
   );
+}
+
+/**
+ * The sentence above the bar. Sign-out ends with "Signing out…", sign-in with
+ * "Opening your account…", and both spend their middle on the same promise:
+ * the phone and the account are about to hold the same records.
+ */
+function progressTitle(progress: AccountSyncProgress): string {
+  switch (progress.stage) {
+    case 'finishing':
+      return progress.mode === 'signOut' ? t('Busy_SigningOut') : t('Busy_OpeningAccount');
+    case 'preparing':
+      return progress.mode === 'signOut' ? t('Busy_SyncingChanges') : SIGNING_IN;
+    case 'uploading':
+      return t('Busy_SyncingChanges');
+    case 'downloading':
+    case 'waiting':
+    default:
+      return t('Busy_SyncingAccount');
+  }
+}
+
+/** "12 of 40 document(s) received from the cloud" under the bar. */
+function progressDetail(progress: AccountSyncProgress): string {
+  if (progress.stage === 'waiting') {
+    return SYNC_WAITING;
+  }
+  if (progress.total <= 0) {
+    // Nothing to count yet (the account is being prepared): the title already
+    // says what is happening, so the line stays empty instead of repeating it.
+    return progress.stage === 'preparing'
+      ? ''
+      : t(progress.mode === 'signIn' ? 'Busy_SyncingAccount' : 'Busy_SyncingChanges');
+  }
+  const template = progress.mode === 'signOut' ? SYNC_COUNT : LOAD_COUNT;
+  return template
+    .replace('{0}', String(progress.settled))
+    .replace('{1}', String(progress.total));
 }
 
 
