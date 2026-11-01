@@ -116,6 +116,18 @@ function changes(db: SQLiteDatabase): number {
   }
 }
 
+/**
+ * One transaction at a time.
+ *
+ * `withTransactionAsync` is a pair of statements (BEGIN ... COMMIT) and other
+ * statements may run between them, so a second transaction started before the
+ * first one committed fails with "cannot start a transaction within a
+ * transaction" - and its ROLLBACK would undo the first one's work. The upload
+ * pipeline settles several documents in parallel, so this chain serializes the
+ * write transactions; the reads and the network requests still overlap.
+ */
+let transactionChain: Promise<unknown> = Promise.resolve();
+
 class ExpoDatabase implements DB {
   constructor(private readonly db: SQLiteDatabase) {}
 
@@ -144,9 +156,16 @@ class ExpoDatabase implements DB {
   }
 
   async transaction(fn: (tx: Tx) => Promise<void>): Promise<void> {
-    await this.db.withTransactionAsync(() =>
-      fn({ execute: (sql, params) => this.execute(sql, params) }),
+    const run = (): Promise<void> =>
+      this.db.withTransactionAsync(() =>
+        fn({ execute: (sql, params) => this.execute(sql, params) }),
+      );
+    const queued = transactionChain.then(run, run);
+    transactionChain = queued.then(
+      () => undefined,
+      () => undefined,
     );
+    await queued;
   }
 
   close(): void {

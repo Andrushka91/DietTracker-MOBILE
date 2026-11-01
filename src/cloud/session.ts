@@ -35,10 +35,13 @@ import { closeDb } from '../data/database';
 import { getDeviceId } from '../services/deviceId';
 import { ensureCategories } from '../services/mealTracking';
 import {
+  cancelScheduledCycle,
   invalidateRunningCycle,
   pushAllLocalRecords,
   refreshStateAsync,
   runCycle,
+  uploadOutbox,
+  type OutboxUploadResult,
 } from './syncEngine';
 
 /**
@@ -52,12 +55,22 @@ const ACCOUNT_FLUSH_DEADLINE_MS = 8000;
 
 /**
  * How many times the sign-out barrier retries the outbox, and how long it waits
- * between two attempts. Four attempts with a growing pause ride out a short
- * network drop; a device that is truly offline ends the barrier in ~10 s with a
- * clear message instead of hiding the user behind a modal forever.
+ * between two attempts. A round that settles at least one document resets the
+ * budget, so a long outbox is allowed to take the time it needs; only rounds
+ * that achieve NOTHING (a dead connection) count against it.
  */
-const SIGN_OUT_UPLOAD_ATTEMPTS = 4;
-const SIGN_OUT_UPLOAD_RETRY_MS = 1500;
+const SIGN_OUT_UPLOAD_ATTEMPTS = 3;
+const SIGN_OUT_UPLOAD_RETRY_MS = 1000;
+
+/**
+ * Whole-operation budget of the sign-out upload. The bar is a modal wall, so it
+ * must end in a predictable time: every round is deadline-bounded (no new
+ * document starts after it), and when the budget is spent the sign-out is
+ * refused with the local cache untouched instead of hiding the user forever.
+ * A normal outbox - even a first sign-out with photographs - finishes in a few
+ * seconds, because the pipeline sends three documents at a time.
+ */
+const SIGN_OUT_UPLOAD_BUDGET_MS = 30000;
 
 /** Resolves to null when `ms` elapses first; never leaves a dangling rejection. */
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
@@ -147,13 +160,20 @@ const FATAL_AUTH_ERRORS = new Set([
  * Empties the outbox before a sign-out, and never gives up while a change is
  * still only on this device:
  *
- *  - the backoff window of a failed operation is ignored (the user is already
- *    waiting behind the progress bar, a minute-long wait is unacceptable),
- *  - each attempt is deadline-bounded, and whatever it did not settle is retried
- *    with the progress it already reached - the bar never jumps backwards,
+ *  - the account boundary runs the SHARED upload pipeline (uploadOutbox) itself
+ *    instead of asking for a full synchronization cycle: it drains the outbox
+ *    directly, so no listing/download of an account that is about to be removed
+ *    is paid for, and its progress frames can never be swallowed by a cycle that
+ *    happens to be running at the same time (the old code joined that cycle and
+ *    the bar stayed at 0 % until it timed out),
+ *  - the backoff window of a failed document is ignored (the user is already
+ *    waiting behind the bar, a minute-long wait is unacceptable),
+ *  - the listing of a round is reused by the next one, so a retry costs one
+ *    request per remaining document instead of a fresh folder scan,
  *  - an outbox that keeps shrinking is allowed to take as long as it needs (a
  *    first sign-out can hold hundreds of photographs): only `attempts` rounds in
- *    a row WITHOUT any progress end the barrier,
+ *    a row WITHOUT any progress end the barrier, and the whole operation is
+ *    bounded by `uploadBudgetMs`,
  *  - a rejected grant ends it at once (retrying revoked credentials only burns
  *    time): the caller then REFUSES the sign-out instead of deleting the only
  *    copy of those records.
@@ -166,43 +186,46 @@ async function uploadOutboxBeforeSignOut(
 ): Promise<{ pending: number; error?: string }> {
   const attempts = Math.max(1, options.maxUploadAttempts ?? SIGN_OUT_UPLOAD_ATTEMPTS);
   const retryDelay = Math.max(0, options.retryDelayMs ?? SIGN_OUT_UPLOAD_RETRY_MS);
+  const budget = Math.max(0, options.uploadBudgetMs ?? SIGN_OUT_UPLOAD_BUDGET_MS);
   const total = initialPending;
+  const deadlineAt = Date.now() + budget;
   let pending = initialPending;
   let stalledAttempts = 0;
+  let fileIndex: OutboxUploadResult['fileIndex'] | undefined;
 
-  while (pending > 0 && stalledAttempts < attempts) {
-    // Every attempt starts where the previous one stopped: the bar only moves
+  while (pending > 0 && stalledAttempts < attempts && Date.now() < deadlineAt) {
+    // Every round starts where the previous one stopped: the bar only moves
     // forward, even when a retry sends the same document again.
     const alreadySent = total - pending;
     report({ stage: 'uploading', uploaded: alreadySent, total });
-    const cycle = await withDeadline(
-      runCycle({
-        trigger: SyncTrigger.Manual,
-        pushOnly: true,
-        ignoreBackoff: true,
-        onUploadProgress: (uploaded) => {
-          // A retry sends the remaining documents: `alreadySent` keeps the
-          // bar where the previous attempt left it and never lets it rewind.
-          const sent = Math.min(alreadySent + uploaded, total);
-          report({ stage: 'uploading', uploaded: sent, total });
-        },
-      }),
-      ACCOUNT_FLUSH_DEADLINE_MS,
-    );
-    const remaining = await countPendingOperations(accountId);
-    if (cycle !== null && cycle.error !== undefined && FATAL_AUTH_ERRORS.has(cycle.error)) {
-      return { pending: remaining, error: cycle.error };
+    const round = await uploadOutbox({
+      ignoreBackoff: true,
+      deadlineAt,
+      fileIndex,
+      onProgress: (settled) => {
+        const sent = Math.min(alreadySent + settled, total);
+        report({ stage: 'uploading', uploaded: sent, total });
+      },
+    });
+    fileIndex = round.fileIndex;
+    if (round.error !== undefined && FATAL_AUTH_ERRORS.has(round.error)) {
+      return { pending: round.pending, error: round.error };
     }
     // Progress resets the budget: the barrier only counts rounds that achieved
     // nothing, which is what a dead connection looks like.
-    stalledAttempts = remaining < pending ? 0 : stalledAttempts + 1;
-    pending = remaining;
-    if (pending > 0 && stalledAttempts < attempts) {
+    stalledAttempts = round.pending < pending ? 0 : stalledAttempts + 1;
+    pending = round.pending;
+    if (pending > 0 && stalledAttempts < attempts && Date.now() < deadlineAt) {
       report({ stage: 'waiting', uploaded: Math.max(0, total - pending), total });
       await delay(retryDelay);
     }
   }
 
+  // A pass that was cut by the deadline may still have settled documents after
+  // it returned: the count is the truth, never the number of rounds.
+  if (pending > 0) {
+    pending = await countPendingOperations(accountId);
+  }
   return { pending, error: pending > 0 ? 'Account_SignOutPendingDetail' : undefined };
 }
 
@@ -396,9 +419,11 @@ export interface SignOutOptions {
   discardChanges?: boolean;
   /** Progress frames for the 0-100 % bar of the busy overlay. */
   onProgress?: (progress: SignOutProgress) => void;
-  /** Test tuning: how many upload attempts / how long between them. */
+  /** Test tuning: how many upload rounds / how long between them. */
   maxUploadAttempts?: number;
   retryDelayMs?: number;
+  /** Test tuning: whole-operation budget of the upload barrier. */
+  uploadBudgetMs?: number;
 }
 
 /**
@@ -421,6 +446,10 @@ export async function signOutGoogle(options: SignOutOptions = {}): Promise<SignO
 
   const pending = await countPendingOperations(account.id);
   if (options.discardChanges !== true) {
+    // Nothing that is only queued may start once the bar is up: a cycle that
+    // began concurrently would list and download an account that is about to be
+    // removed, and it would compete with the barrier for the same documents.
+    cancelScheduledCycle();
     report({ stage: 'preparing', uploaded: 0, total: pending });
     if (pending > 0) {
       const upload = await uploadOutboxBeforeSignOut(account.id, pending, options, report);

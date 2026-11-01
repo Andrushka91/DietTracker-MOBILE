@@ -101,7 +101,7 @@ import {
   uploadObject,
   type DriveObject,
 } from './driveProvider';
-import { AuthError } from './auth';
+import { AuthError, type AuthErrorCode } from './auth';
 import { ensureThumbnail, originalPath, thumbnailPath } from '../data/photoStore';
 import RNFS from '../platform/fs';
 
@@ -517,49 +517,187 @@ async function pushOperation(
   await completeOperation(op.id, new Date().toISOString());
 }
 
-/** Push phase: drain the durable outbox (order = CreatedAt). */
+// --- the upload pipeline -----------------------------------------------------
+//
+// One standard, shared by every caller that drains the outbox (the background
+// cycle, "Synchronize now", the sign-out barrier):
+//
+//  1. the outbox is the durable source of truth (SyncOperation), already
+//     coalesced per document by journalOperation,
+//  2. ONE listing per pass builds the path -> Drive id index, so every document
+//     updates the object it already has instead of creating a new copy,
+//  3. documents are sent through a small bounded window of parallel requests -
+//     uploads are latency bound, and a strictly sequential loop paid one round
+//     trip per document,
+//  4. every document settles on its own: a failure records the backoff and
+//     stays in the outbox, a success removes it - reported progress therefore
+//     always means "documents that really reached the cloud",
+//  5. the push phase is serialized process-wide, so a background cycle and an
+//     account boundary can never upload the same outbox twice,
+//  6. a pass accepts a deadline: no NEW document starts after it, while requests
+//     already in flight finish (each is bounded by its own HTTP timeout), so the
+//     caller is never left hanging and never has to guess what happened.
+
+/** Documents one push pass may send at the same time. */
+const UPLOAD_CONCURRENCY = 3;
+
+/**
+ * Serializes the push phase. A cycle that is downloading must never block an
+ * account boundary, so the lock covers the uploads only - not the whole cycle.
+ */
+let pushChain: Promise<unknown> = Promise.resolve();
+
+function withPushLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = pushChain.then(work, work);
+  pushChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** Options of one outbox pass (see the rules above). */
+export interface OutboxUploadOptions {
+  /** Ignores the exponential-backoff window of a failed document. */
+  ignoreBackoff?: boolean;
+  /** Called with (settled, total) after every document that left the outbox. */
+  onProgress?: (settled: number, total: number) => void;
+  /** Absolute epoch ms: no new document starts after it. */
+  deadlineAt?: number;
+  /** Reuses the listing of an earlier pass (retry rounds of one barrier). */
+  fileIndex?: Map<string, DriveObject>;
+  /** Session epoch the caller captured (its own work must never look stale). */
+  epoch?: number;
+}
+
+/** What one outbox pass achieved. */
+export interface OutboxUploadResult {
+  /** Documents that reached the cloud in this pass. */
+  uploaded: number;
+  /** Documents that failed in this pass (they stay in the outbox). */
+  failed: number;
+  /** Documents still waiting when the pass ended. */
+  pending: number;
+  /** The listing the pass used - hand it back to the next round. */
+  fileIndex: Map<string, DriveObject>;
+  /** Stable code when the pass was aborted (auth failure). */
+  error?: string;
+}
+
+/**
+ * Drains the outbox once. Returns how many documents really reached the cloud
+ * plus what is still waiting, so the caller never has to guess.
+ */
+export function uploadOutbox(options: OutboxUploadOptions = {}): Promise<OutboxUploadResult> {
+  return withPushLock(() => uploadOutboxLocked(options));
+}
+
+async function uploadOutboxLocked(options: OutboxUploadOptions): Promise<OutboxUploadResult> {
+  const account = await getActiveAccount();
+  const cachedIndex = options.fileIndex ?? new Map<string, DriveObject>();
+  if (account === null) {
+    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex };
+  }
+  const pending = await getPendingOperations(account.id);
+  if (pending.length === 0) {
+    return { uploaded: 0, failed: 0, pending: 0, fileIndex: cachedIndex };
+  }
+
+  const total = pending.length;
+  // 0 of N is the first frame of the sign-out bar: the bar starts empty and
+  // moves one step per settled document.
+  options.onProgress?.(0, total);
+
+  // The listing is the first request of a pass. A dead connection fails it, and
+  // then nothing can be decided about an individual document: the pass reports
+  // "no progress" (the caller retries or refuses) instead of throwing at the
+  // caller, which would leave the sign-out bar without an answer.
+  let fileIndex: Map<string, DriveObject>;
+  try {
+    fileIndex = options.fileIndex ?? (await buildFileIndex());
+  } catch (error) {
+    const message = error instanceof AuthError ? error.code : String(error);
+    return {
+      uploaded: 0,
+      failed: 0,
+      pending: pending.length,
+      fileIndex: cachedIndex,
+      ...(error instanceof AuthError ? { error: message } : {}),
+    };
+  }
+  const epoch = options.epoch ?? sessionEpoch;
+  const ignoreBackoff = options.ignoreBackoff === true;
+  const deadlineAt = options.deadlineAt ?? Number.POSITIVE_INFINITY;
+
+  let settled = 0;
+  let failed = 0;
+  let next = 0;
+  let fatal: string | null = null;
+
+  /** One worker: takes the next document of the list until it is exhausted. */
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      if (fatal !== null || cycleIsStale(epoch) || Date.now() >= deadlineAt) {
+        return;
+      }
+      const index = next;
+      if (index >= pending.length) {
+        return;
+      }
+      next += 1;
+      const op = pending[index];
+      if (!ignoreBackoff && op.status === SyncOperationStatus.Failed && op.nextAttemptAt !== null) {
+        if (Date.parse(op.nextAttemptAt) > Date.now()) {
+          continue; // still inside the backoff window: not due, not a failure
+        }
+      }
+      try {
+        await pushOperation(op, fileIndex);
+        settled += 1;
+        options.onProgress?.(settled, total);
+      } catch (error) {
+        const message = error instanceof AuthError ? error.code : String(error);
+        failed += 1;
+        const retryCount = op.retryCount + 1;
+        const nextAttempt =
+          retryCount > 8
+            ? null
+            : new Date(Date.now() + backoffDelayMs(op.retryCount)).toISOString();
+        await failOperation(op.id, message, retryCount, nextAttempt);
+        if (error instanceof AuthError) {
+          // Retrying revoked credentials only burns the user's time.
+          fatal = error.code;
+          return;
+        }
+      }
+    }
+  };
+
+  const workers = Math.max(1, Math.min(UPLOAD_CONCURRENCY, pending.length));
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+
+  const remaining = await countPendingOperations(account.id);
+  return {
+    uploaded: settled,
+    failed,
+    pending: remaining,
+    fileIndex,
+    ...(fatal === null ? {} : { error: fatal }),
+  };
+}
+
+/** Push phase of a cycle: drain the durable outbox (order = CreatedAt). */
 async function pushPending(
-  accountId: string,
   epoch: number,
   onProgress?: (uploaded: number, total: number) => void,
   ignoreBackoff = false,
 ): Promise<number> {
-  const pending = await getPendingOperations(accountId);
-  if (pending.length === 0) {
-    return 0;
+  const pass = await uploadOutbox({ ignoreBackoff, onProgress, epoch });
+  if (pass.error !== undefined) {
+    // A rejected grant aborts the whole cycle: the pull would fail the same way.
+    throw new AuthError(pass.error as AuthErrorCode);
   }
-  // 0 of N is the first frame of the sign-out bar: the bar starts empty and
-  // moves one step per settled document.
-  onProgress?.(0, pending.length);
-  const fileIndex = await buildFileIndex();
-  let uploaded = 0;
-  for (const op of pending) {
-    if (cycleIsStale(epoch)) {
-      return uploaded; // the session ended: stop uploading its records
-    }
-    if (!ignoreBackoff && op.status === SyncOperationStatus.Failed && op.nextAttemptAt !== null) {
-      if (Date.parse(op.nextAttemptAt) > Date.now()) {
-        continue; // still inside the backoff window
-      }
-    }
-    try {
-      await pushOperation(op, fileIndex);
-      uploaded += 1;
-      onProgress?.(uploaded, pending.length);
-    } catch (error) {
-      const message = error instanceof AuthError ? error.code : String(error);
-      const retryCount = op.retryCount + 1;
-      const nextAttempt =
-        retryCount > 8
-          ? null
-          : new Date(Date.now() + backoffDelayMs(op.retryCount)).toISOString();
-      await failOperation(op.id, message, retryCount, nextAttempt);
-      if (error instanceof AuthError) {
-        throw error;
-      }
-    }
-  }
-  return uploaded;
+  return pass.uploaded;
 }
 
 /** Base64 -> bytes (upload helper; works in Hermes + Jest). */
@@ -1313,7 +1451,6 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
     const uploaded = pullOnly
       ? 0
       : await pushPending(
-          account.id,
           epoch,
           options.onUploadProgress,
           options.ignoreBackoff === true,
@@ -1525,6 +1662,22 @@ export function notifyLocalChange(): void {
     debounceHandle = null;
     void runCycle({ trigger: SyncTrigger.LocalChange });
   }, 3000);
+}
+
+/**
+ * Drops background work that has been requested but not started yet (the 3 s
+ * debounce of a local edit, a pass remembered during a running cycle).
+ *
+ * The account boundaries use it: while the sign-out bar is draining the outbox,
+ * a queued cycle would only start a second listing and a full download of an
+ * account that is about to be removed.
+ */
+export function cancelScheduledCycle(): void {
+  if (debounceHandle !== null) {
+    clearTimeout(debounceHandle);
+    debounceHandle = null;
+  }
+  pendingTrigger = null;
 }
 
 // --- special operations -----------------------------------------------------

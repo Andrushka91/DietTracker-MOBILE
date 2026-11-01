@@ -32,7 +32,7 @@ npm install            # installs everything from package-lock.json
 ### 3. Sanity check (once — optional but recommended)
 
 ```bash
-npm run check          # typecheck + lint + 28 unit tests — must be green
+npm run check          # typecheck + lint + 72 unit tests — must be green
 ```
 
 ### 4. Start the dev server
@@ -315,6 +315,50 @@ synchronization is shown as well.
   (Windows cannot build iOS locally; a Mac or EAS build is only needed if you
   ever add a library outside Expo, of which there are currently none).
 
+## How the upload works (outbox → Google Drive)
+
+Every local write is committed to SQLite first and then recorded in the durable
+outbox (`SyncOperation`); the screens never wait for the network. The upload
+pipeline (`uploadOutbox` in `src/cloud/syncEngine.ts`) is the single path used by
+the background cycle, "Synchronize now" and the sign-out barrier, and it follows
+the standard offline-first rules:
+
+1. **The outbox is the source of truth** and is already coalesced per document -
+   ten edits of the same meal are one operation, not ten.
+2. **One listing per pass** builds the `path → Drive file id` index, so each
+   document updates the object it already has instead of creating a copy.
+3. **A small bounded window of parallel requests (3)** - uploads are latency
+   bound, so a sequential loop paid one round trip per document.
+4. **Every document settles on its own**: a success leaves the outbox, a failure
+   records the exponential backoff and stays, so the reported progress always
+   means "documents that really reached the cloud".
+5. **The push phase is serialized process-wide**, so a background cycle and an
+   account boundary can never upload the same outbox twice.
+6. **The local database keeps one writer**: `withTransactionAsync` is a pair of
+   statements, so `src/data/sqlite.ts` queues transactions - parallel uploads can
+   otherwise interleave `BEGIN`/`COMMIT` and fail with "cannot start a
+   transaction within a transaction".
+
+Sign-out is the one operation that must finish before the session changes: it
+drains the outbox behind a determinate bar, ignores the backoff window, reuses the
+listing between rounds, retries only rounds that achieved nothing, and stops at a
+whole-operation budget (30 s). When the outbox still cannot be emptied the local
+cache is kept and the sign-out is **refused** - the phone never deletes the only
+copy of a record.
+
+Two defects of the previous version are covered by regression tests:
+
+* the barrier drove a full synchronization *cycle*, so when a background cycle was
+  already running the barrier received **that** promise: its progress callback was
+  never installed (bar at 0 %), an 8 s deadline fired, and after four rounds the
+  sign-out was refused although the upload was still going. It now drains the
+  outbox itself (`__tests__/uploadPipeline.test.ts`);
+* on Android the first tap after typing in the meal editor only dismissed the
+  keyboard, because the dashboard `ScrollView` used the default
+  `keyboardShouldPersistTaps="never"`. It is now `"handled"`, and the card also
+  keeps a re-entry guard so a double tap writes the record once
+  (`__tests__/mealCardSave.test.tsx`).
+
 ## Troubleshooting
 
 **Scan fails / app says it cannot connect**
@@ -384,12 +428,14 @@ npm start
 
 ## Status & honesty statement
 
-* `npm run check` (strict TypeScript + ESLint) is green and **63 unit tests**
+* `npm run check` (strict TypeScript + ESLint) is green and **72 unit tests**
   pass (completion rules, five-slot permanence, validators, photo
   rules, copy rules, analytics incl. the “–” case, DST-safe calendar day
   stepping, sync frequency/backoff, payload + envelope round-trip, Drive
-  addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask, and the
-  sign-out boundary: forced upload, progress frames, refusal that keeps data).
+  addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask, the
+  sign-out boundary: forced upload, progress frames, refusal that keeps data,
+  the parallel upload pipeline (bounded window, monotonic progress, bounded
+  retry budget, one save per press in the meal card editor).
 * Verified on the local Android emulator (API 37, x86_64 debug build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
   the five permanent cards, inline edit + save,

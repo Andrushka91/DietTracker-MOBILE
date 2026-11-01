@@ -63,6 +63,14 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   const [draftIngredients, setDraftIngredients] = useState(meal.ingredients);
   const [draftTime, setDraftTime] = useState('');
   const [errorLine, setErrorLine] = useState<string | null>(null);
+  /** True while this card's save is in flight (the Save button is disabled). */
+  const [saving, setSaving] = useState(false);
+  /**
+   * Re-entry guard for the save itself. React state is asynchronous, so two
+   * taps landing in the same frame would both pass a `saving === false` check;
+   * this ref is already true for the second one.
+   */
+  const saveBusyRef = useRef(false);
 
   const future = isFutureMeal(meal, now);
   const empty = !hasUserContent(meal, photos.length);
@@ -117,36 +125,49 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
 
   /** Validates + persists the draft. Returns true when the card was written. */
   const runSave = async (): Promise<boolean> => {
-    const timeValue = draftTime.trim();
-    let plannedTime: string | null = null;
-    if (timeValue !== '') {
-      const match = /^(\d{1,2}):(\d{2})$/.exec(timeValue);
-      if (match === null || Number(match[1]) > 23 || Number(match[2]) > 59) {
-        setErrorLine(t('Meal_InvalidTime'));
+    // ONE write at a time. A save that is already running finishes normally and
+    // the duplicate tap is simply dropped, so a double press can never write the
+    // record twice or interleave two validations of the same draft.
+    if (saveBusyRef.current) {
+      return true;
+    }
+    saveBusyRef.current = true;
+    setSaving(true);
+    try {
+      const timeValue = draftTime.trim();
+      let plannedTime: string | null = null;
+      if (timeValue !== '') {
+        const match = /^(\d{1,2}):(\d{2})$/.exec(timeValue);
+        if (match === null || Number(match[1]) > 23 || Number(match[2]) > 59) {
+          setErrorLine(t('Meal_InvalidTime'));
+          return false;
+        }
+        plannedTime = `${match[1].padStart(2, '0')}:${match[2]}:00`;
+      }
+      const draft: MealEntry = {
+        ...meal,
+        title: draftTitle,
+        ingredients: draftIngredients,
+        plannedTime,
+      };
+      const validation = validateMealEntry(draft, true);
+      if (!validation.isValid) {
+        setErrorLine(localizedCode(validation.failures[0].code));
         return false;
       }
-      plannedTime = `${match[1].padStart(2, '0')}:${match[2]}:00`;
+      const saveError = await props.onSave(draft);
+      if (saveError !== null) {
+        setErrorLine(saveError);
+        return false;
+      }
+      setErrorLine(null);
+      setEditing(false);
+      props.onEditingChange?.(meal.id, false);
+      return true;
+    } finally {
+      saveBusyRef.current = false;
+      setSaving(false);
     }
-    const draft: MealEntry = {
-      ...meal,
-      title: draftTitle,
-      ingredients: draftIngredients,
-      plannedTime,
-    };
-    const validation = validateMealEntry(draft, true);
-    if (!validation.isValid) {
-      setErrorLine(localizedCode(validation.failures[0].code));
-      return false;
-    }
-    const saveError = await props.onSave(draft);
-    if (saveError !== null) {
-      setErrorLine(saveError);
-      return false;
-    }
-    setErrorLine(null);
-    setEditing(false);
-    props.onEditingChange?.(meal.id, false);
-    return true;
   };
 
   const saveEdit = async (): Promise<void> => {
@@ -241,8 +262,19 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             placeholderTextColor={colors.textMuted}
           />
           <View style={styles.editorRow}>
-            <BarButton label={t('Common_Cancel')} onPress={cancelEdit} colors={colors} />
-            <BarButton label={t('Common_Save')} onPress={() => void saveEdit()} colors={colors} accent />
+            <BarButton
+              label={t('Common_Cancel')}
+              onPress={cancelEdit}
+              disabled={saving}
+              colors={colors}
+            />
+            <BarButton
+              label={t('Common_Save')}
+              onPress={() => void saveEdit()}
+              disabled={saving}
+              colors={colors}
+              accent
+            />
           </View>
         </View>
       ) : (

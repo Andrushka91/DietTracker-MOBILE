@@ -384,6 +384,12 @@ export function DashboardScreen({
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
+      // The meal editor lives INSIDE this list. With the default
+      // ('never') the first tap after typing only dismisses the keyboard and the
+      // tap never reaches the button - which is exactly why Save had to be
+      // pressed twice on Android. 'handled' forwards every tap a child handles
+      // and still dismisses the keyboard on a tap over empty space.
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={[
         styles.content,
         // The floating tab bar sits ON TOP of the page: keep the same room the
