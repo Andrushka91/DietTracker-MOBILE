@@ -23,7 +23,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DayProgress, addDays, formatDate, forDay, parseDate } from '../../domain/analytics';
 import { MealStatus } from '../../domain/enums';
@@ -41,12 +40,15 @@ import {
   themeColors,
   cardShadow,
 } from '../theme';
+import { useFloatingTabBarClearance } from '../tabBar';
 import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
 
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  const insets = useSafeAreaInsets();
+  // Room the floating tab bar needs below the last day row - measured from the
+  // device's own safe-area inset and the bar height (see src/ui/tabBar.ts).
+  const bottomClearance = useFloatingTabBarClearance();
   const today = formatDate(new Date());
   const [month, setMonth] = useState(today.slice(0, 7));
   const [selected, setSelected] = useState(today);
@@ -161,14 +163,10 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // The floating tab bar sits on top of the page: the last row of the
-        // selected day (and the legend under it) must stay readable above it,
-        // and the extra room keeps the bottom of the calendar card clear of the
-        // bar instead of ending flush against it.
-        {
-          paddingBottom:
-            metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) + metrics.spacing * 4,
-        },
+        // The floating tab bar sits on top of the page: the last day row and the
+        // legend stay readable above it, on every device (no per-screen magic
+        // number - the value comes from the bar's own geometry).
+        { paddingBottom: bottomClearance },
       ]}>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
         {/* Month header: the arrows are pinned to the panel's two edges, so the

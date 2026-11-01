@@ -12,7 +12,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -46,6 +46,7 @@ const Bar = BarButton;
 
 import { t, tFmt, formatLongDate } from '../strings';
 import { fonts, metrics, themeColors, typeScale, type ThemeColors } from '../theme';
+import { useFloatingTabBarClearance } from '../tabBar';
 
 export function DashboardScreen({
   route,
@@ -71,7 +72,7 @@ export function DashboardScreen({
   /** Guards the single photograph pipeline (picker + save) against re-entry. */
   const photoBusyRef = useRef(false);
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const bottomClearance = useFloatingTabBarClearance();
   const now = new Date();
   // Two cards per row once the screen is wide enough (tablet / landscape),
   // otherwise one card per row - order is always preserved (spec 8.2).
@@ -394,7 +395,7 @@ export function DashboardScreen({
         styles.content,
         // The floating tab bar sits ON TOP of the page: keep the same room the
         // Settings page leaves, so Dinner (the last card) is never covered.
-        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+        { paddingBottom: bottomClearance },
       ]}>
       {/* header - part of the page, not a card: long date title,
           Previous / Today / Next, progress line, three state counters, day

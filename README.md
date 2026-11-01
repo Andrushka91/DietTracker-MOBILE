@@ -32,7 +32,7 @@ npm install            # installs everything from package-lock.json
 ### 3. Sanity check (once — optional but recommended)
 
 ```bash
-npm run check          # typecheck + lint + 72 unit tests — must be green
+npm run check          # typecheck + lint + 78 unit tests — must be green
 ```
 
 ### 4. Start the dev server
@@ -157,8 +157,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `1f66e21e…21a33e` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `26df0c02…a1526a` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `da8ed18e…9dc678` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `fec87e54…9716b5` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -428,14 +428,15 @@ npm start
 
 ## Status & honesty statement
 
-* `npm run check` (strict TypeScript + ESLint) is green and **72 unit tests**
+* `npm run check` (strict TypeScript + ESLint) is green and **78 unit tests**
   pass (completion rules, five-slot permanence, validators, photo
   rules, copy rules, analytics incl. the “–” case, DST-safe calendar day
   stepping, sync frequency/backoff, payload + envelope round-trip, Drive
   addressing, string table incl. `{0:0.#}` specifiers, weekday bitmask, the
   sign-out boundary: forced upload, progress frames, refusal that keeps data,
   the parallel upload pipeline (bounded window, monotonic progress, bounded
-  retry budget, one save per press in the meal card editor).
+  retry budget, one save per press in the meal card editor, and the floating
+  tab bar clearance for six real device insets).
 * Verified on the local Android emulator (API 37, x86_64 release APK
   `DietTracker-1.0.0.0-universal.apk` installed over the previous build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
@@ -537,9 +538,19 @@ npm start
     `mipmap-*dpi/ic_launcher.png`, the circular `ic_launcher_round.png`, the
     `mipmap-anydpi-v26` adaptive icon (72 dp safe zone over the same blue
     `#1A7AC5`) and `assets/icon.png` / `assets/adaptive-icon.png` for Expo.
-  * Every scrolling page leaves `metrics.floatingTabBarClearance` (110 pt) plus the
-    bottom safe-area inset below its last card, so the floating tab bar never covers
-    it (dashboard, calendar, statistics, templates and settings share the constant).
-    The calendar adds `spacing * 4` (48 pt) on top of that, because its day rows and
-    the legend run all the way to the bottom of the card and used to end flush against
-    the bar - the extra room is what makes the last rows readable while scrolling.
+  * Every scrolling page leaves room for the **floating tab bar** below its last
+    card, and that room is now *measured* instead of guessed: `src/ui/tabBar.ts` is
+    the single source of truth for the bar's geometry (`TAB_BAR_HEIGHT` 66,
+    `TAB_BAR_SIDE_INSET` 14, `TAB_BAR_MIN_BOTTOM_OFFSET` 10,
+    `TAB_BAR_CLEARANCE_GAP` 32). The navigator in `App.tsx` draws the bar with those
+    constants and every page (dashboard, calendar, statistics, templates, settings)
+    pads its scroll content with `useFloatingTabBarClearance()` =
+    *device bottom safe-area inset (floor 10)* + *bar height the navigator
+    published* + *32 pt of air*. Both device-dependent halves are read at runtime
+    (safe-area context + `BottomTabBarHeightContext`), so a phone with a 3-button
+    navigation bar and one with a 48 pt gesture area keep the SAME visible gap, and
+    a change of the bar's height/float in `App.tsx` moves every page with it - the
+    previous fixed "110 pt + inset" constant was a guess that left too little air on
+    some devices (the calendar's day rows and legend ended flush against the bar)
+    and a visible hole on others. `__tests__/tabBarClearance.test.ts` pins the
+    formula for six real insets and fails if a page ever hardcodes the number again.

@@ -13,7 +13,6 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
@@ -28,6 +27,7 @@ import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { fonts, metrics, cardShadow, themeColors, typeScale } from '../theme';
+import { useFloatingTabBarClearance } from '../tabBar';
 import { formatMegabytes, t, tFmt } from '../strings';
 
 /**
@@ -40,7 +40,7 @@ const SIGN_OUT_UPLOAD_FAILED =
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  const insets = useSafeAreaInsets();
+  const bottomClearance = useFloatingTabBarClearance();
   const [dbPath, setDbPath] = useState('');
   const [storageMb, setStorageMb] = useState('0.00');
   const [quotaLine, setQuotaLine] = useState<string | null>(null);
@@ -339,7 +339,7 @@ export function SettingsScreen(): React.JSX.Element {
         styles.content,
         // The floating tab bar sits ON TOP of the page; the extra room keeps the
         // About card (the last one) fully readable above it.
-        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+        { paddingBottom: bottomClearance },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
       {!app.signedIn && (

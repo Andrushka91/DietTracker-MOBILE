@@ -44,6 +44,11 @@ import { StatisticsScreen } from './src/ui/screens/StatisticsScreen';
 import { TemplatesScreen } from './src/ui/screens/TemplatesScreen';
 import { SettingsScreen } from './src/ui/screens/SettingsScreen';
 import { argb, fonts, themeColors } from './src/ui/theme';
+import {
+  TAB_BAR_HEIGHT,
+  TAB_BAR_SIDE_INSET,
+  tabBarBottomOffset,
+} from './src/ui/tabBar';
 import { t } from './src/ui/strings';
 import { setAppActive, startSyncTriggers, stopSyncTriggers } from './src/cloud/syncEngine';
 import {
@@ -88,16 +93,16 @@ function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }): React
   return <Text style={[styles.tabIcon, { opacity: focused ? 1 : 0.55 }]}>{glyph}</Text>;
 }
 
-/** Height of the floating (iOS style) tab bar, labels included. */
-const TAB_BAR_HEIGHT = 66;
-
 function Tabs(): React.JSX.Element {
   const { isDark } = useApp();
   const colors = themeColors(isDark);
   const insets = useSafeAreaInsets();
-  // The bar floats 14 pt from both edges and clears the home indicator, so the
-  // pages keep their own background right up to the system edges.
-  const barBottom = Math.max(insets.bottom, 10);
+  // The bar floats TAB_BAR_SIDE_INSET from both edges and clears the home
+  // indicator, so the pages keep their own background right up to the system
+  // edges. Both numbers come from src/ui/tabBar.ts, which is also what every
+  // page asks for the room it has to leave below its last card - the bar and
+  // the pages can therefore never disagree about the space.
+  const barBottom = tabBarBottomOffset(insets.bottom);
   return (
     <Tab.Navigator
       screenOptions={{
@@ -106,8 +111,8 @@ function Tabs(): React.JSX.Element {
         headerShown: false,
         tabBarStyle: {
           position: 'absolute',
-          left: 14,
-          right: 14,
+          left: TAB_BAR_SIDE_INSET,
+          right: TAB_BAR_SIDE_INSET,
           bottom: barBottom,
           height: TAB_BAR_HEIGHT,
           paddingTop: 7,
