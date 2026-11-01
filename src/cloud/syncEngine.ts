@@ -127,6 +127,12 @@ export type SyncStateListener = (state: SyncState, lastSuccess: string | null) =
 let currentState: SyncState = SyncState.NotConfigured;
 let lastSuccessfulSync: string | null = null;
 let runningCycle: Promise<CycleResult> | null = null;
+/**
+ * Session token. Sign-out bumps it, so a cycle that is still in flight when the
+ * session ends stops at its next document instead of writing the previous
+ * account's records back into the freshly purged (guest) database.
+ */
+let sessionEpoch = 0;
 /** A request that arrived while a cycle was running, run as one more pass. */
 let pendingTrigger: SyncTrigger | null = null;
 /** When the last automatic download ran, for the throttle of SyncTrigger.AutoPull. */
@@ -512,7 +518,7 @@ async function pushOperation(
 }
 
 /** Push phase: drain the durable outbox (order = CreatedAt). */
-async function pushPending(accountId: string): Promise<number> {
+async function pushPending(accountId: string, epoch: number): Promise<number> {
   const pending = await getPendingOperations(accountId);
   if (pending.length === 0) {
     return 0;
@@ -520,6 +526,9 @@ async function pushPending(accountId: string): Promise<number> {
   const fileIndex = await buildFileIndex();
   let uploaded = 0;
   for (const op of pending) {
+    if (cycleIsStale(epoch)) {
+      return uploaded; // the session ended: stop uploading its records
+    }
     if (op.status === SyncOperationStatus.Failed && op.nextAttemptAt !== null) {
       if (Date.parse(op.nextAttemptAt) > Date.now()) {
         continue; // still inside the backoff window
@@ -1035,6 +1044,7 @@ interface PullResult {
 async function pullChanges(
   accountId: string,
   options: { acceptOwnDevice: boolean },
+  epoch: number,
 ): Promise<PullResult> {
   const metadata = await getMetadata(accountId);
   const since = metadata?.lastSyncCursor ?? null;
@@ -1066,6 +1076,11 @@ async function pullChanges(
   const others = entityDocuments.filter((change) => !isPhotoDocument(change.path));
 
   for (const change of [...others, ...photos]) {
+    if (cycleIsStale(epoch)) {
+      // The session ended while the listing was in flight (sign-out): stop
+      // before the first write - the cache it would touch no longer exists.
+      return { downloaded, failed, conflicts, skipped, unchanged, watermark };
+    }
     try {
       const json = await downloadObject(change.path, change.id);
       if (json === null) {
@@ -1215,7 +1230,22 @@ export function emptyCycleResult(error?: string): CycleResult {
   return { uploaded: 0, downloaded: 0, failed: 0, conflicts: 0, skipped: 0, error };
 }
 
+/**
+ * Tells any cycle still in flight that its session is over (sign-out). The
+ * engine abandons its work at the next document instead of writing the previous
+ * account's records into the guest database the purge just created.
+ */
+export function invalidateRunningCycle(): void {
+  sessionEpoch += 1;
+}
+
+/** True once the session that started a cycle has ended. */
+function cycleIsStale(epoch: number): boolean {
+  return epoch !== sessionEpoch;
+}
+
 async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
+  const epoch = sessionEpoch;
   const account = await getActiveAccount();
   if (account === null) {
     emitState(SyncState.NotConfigured);
@@ -1260,15 +1290,31 @@ async function executeCycle(options: RunCycleOptions): Promise<CycleResult> {
     emitState(SyncState.Syncing);
   }
   try {
-    const uploaded = pullOnly ? 0 : await pushPending(account.id);
+    const uploaded = pullOnly ? 0 : await pushPending(account.id, epoch);
     // A push-only pass stops when the outbox is empty: no listing, no downloads,
     // no watermark. The account boundaries (sign in / sign out) use it and would
     // otherwise wait for a full pull nobody asked for.
     const pull: PullResult = pushOnly
       ? { downloaded: 0, failed: 0, conflicts: 0, skipped: 0, unchanged: 0, watermark: '' }
-      : await pullChanges(account.id, {
-          acceptOwnDevice: options.acceptOwnDevice ?? false,
-        });
+      : await pullChanges(
+          account.id,
+          {
+            acceptOwnDevice: options.acceptOwnDevice ?? false,
+          },
+          epoch,
+        );
+
+    if (cycleIsStale(epoch)) {
+      // The session ended under us (sign-out): report what happened, but never
+      // write the metadata of an account that no longer exists.
+      return {
+        uploaded,
+        downloaded: pull.downloaded,
+        failed: pull.failed,
+        conflicts: pull.conflicts,
+        skipped: pull.skipped,
+      };
+    }
 
     const now = new Date().toISOString();
     if (!pushOnly) {
@@ -1582,7 +1628,7 @@ export async function restoreFromCloud(): Promise<{
   }
   emitState(SyncState.Syncing);
   try {
-    const pull = await pullChanges(account.id, { acceptOwnDevice: true });
+    const pull = await pullChanges(account.id, { acceptOwnDevice: true }, sessionEpoch);
     const now = new Date().toISOString();
     const fresh = (await getMetadata(account.id)) ?? metadata;
     if (fresh !== null) {

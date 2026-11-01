@@ -179,9 +179,14 @@ export async function signIn(): Promise<StoredTokens> {
 async function fetchIdentity(
   accessToken: string,
 ): Promise<{ sub: string; email: string; name: string; picture: string }> {
+  // Same reasoning as the Drive client: React Native's fetch has no timeout of
+  // its own, so a stalled request must be cut off instead of hanging the caller.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
     const response = await fetch(USERINFO_ENDPOINT, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
     });
     if (!response.ok) {
       throw new AuthError('Auth_google_identity_unavailable');
@@ -201,6 +206,8 @@ async function fetchIdentity(
       throw error;
     }
     throw new AuthError('Auth_google_network_error');
+  } finally {
+    clearTimeout(timer);
   }
 }
 

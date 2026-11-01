@@ -11,7 +11,7 @@
 //    unless the user explicitly discards them. Then credentials are removed
 //    and the whole local cache is deleted.
 
-import { ProviderType, SyncStatus } from '../domain/enums';
+import { ProviderType, SyncOperationStatus, SyncStatus } from '../domain/enums';
 import { SyncTrigger } from '../domain/enums';
 import { newGuid } from '../domain/rules/mealSlotRules';
 import { AuthError, readTokens, signIn as googleSignIn, signOutLocal } from './auth';
@@ -20,6 +20,7 @@ import {
   deleteAllAccounts,
   getActiveAccount,
   getActiveProfile,
+  getPendingOperations,
   getPreferences,
   purgeLocalRecords,
   upsertAccount,
@@ -31,7 +32,72 @@ import { removeAllPhotoFiles } from '../data/photoStore';
 import { closeDb } from '../data/database';
 import { getDeviceId } from '../services/deviceId';
 import { ensureCategories } from '../services/mealTracking';
-import { pushAllLocalRecords, refreshStateAsync, runCycle } from './syncEngine';
+import {
+  invalidateRunningCycle,
+  pushAllLocalRecords,
+  refreshStateAsync,
+  runCycle,
+} from './syncEngine';
+
+/**
+ * Upper bound for the upload that runs before a session change. The phone may be
+ * on a dying connection, and Google's endpoints are only bounded because the
+ * Drive client now aborts its own requests - this deadline keeps the SIGN-OUT
+ * spinner short even when that abort has not fired yet. When it wins, the
+ * pending count decides: the user is offered "sign out anyway" instead of
+ * watching a spinner.
+ */
+const ACCOUNT_FLUSH_DEADLINE_MS = 8000;
+
+/** Resolves to null when `ms` elapses first; never leaves a dangling rejection. */
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  // The losing promise keeps running in the background; swallow it so it can
+  // never become an unhandled rejection (the engine handles its own errors).
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
+ * True when the outbox holds something that can be sent right now. An entry
+ * waiting out its exponential backoff (or one that already exhausted its
+ * retries) cannot be uploaded faster by trying again - and a cycle STARTS with
+ * a full Drive listing, which is exactly the delay an account change must avoid.
+ */
+async function hasSendableOperation(accountId: string): Promise<boolean> {
+  const pending = await getPendingOperations(accountId);
+  const now = Date.now();
+  return pending.some(
+    (op) =>
+      op.status !== SyncOperationStatus.Failed ||
+      op.nextAttemptAt === null ||
+      Date.parse(op.nextAttemptAt) <= now,
+  );
+}
+
+/**
+ * Uploads the outbox before the session changes, bounded in time. Skips the
+ * network entirely when nothing is sendable, so an idle or backoff-only account
+ * signs out instantly.
+ */
+async function flushOutbox(accountId: string): Promise<void> {
+  if (!(await hasSendableOperation(accountId))) {
+    return;
+  }
+  await withDeadline(
+    runCycle({ trigger: SyncTrigger.Manual, pushOnly: true }),
+    ACCOUNT_FLUSH_DEADLINE_MS,
+  );
+}
 
 export interface SignInResult {
   ok: boolean;
@@ -75,8 +141,9 @@ export async function signInWithGoogle(options: {
   if (existing !== null) {
     const pending = await countPendingOperations(existing.id);
     if (pending > 0) {
-      // Push only: the gate is "is the outbox empty?", not "pull the cloud".
-      await runCycle({ trigger: SyncTrigger.Manual, pushOnly: true });
+      // Push only and time-boxed: the gate is "is the outbox empty?", not "pull
+      // the cloud", and a dying connection must not hold the account switch.
+      await flushOutbox(existing.id);
       if ((await countPendingOperations(existing.id)) > 0) {
         return { ok: false, error: 'Account_SignInPendingChanges' };
       }
@@ -103,6 +170,9 @@ export async function signInWithGoogle(options: {
   if (existing !== null && !sameAccount) {
     // The cache belongs to the previous account: keep a backup, then replace it.
     await backupBeforeAccountSwitch();
+    // Any cycle of the old session still in flight must not write into the
+    // cache the new account is about to fill.
+    invalidateRunningCycle();
     await purgeLocalRecords();
     await removeAllPhotoFiles();
     await deleteAllAccounts();
@@ -222,25 +292,32 @@ export async function signOutGoogle(options: {
   const account = await getActiveAccount();
   if (account === null) {
     // Guest/local session: nothing to upload, just clear local auth state.
+    invalidateRunningCycle();
     await signOutLocal();
     return { ok: true, pending: 0 };
   }
 
   if (!options.discardChanges) {
-    // Upload only what is actually still waiting: an idle sign-out must not sit
-    // through a full cycle (a listing plus a pull of the other device's changes)
-    // just to discover there is nothing to send. The upload itself is a
-    // push-only pass for the same reason - the cache is about to be deleted, so
-    // downloading the other device's documents first is pure waiting.
+    // Upload only what is actually still waiting, and only for as long as a tap
+    // can reasonably keep a spinner on screen (ACCOUNT_FLUSH_DEADLINE_MS). An
+    // idle account - or one whose only entries wait out their backoff - never
+    // touches the network at all, which is what made this feel stuck before:
+    // the flush began with a full Drive listing.
     if ((await countPendingOperations(account.id)) > 0) {
-      await runCycle({ trigger: SyncTrigger.Manual, pushOnly: true });
+      await flushOutbox(account.id);
     }
     const pending = await countPendingOperations(account.id);
     if (pending > 0) {
+      // Nothing was purged yet: the upload may still complete in the background,
+      // so the user can simply try again, or explicitly discard.
       return { ok: false, pending, error: 'Account_SignOutPendingDetail' };
     }
   }
 
+  // The cache of this account ends here. Whatever cycle is still in flight (a
+  // flush that hit the deadline, the periodic pull) must stop before the purge
+  // creates the guest database it would otherwise write into.
+  invalidateRunningCycle();
   await signOutLocal();
   await purgeLocalRecords();
   await removeAllPhotoFiles();

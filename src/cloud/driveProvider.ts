@@ -128,14 +128,42 @@ function isNotFound(error: unknown): boolean {
   return String(error).includes('drive.http.404');
 }
 
+/**
+ * Hard ceiling for one Drive request. React Native's `fetch` has NO default
+ * timeout: a dropped cell-to-Wi-Fi handover, a captive portal or a sleeping
+ * radio left the caller waiting for a minute or more - and whatever spinner sat
+ * above it (sign-out above all) stayed on screen for exactly as long.
+ */
+const REQUEST_TIMEOUT_MS = 20000;
+
+/** Uploads carry photo bytes: slower links get their own, larger ceiling. */
+const UPLOAD_TIMEOUT_MS = 60000;
+
 async function authHeader(): Promise<Record<string, string>> {
   const accessToken = await getValidAccessToken();
   return { Authorization: `Bearer ${accessToken}` };
 }
 
-async function request(url: string, init: RequestInit = {}): Promise<Response> {
+async function request(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
   const headers = { ...(await authHeader()), ...(init.headers as Record<string, string>) };
-  const response = await fetch(url, { ...init, headers });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, headers, signal: controller.signal });
+  } catch (error) {
+    // An abort is reported as a plain network failure so every caller keeps its
+    // existing "offline / try again" handling (nothing here is fatal).
+    const reason = controller.signal.aborted ? 'drive.network.timeout' : 'drive.network.error';
+    console.warn('[drive] request failed', reason, String(error));
+    throw new Error(reason);
+  } finally {
+    clearTimeout(timer);
+  }
   if (response.status === 401) {
     // Expired/revoked grant -> the sync engine surfaces AuthenticationRequired.
     throw new AuthError('Auth_google_unauthorized');
@@ -218,11 +246,15 @@ export async function uploadObject(
       : `${UPLOAD_BASE}/${existingId}?uploadType=multipart&fields=${FILE_FIELDS}`;
   const method = existingId === null ? 'POST' : 'PATCH';
 
-  const response = await request(endpoint, {
-    method,
-    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-    body: body as unknown as BodyInit_,
-  });
+  const response = await request(
+    endpoint,
+    {
+      method,
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body: body as unknown as BodyInit_,
+    },
+    UPLOAD_TIMEOUT_MS,
+  );
   const file = (await response.json()) as RawFile;
   return toObject(file);
 }

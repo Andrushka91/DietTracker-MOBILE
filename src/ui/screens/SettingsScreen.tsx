@@ -247,6 +247,11 @@ export function SettingsScreen(): React.JSX.Element {
         let result: Awaited<ReturnType<typeof app.signOut>>;
         try {
           result = await app.signOut(false);
+        } catch (error) {
+          // Never leave the user without feedback (the overlay is already gone).
+          console.warn('[settings] sign-out failed', error);
+          app.showStatus(t('Auth_Unknown'));
+          return;
         } finally {
           app.setBusy(null);
         }
@@ -268,6 +273,9 @@ export function SettingsScreen(): React.JSX.Element {
               try {
                 await app.signOut(true);
                 app.showStatus(t('Account_SignOutDiscarded'));
+              } catch (error) {
+                console.warn('[settings] sign-out failed', error);
+                app.showStatus(t('Auth_Unknown'));
               } finally {
                 app.setBusy(null);
               }
@@ -299,6 +307,9 @@ export function SettingsScreen(): React.JSX.Element {
       }
       app.showStatus(t('Account_SignedIn'));
       await refreshFacts();
+    } catch (error) {
+      console.warn('[settings] sign-in failed', error);
+      app.showStatus(t('Auth_Unknown'));
     } finally {
       app.setBusy(null);
     }
