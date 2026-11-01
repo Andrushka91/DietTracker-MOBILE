@@ -179,6 +179,27 @@ Nothing requires a global install — `expo`, `eas-cli`, `react-native`,
 > `npm run ios` are **local** builds; Android needs the Android SDK (this
 > machine has it, see *Local Android emulator* below), iOS needs Xcode.
 
+## Design system (tokens, icons, screenshots)
+
+The whole look comes from **one token file** and **one icon component**, so a
+visual change never touches logic, navigation or data:
+
+| What | Where |
+|---|---|
+| Colours (light + dark), state colours, radii, spacing, text scale, elevation | `src/ui/theme.ts` (`themeColors`, `metrics`, `typeScale`, `pageTitleStyle`, `cardShadow`, `raisedShadow`) |
+| Icons — one family for tabs, actions, pills and chrome | `src/ui/components/icons.tsx` (`Ionicons` from the Expo-pinned `@expo/vector-icons`) |
+| Before / after screenshots of every screen in both themes, plus the validation log | [`docs/design/`](./docs/design/README.md) |
+
+Rules that keep it coherent: cards are always lighter than the page and lifted by
+`cardShadow`; the accent (indigo) is the only interactive colour; the three state
+colours mean the same everywhere and are always repeated in words, never colour
+alone. Meal-category emoji come from `MealCategory.Icon` in SQLite and are **data**,
+not design.
+
+The visual refresh is documented (and reversible) on the
+`redesign/visual-refresh-20261101` branch; the rollback point is the
+`backup/pre-redesign-20261101-2126` tag and its GitHub release.
+
 ## Standalone release APK
 
 `npm run apk` builds what you install on a phone **without** a development server:
