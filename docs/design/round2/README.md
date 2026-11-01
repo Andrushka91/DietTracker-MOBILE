@@ -214,7 +214,7 @@ Each fix was re-rendered on the emulator before the next one; the capture set in
 | Check | Command | Result |
 |---|---|---|
 | Types | `node node_modules/typescript/bin/tsc --noEmit` | clean |
-| Lint | `node node_modules/eslint/bin/eslint.js .` | **0 errors**, 118 warnings — all the pre-existing `no-void` / inline-style warnings |
+| Lint | `node node_modules/eslint/bin/eslint.js .` | **0 errors**, 118 warnings — the repo's long-standing `no-bitwise` / `no-void` / inline-style warnings (5 inline style, 1 unused disable); no errors |
 | Tests | `node node_modules/jest/bin/jest.js` | **14 suites / 99 tests passed** |
 | Release build | `scripts\build-apk.bat` | both APKs rebuilt at 23:31/23:32 on 2026-11-01 (`arm64-v8a` 30,634,597 B `fc74b20d…`, `universal` 87,986,224 B `91a208b5…`); **not uploaded** |
 | Install | `adb install -r -d release\…-universal.apk` | updates in place, all existing meals kept |
