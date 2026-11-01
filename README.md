@@ -157,8 +157,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `cfeb7cbf…a370ea` (1.0.0.0 / 2026-11-01) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `185a1e1f…4effb0d` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `1f66e21e…21a33e` (1.0.0.0 / 2026-11-01) |
+| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `26df0c02…a1526a` (1.0.0.0 / 2026-11-01) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -511,6 +511,15 @@ npm start
     count instead of the miniature meal cards: a phone cell is about 44 pt wide, so
     the five meals of the selected day are listed as full rows under the grid (title,
     category, time, photo count, status pill) - same information, legible size.
+  * The calendar header is one symmetrical block: the ‹ / › month arrows are pinned to
+    the panel's two edges (so the left arrow sits exactly above the left edge of the
+    grid and the right one above the right edge of the action row) with the month label
+    filling the space between them, and the selected day's long date
+    ("Sunday, 1 November 2026") rides to the right of **Open day**, bottom-aligned with
+    the buttons instead of taking a line of its own. The confirmed / missed / pending
+    counters that used to sit under those buttons are gone - the day cells and the
+    status pills already carry that state, and the date line was what pushed the grid
+    down.
   * **Signing out cannot skip the upload.** The account card opens the iOS-style
     confirmation, then the global overlay shows a determinate bar from 0 % to 100 %
     (`busyProgress` in `src/ui/appContext.tsx`, painted by `ProgressOverlay` in
@@ -531,3 +540,6 @@ npm start
   * Every scrolling page leaves `metrics.floatingTabBarClearance` (110 pt) plus the
     bottom safe-area inset below its last card, so the floating tab bar never covers
     it (dashboard, calendar, statistics, templates and settings share the constant).
+    The calendar adds `spacing * 4` (48 pt) on top of that, because its day rows and
+    the legend run all the way to the bottom of the card and used to end flush against
+    the bar - the extra room is what makes the last rows readable while scrolling.

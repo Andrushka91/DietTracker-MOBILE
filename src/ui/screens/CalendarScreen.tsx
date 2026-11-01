@@ -1,6 +1,8 @@
 // Calendar (spec 8.5) - Microsoft-calendar-style month view: a "October 2026"
-// month header with ‹ / › arrows, Today / Open day buttons, selected-day
-// summary, 7-column weekday header (Monday first) and the grid of day cells.
+// month header with ‹ / › arrows pinned to the panel edges, Today / Open day
+// buttons with the selected date riding beside them (bottom-aligned, right-
+// aligned) instead of on a line of its own, the 7-column weekday header
+// (Monday first) and the grid of day cells.
 //
 // Day cell colors: gray = untouched/pending, green = every meal eaten,
 // red = at least one missed; today paints its whole cell with the accent
@@ -39,7 +41,7 @@ import {
   themeColors,
   cardShadow,
 } from '../theme';
-import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t, tFmt } from '../strings';
+import { formatLongDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
 
 export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
   const app = useApp();
@@ -132,7 +134,6 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   for (let index = 0; index < cells.length; index += 7) {
     rows.push(cells.slice(index, index + 7));
   }
-  const selectedProgress = progressByDate[selected];
   // Weekday captions come from the resource file ("Mo Tu We ..."), Monday first.
   const weekdays = t('Calendar_Weekdays').split(/\s+/).filter((name) => name !== '');
 
@@ -161,12 +162,19 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
       contentContainerStyle={[
         styles.content,
         // The floating tab bar sits on top of the page: the last row of the
-        // selected day must stay readable above it.
-        { paddingBottom: metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) },
+        // selected day (and the legend under it) must stay readable above it,
+        // and the extra room keeps the bottom of the calendar card clear of the
+        // bar instead of ending flush against it.
+        {
+          paddingBottom:
+            metrics.floatingTabBarClearance + Math.max(insets.bottom, 10) + metrics.spacing * 4,
+        },
       ]}>
       <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
-        {/* Month header: the arrows hug both edges and the month sits centered
-            between them, iOS-calendar style. */}
+        {/* Month header: the arrows are pinned to the panel's two edges, so the
+            left one lines up with the left edge of the day grid below and the
+            right one with the right edge of the action row - a symmetrical
+            pair framing the centred month label. */}
         <View style={styles.monthRow}>
           <IconButton
             label={t('Calendar_PreviousMonth')}
@@ -184,20 +192,26 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
             colors={colors}
           />
         </View>
-        <View style={styles.buttonRow}>
-          <BarButton label={t('Calendar_Today')} accent onPress={goToToday} colors={colors} />
-          <BarButton
-            label={t('Calendar_OpenDay')}
-            onPress={() => props.onOpenDay(selected)}
-            colors={colors}
-          />
+        {/* Today / Open day keep the left side of the row; the selected date
+            rides to their right, bottom-aligned with the buttons, so it costs
+            no line of its own and the calendar card stays compact. The
+            confirmed/missed/pending counters are deliberately gone: the day
+            cells already colour-code the state. */}
+        <View style={styles.actionRow}>
+          <View style={styles.buttonRow}>
+            <BarButton label={t('Calendar_Today')} accent onPress={goToToday} colors={colors} />
+            <BarButton
+              label={t('Calendar_OpenDay')}
+              onPress={() => props.onOpenDay(selected)}
+              colors={colors}
+            />
+          </View>
+          <Text
+            style={[styles.selectedDate, { color: colors.textSecondary }]}
+            numberOfLines={2}>
+            {formatLongDate(selected)}
+          </Text>
         </View>
-        <Text style={[styles.summary, { color: colors.textSecondary }]} numberOfLines={2}>
-          {formatLongDate(selected)}
-          {selectedProgress !== undefined
-            ? ` - ${tFmt('Calendar_DaySummary', selectedProgress.completed, selectedProgress.missed, selectedProgress.pending)}`
-            : ''}
-        </Text>
 
         <View style={styles.weekHeader}>
           {weekdays.map((weekday) => (
@@ -369,16 +383,31 @@ function statusLabel(status: MealStatus): string {
 const styles = StyleSheet.create({
   content: { padding: metrics.pagePadding },
   panel: { borderRadius: 16, padding: 14 },
-  /** The arrows sit next to the centered month label, as one group. */
+  /**
+   * The arrows sit on the two edges of the panel (space-between) with the month
+   * label filling what is left: both arrows have the same chrome, so the label
+   * stays optically centred and the pair is symmetrical - the left arrow above
+   * the left edge of the grid, the right arrow above the right edge of the
+   * action row.
+   */
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     columnGap: metrics.controlGap,
   },
-  monthLabel: { fontSize: 22, fontFamily: fonts.medium, marginHorizontal: 2 },
-  buttonRow: { flexDirection: 'row', gap: metrics.controlGap, marginTop: 10 },
-  summary: { marginTop: 10, fontSize: 13 },
+  monthLabel: { flex: 1, textAlign: 'center', fontSize: 22, fontFamily: fonts.medium },
+  /** Today / Open day on the left, the selected date bottom-aligned on the right. */
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    columnGap: metrics.controlGap,
+    marginTop: 10,
+  },
+  /** The two buttons never shrink: the date takes the remaining width instead. */
+  buttonRow: { flexDirection: 'row', flexShrink: 0, gap: metrics.controlGap },
+  /** Long date of the selected day ("Sunday, 1 November 2026"). */
+  selectedDate: { flex: 1, textAlign: 'right', fontSize: 12, paddingBottom: 3 },
   weekHeader: { flexDirection: 'row', marginTop: 12 },
   weekday: { flex: 1, textAlign: 'center', fontSize: 12, fontFamily: fonts.medium },
   /** Day grid: whole weeks of seven equal flex cells (no percentage drift). */
