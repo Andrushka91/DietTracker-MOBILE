@@ -33,18 +33,22 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { BarButton, IconButton } from '../components/buttons';
 import { Icon } from '../components/icons';
-import {
-  fonts,
-  metrics,
-  statusPillColors,
-  themeColors,
-  cardShadow,
-  typeScale,
-} from '../theme';
+import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
-import { formatLongDate, formatMediumDate, formatMonthLabel, formatTime, mealNameKey, t } from '../strings';
+import {
+  formatLongDate,
+  formatMonthLabel,
+  formatTime,
+  mealNameKey,
+  t,
+  tFmt,
+} from '../strings';
 
-export function CalendarScreen(props: { onOpenDay: (date: string) => void }): React.JSX.Element {
+export function CalendarScreen(props: {
+  onOpenDay: (date: string) => void;
+  /** Date the page should show on arrival (Statistics sends a period start). */
+  initialDate?: string;
+}): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
   // Room the floating tab bar needs below the last day row - measured from the
@@ -116,6 +120,17 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
     setSelected(today);
   };
 
+  // Arriving from Statistics with a date selects it and opens its month; both
+  // halves matter, or the grid would stay on the month the user just left.
+  useEffect(() => {
+    const target = props.initialDate;
+    if (target === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+      return;
+    }
+    setMonth(target.slice(0, 7));
+    setSelected(target);
+  }, [props.initialDate]);
+
   // The Windows grid starts on the Monday before the 1st and always shows whole
   // weeks, so the neighbouring months' days fill the first and last row. They
   // keep their real day numbers, dimmed to 35 % (CalendarDayViewModel.CellOpacity).
@@ -141,73 +156,79 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
   const weekdays = t('Calendar_Weekdays').split(/\s+/).filter((name) => name !== '');
 
 
-  /**
-   * Calendar day state. A decided day keeps a quiet dot in its state colour (a
-   * full-cell green/red wash on all 42 cells turned the grid into a wall of
-   * tiles); today paints the whole cell with the accent, and a selected day gets
-   * the accent outline. Nothing is decided => no fill at all.
-   */
-  const dayState = (progress?: DayProgress): { dot: string | null } => {
-    if (progress !== undefined && progress.isFullyCompleted) {
-      return { dot: colors.done };
-    }
-    if (progress !== undefined && progress.missed > 0) {
-      return { dot: colors.missed };
-    }
-    return { dot: null };
-  };
+  /** The colour of one meal-slot mark: done, missed, or "nothing recorded". */
+  const markColor = (status: MealStatus): string =>
+    status === MealStatus.Done
+      ? colors.done
+      : status === MealStatus.Missed
+        ? colors.missed
+        : colors.cellPending;
+
+  /** Counts and photo total of the day the agenda is previewing. */
+  const selectedProgress = progressByDate[selected];
+  const selectedPhotos =
+    selectedProgress?.slots.reduce((total, slot) => total + slot.photoCount, 0) ?? 0;
+  const selectedSummary =
+    selectedProgress === undefined
+      ? tFmt('Rn_CalendarDaySummary', 0, 0, 0)
+      : `${tFmt(
+          'Rn_CalendarDaySummary',
+          selectedProgress.completed,
+          selectedProgress.missed,
+          selectedProgress.pending,
+        )}${selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''}`;
 
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // The floating tab bar sits on top of the page: the last day row and the
-        // legend stay readable above it, on every device (no per-screen magic
-        // number - the value comes from the bar's own geometry).
+        // The floating tab bar sits on top of the page: the agenda stays readable
+        // above it on every device (no per-screen magic number).
         { paddingBottom: bottomClearance },
       ]}>
-      <View style={[styles.panel, cardShadow, { backgroundColor: colors.surface }]}>
-        {/* Month header: the arrows are pinned to the panel's two edges, so the
-            left one lines up with the left edge of the day grid below and the
-            right one with the right edge of the action row - a symmetrical
-            pair framing the centred month label. */}
+      <View style={styles.pageHead}>
+        <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Calendar')}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('Calendar_Today')}
+          onPress={goToToday}
+          hitSlop={10}
+          style={({ pressed }) => [styles.todayLink, { opacity: pressed ? 0.6 : 1 }]}>
+          <Text style={[styles.todayLinkText, { color: colors.accent }]}>
+            {t('Calendar_Today')}
+          </Text>
+        </Pressable>
+      </View>
+      <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+        {t('Rn_CalendarSubtitle')}
+      </Text>
+
+      {/* Month navigation, weekday grid and the mark key read as ONE surface, so
+          the month is a single object instead of three stacked cards. */}
+      <View style={[styles.board, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.monthRow}>
-          <IconButton
-            label={t('Calendar_PreviousMonth')}
-            icon="chevron-back"
-            onPress={() => shiftMonth(-1)}
-            colors={colors}
-          />
           <Text style={[styles.monthLabel, { color: colors.text }]} numberOfLines={1}>
             {formatMonthLabel(month)}
           </Text>
-          <IconButton
-            label={t('Calendar_NextMonth')}
-            icon="chevron-forward"
-            onPress={() => shiftMonth(1)}
-            colors={colors}
-          />
-        </View>
-        {/* Today / Open day keep the left side of the row; the selected date
-            rides to their right, bottom-aligned with the buttons, so it costs
-            no line of its own and the calendar card stays compact. The
-            confirmed/missed/pending counters are deliberately gone: the day
-            cells already colour-code the state. */}
-        <View style={styles.actionRow}>
-          <View style={styles.buttonRow}>
-            <BarButton label={t('Calendar_Today')} accent onPress={goToToday} colors={colors} />
-            <BarButton
-              label={t('Calendar_OpenDay')}
-              onPress={() => props.onOpenDay(selected)}
+          <View style={styles.monthActions}>
+            <IconButton
+              label={t('Calendar_PreviousMonth')}
+              icon="chevron-back"
+              onPress={() => shiftMonth(-1)}
+              size={20}
+              touch={44}
+              colors={colors}
+            />
+            <IconButton
+              label={t('Calendar_NextMonth')}
+              icon="chevron-forward"
+              onPress={() => shiftMonth(1)}
+              size={20}
+              touch={44}
               colors={colors}
             />
           </View>
-          <Text
-            style={[styles.selectedDate, { color: colors.textSecondary }]}
-            numberOfLines={2}>
-            {formatMediumDate(selected)}
-          </Text>
         </View>
 
         <View style={styles.weekHeader}>
@@ -218,6 +239,7 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
           ))}
         </View>
 
+
         <View style={styles.grid}>
           {rows.map((row) => (
             <View key={row[0]?.date ?? ''} style={styles.gridRow}>
@@ -225,307 +247,310 @@ export function CalendarScreen(props: { onOpenDay: (date: string) => void }): Re
                 const isToday = cell.date === today;
                 const isSelected = cell.date === selected;
                 const progress = cell.progress;
-                const hasPhoto = progress !== undefined && progress.slots.some((s) => s.photoCount > 0);
-                const hasFigure = progress !== undefined && progress.decided > 0;
-                const state = dayState(progress);
-                /** White ink on the solid accent fill of today. */
-                const onToday = isToday ? colors.accentFillText : null;
+                /** Recorded days show their five slot marks; untouched days stay quiet. */
+                const recorded = progress !== undefined && progress.decided > 0;
+                const summary =
+                  progress === undefined
+                    ? ''
+                    : tFmt(
+                        'Calendar_DaySummary',
+                        progress.completed,
+                        progress.missed,
+                        progress.pending,
+                      );
                 return (
-                  <View key={cell.date} style={styles.cellHost}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={formatLongDate(cell.date)}
-                      accessibilityState={{ selected: isSelected }}
-                      onPress={() => {
-                        // A day of the neighbouring month also moves the grid there.
-                        if (!cell.inMonth) {
-                          setMonth(cell.date.slice(0, 7));
-                        }
-                        setSelected(cell.date);
-                      }}
-                      onLongPress={() => props.onOpenDay(cell.date)}
+                  <Pressable
+                    key={cell.date}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      summary === '' ? formatLongDate(cell.date) : `${formatLongDate(cell.date)}, ${summary}`
+                    }
+                    accessibilityState={{ selected: isSelected }}
+                    onPress={() => {
+                      // A day of a neighbouring month also moves the grid there.
+                      if (!cell.inMonth) {
+                        setMonth(cell.date.slice(0, 7));
+                      }
+                      setSelected(cell.date);
+                    }}
+                    onLongPress={() => props.onOpenDay(cell.date)}
+                    style={[styles.cell, { opacity: cell.inMonth ? 1 : 0.38 }]}>
+                    {/* Selected = filled circle, today = outline, everything else
+                        is just the number. */}
+                    <View
                       style={[
-                        styles.cell,
-                        {
-                          backgroundColor: isToday ? colors.accent : 'transparent',
-                          borderWidth: isSelected && !isToday ? 1.5 : 0,
+                        styles.dayCircle,
+                        isSelected && { backgroundColor: colors.accent },
+                        !isSelected && isToday && {
+                          borderWidth: 1.5,
                           borderColor: colors.accent,
-                          opacity: cell.inMonth ? 1 : 0.35,
                         },
                       ]}>
-                      <View style={styles.cellTopRow}>
-                        {/* The day number sits plainly in the cell - no badge,
-                            no circle; today is marked by the accent square. */}
-                        <View style={styles.dayBadge}>
-                          <Text
+                      <Text
+                        style={[
+                          styles.dayNumber,
+                          {
+                            color: isSelected
+                              ? colors.accentFillText
+                              : isToday
+                                ? colors.accent
+                                : colors.text,
+                          },
+                        ]}
+                        maxFontSizeMultiplier={1.3}>
+                        {Number(cell.date.slice(8))}
+                      </Text>
+                    </View>
+                    <View style={styles.marks}>
+                      {recorded &&
+                        progress.slots.map((slot) => (
+                          <View
+                            key={slot.mealCategoryKey}
                             style={[
-                              styles.dayNumber,
-                              { color: onToday ?? colors.text },
+                              styles.mark,
+                              { backgroundColor: markColor(slot.status) },
                             ]}
-                            maxFontSizeMultiplier={1.2}>
-                            {cell.date.slice(8)}
-                          </Text>
-                        </View>
-                        {/* Photo marker of the day: one glyph, right-aligned. */}
-                        {hasPhoto && (
-                          <Icon
-                            name="camera-outline"
-                            size={11}
-                            color={onToday ?? colors.textMuted}
                           />
-                        )}
-                      </View>
-                      {/*
-                       * The day's state: a 6 pt dot in the state colour plus the
-                       * confirmed share of the five slots ("3/5"). Untouched days
-                       * show nothing - a pending meal never produces a figure.
-                       */}
-                      <View style={styles.cellBottomRow}>
-                        {state.dot !== null && (
-                          <View style={[styles.cellDot, { backgroundColor: onToday ?? state.dot }]} />
-                        )}
-                        <Text
-                          style={[styles.cellCount, { color: onToday ?? colors.textMuted }]}
-                          numberOfLines={1}
-                          maxFontSizeMultiplier={1.2}>
-                          {hasFigure && progress !== undefined
-                            ? `${progress.completed}/${progress.totalSlots}`
-                            : ''}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
+                        ))}
+                    </View>
+                  </Pressable>
                 );
               })}
             </View>
           ))}
         </View>
 
-        {/* The five cards of the selected day (spec 8.5): the Windows calendar
-            lists the meals of the day, so tapping a day shows what it holds and
-            a tap on a row opens that day on the dashboard. */}
-        <View style={styles.dayList}>
-          {(progressByDate[selected]?.slots ?? []).map((slot) => {
-            const category = categories.find((c) => c.fixedCategoryKey === slot.mealCategoryKey);
-            const pillColors = statusPillColors(colors, slot.status);
-            const name = category !== undefined && category.name !== ''
+        <View style={[styles.keyRow, { borderTopColor: colors.hairline }]}>
+          <KeyItem icon="checkmark" color={colors.done} label={t('Status_Done')} colors={colors} />
+          <KeyItem icon="close" color={colors.missed} label={t('Status_Missed')} colors={colors} />
+          <KeyItem
+            icon="time-outline"
+            color={colors.pending}
+            label={t('Status_Pending')}
+            colors={colors}
+          />
+        </View>
+        <View style={styles.boardFoot}>
+          <Text style={[styles.footText, { color: colors.textMuted }]}>
+            {t('Rn_CalendarMarks')}
+          </Text>
+          <View style={styles.footToday}>
+            <View style={[styles.footRing, { borderColor: colors.accent }]} />
+            <Text style={[styles.footText, { color: colors.textMuted }]}>
+              {t('Calendar_Today')}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+
+      {/* Selected day: one clear date, a concise count line and an explicit
+          "Open day" - selecting a date only PREVIEWS its agenda. */}
+      <View style={styles.selectedRow}>
+        <View style={styles.copy}>
+          <Text style={[styles.selectedTitle, { color: colors.text }]} numberOfLines={1}>
+            {formatLongDate(selected)}
+          </Text>
+          <Text style={[styles.selectedDetail, { color: colors.textMuted }]}>
+            {selectedSummary}
+          </Text>
+        </View>
+        <BarButton
+          compact
+          label={t('Calendar_OpenDay')}
+          onPress={() => props.onOpenDay(selected)}
+          colors={colors}
+        />
+      </View>
+
+      {/* Grouped agenda of the selected date: time, meal, category + photo count,
+          explicit status. */}
+      <View style={[styles.agenda, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {(selectedProgress?.slots ?? []).map((slot, index) => {
+          const category = categories.find((c) => c.fixedCategoryKey === slot.mealCategoryKey);
+          const pill = softPillColors(colors, slot.status);
+          const name =
+            category !== undefined && category.name !== ''
               ? category.name
               : t(mealNameKey(slot.mealCategoryKey));
-            const time = formatTime(
-              slot.plannedTime ?? (category !== undefined ? category.defaultTime : null),
-              app.use12HourClock,
-            );
-            return (
-              <Pressable
-                key={slot.mealCategoryKey}
-                accessibilityRole="button"
-                accessibilityLabel={`${name} - ${t('Calendar_OpenDay')}`}
-                onPress={() => props.onOpenDay(selected)}
-                // The SAME frame the dashboard meal cards wear (status-coloured
-                // border, grouped-card fill, radius and shadow); only the compact
-                // height stays, because the day list needs the space.
-                style={[
-                  styles.dayRow,
-                  { backgroundColor: colors.cardFill, borderColor: colors.border },
-                ]}>
-                {/* Same state rail as the dashboard cards, compact height. A
-                    pending row has no rail, exactly like a pending meal card. */}
-                {slot.status !== MealStatus.Pending && (
-                  <View style={[styles.dayRowRail, { backgroundColor: pillColors.dot }]} />
-                )}
-                <Text style={styles.dayRowIcon}>{category?.icon !== '' ? category?.icon : '🍽️'}</Text>
-                <View style={styles.dayRowText}>
-                  <Text style={[styles.dayRowTitle, { color: colors.text }]} numberOfLines={1}>
-                    {slot.title !== '' ? slot.title : name}
-                  </Text>
-                  <View style={styles.dayRowMetaRow}>
-                    <Text style={[styles.dayRowMeta, { color: colors.textMuted }]} numberOfLines={1}>
-                      {name}
-                      {time !== '' ? ` · ${time}` : ''}
-                    </Text>
-                    {slot.photoCount > 0 && (
-                      <View style={styles.photoMarker}>
-                        <Icon name="camera-outline" size={12} color={colors.textMuted} />
-                        <Text style={[styles.dayRowMeta, { color: colors.textMuted }]}>
-                          {slot.photoCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                <View
+          const time = formatTime(
+            slot.plannedTime ?? (category !== undefined ? category.defaultTime : null),
+            app.use12HourClock,
+          );
+          return (
+            <View
+              key={slot.mealCategoryKey}
+              style={[
+                styles.agendaRow,
+                index > 0 && {
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: colors.hairline,
+                },
+              ]}>
+              <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
+                {time}
+              </Text>
+              <View style={styles.copy}>
+                <Text
                   style={[
-                    styles.dayRowPill,
-                    {
-                      backgroundColor: pillColors.fill,
-                      borderWidth: pillColors.solid ? 0 : 1,
-                      borderColor: colors.border,
-                    },
-                  ]}>
-                  <Text style={[styles.dayRowPillText, { color: pillColors.ink }]}>
-                    {statusLabel(slot.status)}
+                    styles.agendaTitle,
+                    { color: slot.title !== '' ? colors.text : colors.textMuted },
+                  ]}
+                  numberOfLines={1}>
+                  {slot.title !== '' ? slot.title : t('Rn_NoMealRecorded')}
+                </Text>
+                <View style={styles.agendaMeta}>
+                  <Text style={[styles.agendaDetail, { color: colors.textMuted }]} numberOfLines={1}>
+                    {name}
                   </Text>
+                  {slot.photoCount > 0 && (
+                    <>
+                      <Icon name="camera-outline" size={12} color={colors.textMuted} />
+                      <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
+                        {slot.photoCount}
+                      </Text>
+                    </>
+                  )}
                 </View>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.legend}>
-          {/* The dot uses the STATE colour, not the pale cell wash, so all three
-              dots stay equally legible on the white panel. */}
-          <Legend color={colors.pending} label={t('Calendar_LegendPending')} textColor={colors.textSecondary} />
-          <Legend color={colors.done} label={t('Calendar_LegendGreen')} textColor={colors.textSecondary} />
-          <Legend color={colors.missed} label={t('Calendar_LegendRed')} textColor={colors.textSecondary} />
-        </View>
+              </View>
+              <View style={[styles.agendaPill, { backgroundColor: pill.fill }]}>
+                <Text style={[styles.agendaPillText, { color: pill.ink }]}>
+                  {statusLabel(slot.status)}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
       </View>
     </ScrollView>
   );
 }
 
-/** One legend entry: the state dot plus its description (the dot carries the colour). */
-function Legend(props: {
+/** One entry of the mark key: glyph in the state colour plus its word. */
+function KeyItem(props: {
+  icon: React.ComponentProps<typeof Icon>['name'];
   color: string;
   label: string;
-  textColor: string;
+  colors: ReturnType<typeof themeColors>;
 }): React.JSX.Element {
   return (
-    <View style={styles.legendItem}>
-      <View style={[styles.legendChip, { backgroundColor: props.color }]} />
-      <Text style={[styles.legendText, { color: props.textColor }]} numberOfLines={1}>
-        {props.label}
-      </Text>
+    <View style={styles.keyItem}>
+      <Icon name={props.icon} size={13} color={props.color} />
+      <Text style={[styles.keyText, { color: props.colors.textSecondary }]}>{props.label}</Text>
     </View>
   );
 }
 
-/** Localized status label used by the selected-day rows (spec 8.3 pill). */
+/** Localized status label used by the agenda pill (spec 8.3). */
 function statusLabel(status: MealStatus): string {
   if (status === MealStatus.Done) {
     return t('Status_Done');
   }
-  return status === MealStatus.Missed ? t('Status_Missed') : t('Status_Pending');
+  if (status === MealStatus.Missed) {
+    return t('Status_Missed');
+  }
+  return t('Status_Pending');
 }
 
+
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 12, paddingTop: 8 },
-  panel: { borderRadius: 16, padding: 10 },
-  /**
-   * The arrows sit on the two edges of the panel (space-between) with the month
-   * label filling what is left: both arrows have the same chrome, so the label
-   * stays optically centred and the pair is symmetrical - the left arrow above
-   * the left edge of the grid, the right arrow above the right edge of the
-   * action row.
-   */
+  /** Page frame; the bottom padding is computed at render time (tab bar). */
+  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
+  pageHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  pageTitle: { ...pageTitleStyle },
+  /** "Today" is a quiet accent link, not a filled button. */
+  todayLink: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 6, marginTop: 2 },
+  todayLinkText: { fontSize: 13, fontFamily: fonts.medium },
+  subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+  /** Month navigation + weekday grid + key form one coherent surface. */
+  board: {
+    marginTop: 12,
+    borderRadius: 15,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 8,
+  },
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    columnGap: metrics.controlGap,
+    columnGap: 8,
+    minHeight: 44,
   },
-  monthLabel: { flex: 1, textAlign: 'center', fontSize: typeScale.title2, fontFamily: fonts.bold, letterSpacing: -0.4 },
-  /** Today / Open day on the left, the selected date bottom-aligned on the right. */
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    columnGap: metrics.controlGap,
-    marginTop: 10,
-  },
-  /** The two buttons never shrink: the date takes the remaining width instead. */
-  buttonRow: { flexDirection: 'row', flexShrink: 0, gap: metrics.controlGap },
-  /** Long date of the selected day ("Sunday, 1 November 2026"). */
-  selectedDate: { flex: 1, textAlign: 'right', fontSize: 12, paddingBottom: 3 },
-  weekHeader: { flexDirection: 'row', marginTop: 12 },
-  weekday: { flex: 1, textAlign: 'center', fontSize: 12, fontFamily: fonts.medium },
-  /** Day grid: whole weeks of seven equal flex cells (no percentage drift). */
-  grid: { marginTop: 4, rowGap: 2 },
+  monthLabel: { fontSize: 18, fontFamily: fonts.medium, letterSpacing: -0.3 },
+  monthActions: { flexDirection: 'row', alignItems: 'center' },
+  weekHeader: { flexDirection: 'row', marginTop: 2 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, paddingVertical: 6 },
+  /** Whole weeks of seven equal cells (no percentage drift). */
+  grid: { rowGap: 2 },
   gridRow: { flexDirection: 'row' },
-  cellHost: { flex: 1, aspectRatio: 1 },
-  /**
-   * A day cell is mostly AIR: plain number, a state dot and the confirmed count.
-   * Only today (accent fill) and the selected day (accent outline) draw chrome -
-   * 42 grey tiles made the month look like a keyboard.
-   */
-  cell: {
-    flex: 1,
-    borderRadius: 12,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    justifyContent: 'space-between',
-  },
-  cellTopRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 2 },
-  /** Plain host of the day number: no badge, no circle (today paints the cell). */
-  dayBadge: {
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 2,
+  /** Cell = the day circle plus its five marks; 48 pt tall so it stays tappable. */
+  cell: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', rowGap: 3 },
+  dayCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayNumber: { fontSize: 14, fontFamily: fonts.medium },
-  cellBottomRow: {
+  dayNumber: { fontSize: 13, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
+  /** Five slot marks in meal order: 4 x 3 pt, 2 pt apart. */
+  marks: { flexDirection: 'row', alignItems: 'center', columnGap: 2, height: 3 },
+  mark: { width: 4, height: 3, borderRadius: 2 },
+  keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 4,
-    minHeight: 14,
+    justifyContent: 'center',
+    columnGap: 18,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 8,
+    paddingTop: 10,
   },
-  /** State dot of a decided day (green = all eaten, red = something missed). */
-  cellDot: { width: 6, height: 6, borderRadius: 3 },
-  /** "3/5" - the confirmed share of the day's five slots. */
-  cellCount: { fontSize: 10, fontFamily: fonts.medium, marginLeft: 'auto' },
-  /** The five meal rows of the selected day. */
-  dayList: { marginTop: 12, rowGap: 6 },
-  /**
-   * A compact dashboard card: the frame is exactly the meal card's (same
-   * metrics.radius / metrics.cardBorder and the state colour as the border, and
-   * the same 9 pt inset from the border), so both screens read as one family -
-   * only the height stays compact. Without that inset the emoji sat on the
-   * stroke, which looked crowded.
-   */
-  dayRow: {
+  keyItem: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  keyText: { fontSize: 11 },
+  boardFoot: {
     flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: metrics.radius,
-    borderWidth: metrics.cardBorder,
-    paddingLeft: 13,
-    paddingRight: 10,
-    columnGap: 8,
-  },
-  /** Compact state rail: the three state colours mean the same here. */
-  dayRowRail: {
-    position: 'absolute',
-    left: 0,
-    top: 10,
-    bottom: 10,
-    width: metrics.statusRail,
-    borderTopRightRadius: metrics.statusRail,
-    borderBottomRightRadius: metrics.statusRail,
-  },
-  dayRowIcon: { fontSize: 18, paddingVertical: 9 },
-  dayRowText: { flex: 1, paddingVertical: 7 },
-  dayRowTitle: { fontSize: 14, fontFamily: fonts.medium },
-  dayRowMeta: { fontSize: 12, marginTop: 1 },
-  /** Meta line plus the photo marker, so the camera glyph lines up with the text. */
-  dayRowMetaRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
-  photoMarker: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
-  dayRowPill: {
-    borderRadius: metrics.radiusPill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-  },
-  dayRowPillText: { fontSize: 10, fontFamily: fonts.medium },
-  legend: {
-    flexDirection: 'row',
-    // One row for all three states - the dot already carries the colour, so the
-    // label is only the description and fits beside the others.
-    flexWrap: 'nowrap',
     alignItems: 'center',
     justifyContent: 'space-between',
-    columnGap: 10,
-    marginTop: 12,
+    marginTop: 8,
+    paddingHorizontal: 2,
   },
-  legendItem: { flexDirection: 'row', alignItems: 'center', columnGap: 5, flexShrink: 1 },
-  /** Small solid state dot, like the iOS calendar legend. */
-  legendChip: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 12, flexShrink: 1 },
+  footText: { fontSize: 11 },
+  footToday: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
+  footRing: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5 },
+  /** Selected date + its counts, with the explicit Open day action. */
+  selectedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 10,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  copy: { flex: 1, minWidth: 0 },
+  selectedTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
+  selectedDetail: { fontSize: 11, lineHeight: 16, marginTop: 2 },
+  /** Grouped agenda: time | meal | status, one row per slot. */
+  agenda: { borderRadius: 15, borderWidth: 1, overflow: 'hidden' },
+  agendaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 10,
+    minHeight: 62,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  agendaTime: { fontSize: 12, width: 44, fontVariant: ['tabular-nums'] },
+  agendaTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
+  agendaMeta: { flexDirection: 'row', alignItems: 'center', columnGap: 4, marginTop: 2 },
+  agendaDetail: { fontSize: 11, flexShrink: 1 },
+  /** Soft pill: the state colour on a wash of itself. */
+  agendaPill: {
+    borderRadius: metrics.radiusPill,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    flexShrink: 0,
+  },
+  agendaPillText: { fontSize: 11, fontFamily: fonts.medium },
 });
+

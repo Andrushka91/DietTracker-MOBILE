@@ -161,8 +161,10 @@ function Tabs(): React.JSX.Element {
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} />
           ),
         }}>
-        {({ navigation }) => (
+        {({ navigation, route }) => (
           <CalendarScreen
+            /* Statistics can send the calendar to a specific period. */
+            initialDate={(route.params as { date?: string } | undefined)?.date}
             onOpenDay={(date) => {
               navigation.navigate('DashboardTab', { date } as never);
             }}

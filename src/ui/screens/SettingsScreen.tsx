@@ -12,7 +12,7 @@
 // skipped - the local cache is the only copy of those records until then.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
@@ -29,9 +29,9 @@ import { useApp } from '../appContext';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { Icon } from '../components/icons';
-import { fonts, metrics, pageTitleStyle, cardShadow, themeColors, typeScale } from '../theme';
+import { fonts, metrics, pageTitleStyle, themeColors, type ThemeColors } from '../theme';
 import { useFloatingTabBarClearance } from '../tabBar';
-import { formatMegabytes, t, tFmt } from '../strings';
+import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
 
 /**
  * RN-only wording: the sign-out can no longer be forced past a failed sync, so
@@ -332,9 +332,12 @@ export function SettingsScreen(): React.JSX.Element {
   };
 
   const prefs = app.preferences;
-  const cardStyle = [styles.card, cardShadow, { backgroundColor: colors.cardFill }];
+  /** Rows that reveal their own detail (scheduled checks, privacy, advanced). */
+  const [openRows, setOpenRows] = useState<Record<string, boolean>>({});
+  const toggleRow = (key: string): void =>
+    setOpenRows((current) => ({ ...current, [key]: current[key] !== true }));
 
-  // Background cycles never repaint this line: it keeps showing the last
+  // Background cycles never repaint the sync row: it keeps showing the last
   // successful synchronization and only changes for an explicit run or when
   // something needs attention (offline, sign in again, error).
   const shownSyncState =
@@ -343,6 +346,39 @@ export function SettingsScreen(): React.JSX.Element {
       : app.syncState === SyncState.Syncing || app.syncState === SyncState.PendingChanges
         ? SyncState.Synced
         : app.syncState;
+  const sync = describeSync(shownSyncState, app.lastSyncSuccess, app.signedIn, app.use12HourClock);
+  const accountName = app.signedIn
+    ? accountIdentity.name !== ''
+      ? accountIdentity.name
+      : accountIdentity.email !== ''
+        ? accountIdentity.email
+        : t('Account_SignedIn')
+    : t('Rn_GuestAccount');
+  const accountDetail = app.signedIn
+    ? accountIdentity.email !== '' && accountIdentity.name !== ''
+      ? accountIdentity.email
+      : quotaLine ?? t('Rn_ConnectedDetail')
+    : t('Rn_GuestDetail');
+
+  const showAccountDetails = (): void => {
+    setDialog({
+      title: t('Rn_AccountDetails'),
+      message: app.signedIn
+        ? [
+            `${accountName}`,
+            accountIdentity.email !== '' ? accountIdentity.email : '',
+            quotaLine ?? t('Account_ProviderGoogle'),
+            t('Account_CloudSaveHint'),
+          ]
+            .filter((line) => line !== '')
+            .join('\n\n')
+        : `${t('Rn_GuestAccount')}\n\n${t('Account_PrivacySummary')}`,
+      confirmText: t('Common_Ok'),
+      singleAction: true,
+      onCancel: () => setDialog(null),
+      onConfirm: () => setDialog(null),
+    });
+  };
 
   return (
     <ScrollView
@@ -350,170 +386,261 @@ export function SettingsScreen(): React.JSX.Element {
       contentContainerStyle={[
         styles.content,
         // The floating tab bar sits ON TOP of the page; the extra room keeps the
-        // About card (the last one) fully readable above it.
+        // last row fully readable above it.
         { paddingBottom: bottomClearance },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
 
-      {/* 2. Account card */}
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_Account')}</Text>
-      <View style={cardStyle}>
-        {/* Profile panel: a large framed photo, the full display name and the
-            e-mail (nothing is clipped to one line any more), the provider line
-            under them and the account action as a full-width button below the
-            identity - the classic account settings arrangement. */}
-        <View style={styles.accountPanel}>
-          <View
-            style={[
-              styles.avatar,
-              { backgroundColor: colors.surfaceVariant, borderColor: colors.border },
-            ]}>
+      {/* Account: identity row + the one account action, in a single card. */}
+      <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('Rn_AccountDetails')}: ${accountName}`}
+          onPress={showAccountDetails}
+          style={({ pressed }) => [
+            styles.accountRow,
+            pressed && { backgroundColor: colors.surfaceVariant },
+          ]}>
+          <View style={[styles.avatar, { backgroundColor: colors.surfaceVariant }]}>
             {accountIdentity.photoUrl !== '' ? (
               <Image source={{ uri: accountIdentity.photoUrl }} style={styles.avatarImage} />
             ) : (
-              <Icon name="person-circle-outline" size={46} color={colors.textMuted} />
+              <Icon name="person" size={22} color={colors.textMuted} />
             )}
           </View>
-          <View style={styles.accountText}>
-            <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={2}>
-              {app.signedIn
-                ? accountIdentity.name !== ''
-                  ? accountIdentity.name
-                  : accountIdentity.email !== ''
-                    ? accountIdentity.email
-                    : t('Account_SignedIn')
-                : t('Account_NoEmail')}
+          <View style={styles.copy}>
+            <Text style={[styles.label, { color: colors.text }]} numberOfLines={1}>
+              {accountName}
             </Text>
-            {app.signedIn && accountIdentity.email !== '' && accountIdentity.name !== '' && (
-              <Text
-                style={[styles.accountEmail, { color: colors.textSecondary }]}
-                numberOfLines={2}
-                ellipsizeMode="middle"
-                selectable>
-                {accountIdentity.email}
-              </Text>
-            )}
-            <Text style={[styles.accountMeta, { color: colors.textMuted }]} numberOfLines={2}>
-              {app.signedIn
-                ? quotaLine ?? t('Account_ProviderGoogle')
-                : t('Account_ProviderNone')}
+            <Text style={[styles.detail, { color: colors.textMuted }]} numberOfLines={1}>
+              {accountDetail}
             </Text>
           </View>
+          <Icon name="chevron-forward" size={16} color={colors.textMuted} />
+        </Pressable>
+        <View style={styles.accountAction}>
+          {app.signedIn ? (
+            <BarButton
+              danger
+              label={t('Account_SignOut')}
+              style={styles.accountButton}
+              onPress={confirmSignOut}
+              colors={colors}
+            />
+          ) : (
+            <BarButton
+              accent
+              icon="log-in-outline"
+              label={t('Account_Google')}
+              style={styles.accountButton}
+              onPress={() => void signIn()}
+              colors={colors}
+            />
+          )}
         </View>
-        {/* The buttons never carry a spinner: the global busy overlay covers
-            the whole screen while Google runs, so the card keeps its layout -
-            no label swap, no size jump, and no second tap can slip through. */}
-        {app.signedIn ? (
-          <BarButton
-            danger
-            label={t('Account_SignOut')}
-            style={styles.accountAction}
-            onPress={confirmSignOut}
-            colors={colors}
-          />
-        ) : (
-          <BarButton
-            accent
-            label={t('Account_Google')}
-            style={styles.accountAction}
-            onPress={() => void signIn()}
-            colors={colors}
-          />
-        )}
-        <Text style={[styles.hint, { color: colors.textMuted }]}>
-          {app.signedIn ? t('Account_CloudSaveHint') : t('Account_PrivacySummary')}
-        </Text>
       </View>
 
-      {/* 3. General card */}
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_General')}</Text>
-      <View style={cardStyle}>
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_AutoSaveHint')}</Text>
-        <ToggleRow
+
+      {/* General */}
+      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>
+        {t('Settings_General')}
+      </Text>
+      <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SettingsRow
+          icon="time-outline"
           label={t('Settings_12Hour')}
-          value={prefs?.use12HourClock ?? false}
-          onChange={(value) => void app.setPreference('use12HourClock', value)}
+          divider={false}
+          colors={colors}
+          trailingControl={
+            <Switch
+              value={prefs?.use12HourClock ?? false}
+              onValueChange={(value) => void app.setPreference('use12HourClock', value)}
+              accessibilityLabel={t('Settings_12Hour')}
+              trackColor={{ false: colors.border, true: colors.success }}
+              thumbColor="#FFFFFF"
+            />
+          }
+        />
+      </View>
+
+      {/* Cloud sync: state, schedule, contents - the three questions this
+          section answers, in that order. */}
+      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>
+        {t('Rn_SectionCloud')}
+      </Text>
+      <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SettingsRow
+          icon={sync.icon}
+          label={sync.title}
+          detail={sync.detail}
+          divider={false}
+          colors={colors}
+          trailingControl={
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Settings_SyncNow')}
+              accessibilityState={{ disabled: !app.signedIn || syncing }}
+              disabled={!app.signedIn || syncing}
+              onPress={() => void synchronizeNow()}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.refreshButton,
+                {
+                  backgroundColor: pressed ? colors.surfaceVariant : 'transparent',
+                  opacity: app.signedIn ? 1 : 0.4,
+                },
+              ]}>
+              <Icon
+                name="refresh"
+                size={20}
+                color={syncing ? colors.accent : colors.textSecondary}
+              />
+            </Pressable>
+          }
+        />
+        <SettingsRow
+          icon="calendar-outline"
+          label={t('Rn_ScheduledChecks')}
+          trailing={
+            (prefs?.syncFrequency ?? 1) === SyncFrequency.Monthly
+              ? t('Sync_FrequencyMonthly')
+              : t('Sync_FrequencyWeekly')
+          }
+          expanded={openRows.syncSchedule === true}
+          onPress={() => toggleRow('syncSchedule')}
+          colors={colors}
+        />
+        {openRows.syncSchedule === true && (
+          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+            <Segmented
+              options={[t('Sync_FrequencyWeekly'), t('Sync_FrequencyMonthly')]}
+              index={(prefs?.syncFrequency ?? 1) === SyncFrequency.Monthly ? 1 : 0}
+              onChange={(index) =>
+                void app.setPreference(
+                  'syncFrequency',
+                  index === 1 ? SyncFrequency.Monthly : SyncFrequency.Weekly,
+                )
+              }
+              colors={colors}
+            />
+            <Text style={[styles.hint, { color: colors.textMuted }]}>
+              {t('Settings_SyncFrequencyHint')}
+            </Text>
+          </View>
+        )}
+        <SettingsRow
+          icon="cloud-outline"
+          label={t('Rn_CloudContents')}
+          disabled={!app.signedIn}
+          onPress={() => void whatIsInTheCloud()}
+          colors={colors}
+        />
+      </View>
+      <Text style={[styles.note, { color: colors.textMuted }]}>{t('Rn_SyncAutoHint')}</Text>
+
+
+      {/* Data & backup: export and restore are separate rows, never one button. */}
+      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>
+        {t('Rn_SectionData')}
+      </Text>
+      <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SettingsRow
+          icon="download-outline"
+          label={t('Settings_Export')}
+          detail={t('Rn_ExportDetail')}
+          divider={false}
+          onPress={() => void exportData()}
+          colors={colors}
+        />
+        <SettingsRow
+          icon="cloud-download-outline"
+          label={t('Settings_Import')}
+          detail={t('Rn_RestoreDetail')}
+          onPress={() => void restoreBackupFile()}
+          colors={colors}
+        />
+        <SettingsRow
+          icon="calendar-number-outline"
+          label={t('Settings_ExportCalendar')}
+          onPress={() => void exportCalendar()}
+          colors={colors}
+        />
+        <SettingsRow
+          icon="images-outline"
+          label={t('Rn_PhotoStorage')}
+          trailing={`${storageMb} MB`}
           colors={colors}
         />
       </View>
 
-      {/* 4. Synchronization card */}
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_Sync')}</Text>
-      <View style={cardStyle}>
-        {/* One calm line: the last successful synchronization, or the state of
-            the explicit cycle. No spinner and no "pending changes" alarm - the
-            engine retries on its own and the user has nothing to do. */}
-        <Text style={[styles.body, { color: colors.textSecondary }]}>
-          {syncStateLabel(shownSyncState, app.lastSyncSuccess)}
-        </Text>
-        {/* The cadence control first, its explanation right under it. */}
-        <Segmented
-          options={[t('Sync_FrequencyWeekly'), t('Sync_FrequencyMonthly')]}
-          index={(prefs?.syncFrequency ?? 1) === SyncFrequency.Monthly ? 1 : 0}
-          onChange={(index) =>
-            void app.setPreference('syncFrequency', index === 1 ? SyncFrequency.Monthly : SyncFrequency.Weekly)
+
+      {/* More: what leaves this device, what the app knows technically, version. */}
+      <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>
+        {t('Rn_SectionMore')}
+      </Text>
+      <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <SettingsRow
+          icon="shield-checkmark-outline"
+          label={t('Rn_PrivacyRow')}
+          divider={false}
+          expanded={openRows.privacy === true}
+          onPress={() => toggleRow('privacy')}
+          colors={colors}
+        />
+        {openRows.privacy === true && (
+          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+            <Text style={[styles.hint, { color: colors.textSecondary }]}>
+              {t('Settings_PrivacyHint')}
+            </Text>
+            <Text style={[styles.hint, { color: colors.textMuted }]}>
+              {t('Settings_PrivacyLocalHint')}
+            </Text>
+          </View>
+        )}
+        <SettingsRow
+          icon="construct-outline"
+          label={t('Rn_AdvancedRow')}
+          expanded={openRows.advanced === true}
+          onPress={() => toggleRow('advanced')}
+          colors={colors}
+        />
+        {openRows.advanced === true && (
+          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+            <Text style={[styles.detail, { color: colors.textMuted }]}>
+              {t('Rn_LocalDatabase')}
+            </Text>
+            <Text style={[styles.mono, { color: colors.textSecondary }]} selectable>
+              {dbPath}
+            </Text>
+            <BarButton
+              compact
+              icon="server-outline"
+              label={t('Rn_CheckIntegrity')}
+              onPress={() => void checkDbIntegrity()}
+              colors={colors}
+              style={styles.integrityButton}
+            />
+            {integrityText !== null && (
+              <Text style={[styles.hint, { color: colors.textSecondary }]}>{integrityText}</Text>
+            )}
+          </View>
+        )}
+        <SettingsRow
+          icon="information-circle-outline"
+          label={t('Rn_AboutApp')}
+          trailing="1.0.0"
+          onPress={() =>
+            setDialog({
+              title: t('Rn_AboutApp'),
+              message: tFmt('Settings_AboutText', '1.0.0', 'React Native'),
+              confirmText: t('Common_Ok'),
+              singleAction: true,
+              onCancel: () => setDialog(null),
+              onConfirm: () => setDialog(null),
+            })
           }
           colors={colors}
         />
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_SyncFrequencyHint')}</Text>
-        {/* Sync actions: the primary "Synchronize now" spans the card, the two
-            secondary actions share the row below it. */}
-        <View style={styles.actionGrid}>
-          <BarButton
-            compact
-            style={styles.gridWide}
-            label={t('Settings_SyncNow')}
-            accent
-            disabled={!app.signedIn || syncing}
-            onPress={() => void synchronizeNow()}
-            colors={colors}
-          />
-          <BarButton
-            compact
-            style={styles.gridCell}
-            label={t('Settings_ExportCalendar')}
-            onPress={() => void exportCalendar()}
-            colors={colors}
-          />
-          <BarButton
-            compact
-            style={styles.gridCell}
-            label={t('Account_Preview')}
-            disabled={!app.signedIn}
-            onPress={() => void whatIsInTheCloud()}
-            colors={colors}
-          />
-        </View>
-      </View>
-
-      {/* 5. Privacy and backup card */}
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_PrivacyAndBackup')}</Text>
-      <View style={cardStyle}>
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_PrivacyHint')}</Text>
-        <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Settings_PrivacyLocalHint')}</Text>
-        <Text style={[styles.body, { color: colors.textSecondary }]}>
-          {tFmt('Settings_StorageUsage', storageMb)}
-        </Text>
-        <Text style={[styles.hint, { color: colors.textMuted }]} selectable>
-          {dbPath}
-        </Text>
-        {/* Export / Restore share a row; the integrity check closes the card. */}
-        <View style={styles.actionGrid}>
-          <BarButton compact style={styles.gridCell} label={t('Settings_Export')} accent onPress={() => void exportData()} colors={colors} />
-          <BarButton compact style={styles.gridCell} label={t('Settings_Import')} onPress={() => void restoreBackupFile()} colors={colors} />
-          <BarButton compact style={styles.gridWide} label={t('Settings_Integrity')} onPress={() => void checkDbIntegrity()} colors={colors} />
-        </View>
-        {integrityText !== null && (
-          <Text style={[styles.body, { color: colors.textSecondary }]}>{integrityText}</Text>
-        )}
-      </View>
-
-      {/* 6. About card */}
-      <Text style={[styles.sectionHeader, { color: colors.textSecondary }]}>{t('Settings_About')}</Text>
-      <View style={cardStyle}>
-        <Text style={[styles.body, { color: colors.textSecondary }]}>
-          {tFmt('Settings_AboutText', '1.0.0', 'React Native')}
-        </Text>
       </View>
 
       {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
@@ -521,96 +648,229 @@ export function SettingsScreen(): React.JSX.Element {
   );
 }
 
-function syncStateLabel(state: SyncState, lastSuccess: string | null): string {
+
+
+/**
+ * One title + one detail for the cloud-sync row, derived from the engine state.
+ * The detail never claims more than the engine knows: an offline device says the
+ * data is saved locally, a failed sync says it failed, and a guest is told to sign
+ * in instead of being shown an empty "never synchronized" line.
+ */
+function describeSync(
+  state: SyncState,
+  lastSuccess: string | null,
+  signedIn: boolean,
+  use12HourClock: boolean,
+): { icon: React.ComponentProps<typeof Icon>['name']; title: string; detail: string } {
+  const last =
+    lastSuccess === null
+      ? t('Sync_Never')
+      : `${t('Rn_LastSync')} · ${formatInstant(lastSuccess, use12HourClock)}`;
+  if (!signedIn) {
+    return {
+      icon: 'cloud-offline-outline',
+      title: t('Rn_SyncGuest'),
+      detail: t('Rn_SyncGuestDetail'),
+    };
+  }
   switch (state) {
-    case SyncState.Synced:
-      return lastSuccess !== null ? tFmt('Sync_LastSuccess', lastSuccess) : t('Sync_Never');
     case SyncState.Syncing:
-      return t('Sync_Syncing');
+      return { icon: 'sync-outline', title: t('Sync_Syncing'), detail: last };
     case SyncState.PendingChanges:
-      // Changes waiting for the upload are the engine's own business: the card
-      // keeps showing the last successful synchronization instead of raising a
-      // "pending changes" alarm (or a spinner) the user cannot act on.
-      return lastSuccess !== null ? tFmt('Sync_LastSuccess', lastSuccess) : t('Sync_Never');
+      return { icon: 'cloud-upload-outline', title: t('Rn_SyncPending'), detail: last };
     case SyncState.Offline:
-      return t('Sync_Offline');
+      return {
+        icon: 'cloud-offline-outline',
+        title: t('Rn_SyncOffline'),
+        detail: t('Rn_SyncResumes'),
+      };
     case SyncState.Paused:
-      return t('Sync_Paused');
+      return {
+        icon: 'pause-circle-outline',
+        title: t('Rn_SyncPausedTitle'),
+        detail: t('Rn_SyncPausedDetail'),
+      };
     case SyncState.AuthenticationRequired:
-      return t('Sync_AuthenticationRequired');
+      return {
+        icon: 'alert-circle-outline',
+        title: t('Rn_SyncAuthTitle'),
+        detail: t('Rn_SyncAuthDetail'),
+      };
     case SyncState.Error:
-      return t('Sync_Error');
+      return {
+        icon: 'alert-circle-outline',
+        title: t('Rn_SyncErrorTitle'),
+        detail: t('Rn_SyncErrorDetail'),
+      };
+    case SyncState.Synced:
+      return { icon: 'cloud-done-outline', title: t('Rn_SyncOk'), detail: last };
     default:
-      return t('Sync_NotConfigured');
+      return { icon: 'cloud-offline-outline', title: t('Sync_NotConfigured'), detail: last };
   }
 }
 
-function ToggleRow(props: {
+/**
+ * One row of a grouped card, in the round-3 anatomy: a 20 pt leading glyph, a
+ * 14 pt label over an 11 pt detail, and a trailing value / control / chevron. A
+ * row with `onPress` is a button; the others are plain information rows.
+ */
+function SettingsRow(props: {
+  icon: React.ComponentProps<typeof Icon>['name'];
   label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-  colors: ReturnType<typeof themeColors>;
+  detail?: string;
+  trailing?: string;
+  /** Any trailing control (a switch, an icon button) - replaces value + chevron. */
+  trailingControl?: React.ReactNode;
+  expanded?: boolean;
+  disabled?: boolean;
+  onPress?: () => void;
+  /** False for the first row of a group (the card's own frame is the top edge). */
+  divider?: boolean;
+  colors: ThemeColors;
 }): React.JSX.Element {
+  const interactive = props.onPress !== undefined && props.disabled !== true;
+  const content = (
+    <>
+      <View style={styles.leading}>
+        <Icon
+          name={props.icon}
+          size={20}
+          color={props.disabled === true ? props.colors.disabledText : props.colors.textMuted}
+        />
+      </View>
+      <View style={styles.copy}>
+        <Text
+          style={[
+            styles.label,
+            { color: props.disabled === true ? props.colors.disabledText : props.colors.text },
+          ]}
+          numberOfLines={2}>
+          {props.label}
+        </Text>
+        {props.detail !== undefined && props.detail !== '' && (
+          <Text style={[styles.detail, { color: props.colors.textMuted }]} numberOfLines={2}>
+            {props.detail}
+          </Text>
+        )}
+      </View>
+      {props.trailingControl ?? (
+        <View style={styles.trailing}>
+          {props.trailing !== undefined && (
+            <Text style={[styles.trailingText, { color: props.colors.textMuted }]}>
+              {props.trailing}
+            </Text>
+          )}
+          {props.onPress !== undefined && (
+            <Icon
+              name={props.expanded === true ? 'chevron-down' : 'chevron-forward'}
+              size={16}
+              color={props.colors.textMuted}
+            />
+          )}
+        </View>
+      )}
+    </>
+  );
+
+  const dividerStyle = {
+    borderTopColor: props.divider === false ? 'transparent' : props.colors.hairline,
+  };
+  if (props.onPress === undefined) {
+    return <View style={[styles.row, dividerStyle]}>{content}</View>;
+  }
   return (
-    <View style={styles.toggleRow}>
-      <Text style={[styles.body, { color: props.colors.text, flex: 1 }]}>{props.label}</Text>
-      <Switch
-        value={props.value}
-        onValueChange={props.onChange}
-        accessibilityLabel={props.label}
-        trackColor={{ false: props.colors.border, true: props.colors.success }}
-        thumbColor="#FFFFFF"
-      />
-    </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={
+        props.trailing === undefined ? props.label : `${props.label}, ${props.trailing}`
+      }
+      accessibilityState={{ disabled: props.disabled === true, expanded: props.expanded }}
+      disabled={props.disabled === true}
+      onPress={props.onPress}
+      style={({ pressed }) => [
+        styles.row,
+        dividerStyle,
+        pressed && interactive && { backgroundColor: props.colors.surfaceVariant },
+      ]}>
+      {content}
+    </Pressable>
   );
 }
 
+
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { padding: metrics.pagePadding, rowGap: 14 },
-  pageTitle: { ...pageTitleStyle },
-  /** Grouped card: no stroke - the card floats on the grouped background. */
-  card: { borderRadius: metrics.radius, padding: 16, rowGap: 12 },
-  /** iOS grouped-list section header: small uppercase caption above the card. */
+  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
+  pageTitle: { ...pageTitleStyle, marginBottom: 14 },
+  /** Grouped card: a hairline frame on the page surface, no heavy shadow. */
+  group: {
+    borderRadius: 15,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  /** iOS-style grouped section caption, 11 pt caps with wide tracking. */
   sectionHeader: {
-    fontSize: typeScale.caption,
+    fontSize: 11,
+    lineHeight: 18,
     fontFamily: fonts.medium,
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    marginLeft: 4,
-    marginBottom: -2,
+    letterSpacing: 1.1,
+    marginLeft: 2,
+    marginTop: 18,
+    marginBottom: 7,
   },
-  cardTitle: { fontSize: typeScale.headline, fontFamily: fonts.medium },
-  body: { fontSize: 14, lineHeight: 20 },
-  hint: { fontSize: 12, lineHeight: 17 },
-  /**
-   * Account panel: a 84 pt framed photo beside the identity column. The name and
-   * the e-mail may wrap to two lines each - the old single row cut both of them
-   * off at the same width the button needed.
-   */
-  accountPanel: { flexDirection: 'row', alignItems: 'center', columnGap: 14 },
-  accountText: { flex: 1, rowGap: 3 },
-  accountName: { fontSize: 20, lineHeight: 26, fontFamily: fonts.medium },
-  accountEmail: { fontSize: 14, lineHeight: 19 },
-  accountMeta: { fontSize: 12, lineHeight: 16, marginTop: 2 },
-  /** Full-width account action under the identity (sign in / sign out). */
-  accountAction: { minHeight: 44, justifyContent: 'center', marginTop: 4 },
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 12,
+    padding: 14,
+  },
   avatar: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    borderWidth: 1,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%' },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
-  /**
-   * Action grid: two equal buttons per row, plus one full-width button for the
-   * primary action of the card. Rectangular chrome keeps every row aligned.
-   */
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 8 },
-  gridCell: { flexBasis: '48%', flexGrow: 1, minHeight: 38, justifyContent: 'center' },
-  gridWide: { flexBasis: '100%', flexGrow: 1, minHeight: 38, justifyContent: 'center' },
+  copy: { flex: 1, minWidth: 0 },
+  label: { fontSize: 14, lineHeight: 19, fontFamily: fonts.medium },
+  detail: { fontSize: 11, lineHeight: 16, marginTop: 2 },
+  /** The account action keeps the card's inner padding on every side. */
+  accountAction: { paddingHorizontal: 14, paddingBottom: 14 },
+  accountButton: { minHeight: 46, justifyContent: 'center' },
+  /** One row of a group; the hairline above it is drawn by the row itself. */
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 11,
+    minHeight: 58,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'transparent',
+  },
+  leading: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
+  trailing: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
+  trailingText: { fontSize: 12 },
+  refreshButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  /** Revealed detail inside a group (schedule picker, privacy, diagnostics). */
+  expanded: {
+    paddingHorizontal: 13,
+    paddingBottom: 13,
+    rowGap: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  hint: { fontSize: 12, lineHeight: 17 },
+  note: { fontSize: 11, lineHeight: 16, marginTop: 8, marginLeft: 3, marginRight: 3 },
+  mono: { fontSize: 11, lineHeight: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  integrityButton: { alignSelf: 'flex-start', justifyContent: 'center' },
 });
+
