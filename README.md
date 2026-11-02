@@ -1,10 +1,9 @@
 # Diet Tracker — React Native (Android & iOS)
 
-React Native port of the Windows Diet Tracker (WinUI 3 / .NET 10), built from
-[PROMPT_SPEC.md](./PROMPT_SPEC.md). Same SQLite schema, same migration history,
-same Google Drive dataset — a user signed into the same Google account sees the
-same meals on Windows and on their phone. The app follows the system
-dark/light theme automatically and ships English only.
+React Native port of the Windows Diet Tracker (WinUI 3 / .NET 10). Same SQLite
+schema, same migration history, same Google Drive dataset — a user signed into
+the same Google account sees the same meals on Windows and on their phone. The
+app follows the system dark/light theme automatically and ships English only.
 
 ## ⚡ Quick start — one command, six steps
 
