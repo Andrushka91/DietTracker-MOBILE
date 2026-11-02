@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { EntityType, MealStatus } from '../../domain/enums';
@@ -57,6 +58,7 @@ export function DashboardScreen({
   route: { params?: { date?: string; mealKey?: number } };
 }): React.JSX.Element {
   const app = useApp();
+  const navigation = useNavigation();
   const colors = themeColors(app.isDark);
   const [date, setDate] = useState(route.params?.date ?? formatDate(new Date()));
   const [meals, setMeals] = useState<MealEntry[] | null>(null);
@@ -65,7 +67,11 @@ export function DashboardScreen({
   const [categories, setCategories] = useState<MealCategory[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
-  const [viewerPhoto, setViewerPhoto] = useState<MealPhoto | null>(null);
+  const [viewer, setViewer] = useState<{
+    photos: MealPhoto[];
+    index: number;
+    context: string;
+  } | null>(null);
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
   const [saveAllTick, setSaveAllTick] = useState(0);
   const [openEditors, setOpenEditors] = useState<string[]>([]);
@@ -324,23 +330,16 @@ export function DashboardScreen({
     }
   };
 
-  const handleRemovePhoto = (photo: MealPhoto): void => {
-    setDialog({
-      title: t('Photo_RemoveTitle'),
-      message: t('Photo_RemoveMessage'),
-      cancelText: t('Common_No'),
-      confirmText: t('Common_Yes'),
-      destructive: true,
-      onCancel: () => setDialog(null),
-      onConfirm: async () => {
-        setDialog(null);
-        await removePhoto(photo);
-        await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
-        app.notifyChanged();
-        await reload();
-      },
-    });
+  const handleRemovePhoto = async (photo: MealPhoto): Promise<void> => {
+    // Confirmation happens inside the viewer; this runs only after the user has
+    // confirmed there, so the existing deletion and sync callbacks are reused.
+    setViewer(null);
+    await removePhoto(photo);
+    await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
+    app.notifyChanged();
+    await reload();
   };
+
 
   /**
    * One acknowledgement for a bulk action.
@@ -497,9 +496,8 @@ export function DashboardScreen({
           Previous / Today / Next, progress line, three state counters, day
           actions and the status caption (spec 8.2). */}
       <View style={styles.header}>
-        <Text style={[styles.dateTitle, { color: colors.text }]}>{formatLongDate(date)}</Text>
-        {/* Day navigation: the arrows say which way, the words say what moves.
-            One compact row, so the date stays the page title. */}
+        {/* Day navigation: previous day, the date centred between the arrows,
+            next day. Tapping the date opens the Calendar tab to choose a day. */}
         <View style={styles.navRow}>
           <IconButton
             label={t('Dashboard_PreviousDay')}
@@ -507,12 +505,15 @@ export function DashboardScreen({
             onPress={() => setDate(addDays(date, -1))}
             colors={colors}
           />
-          <Bar
-            compact
-            label={t('Common_Today')}
-            onPress={() => setDate(formatDate(new Date()))}
-            colors={colors}
-          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={formatLongDate(date)}
+            onPress={() => navigation.navigate('CalendarTab' as never)}
+            style={styles.dateButton}>
+            <Text style={[styles.dateTitle, { color: colors.text }]} numberOfLines={2}>
+              {formatLongDate(date)}
+            </Text>
+          </Pressable>
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
@@ -520,6 +521,16 @@ export function DashboardScreen({
             colors={colors}
           />
         </View>
+        {date !== formatDate(new Date()) && (
+          <View style={styles.todayRow}>
+            <Bar
+              compact
+              label={t('Common_Today')}
+              onPress={() => setDate(formatDate(new Date()))}
+              colors={colors}
+            />
+          </View>
+        )}
         {progress !== null && (
           <>
             {/* Progress: the bar AND its number, so the width is never the only
@@ -545,7 +556,6 @@ export function DashboardScreen({
           </>
         )}
         <View style={styles.actionsRow}>
-          <Bar compact label={t('Dashboard_SaveDayTemplate')} onPress={handleSaveDayTemplate} colors={colors} />
           <Bar
             compact
             label={t('Dashboard_SaveAll')}
@@ -565,6 +575,7 @@ export function DashboardScreen({
             onPress={() => void handleMarkAllMissed()}
             disabled={!canMarkMissed}
             colors={colors}
+            style={styles.bulkButton}
           />
           <Bar
             compact
@@ -574,6 +585,7 @@ export function DashboardScreen({
             onPress={() => void handleMarkAllDone()}
             disabled={!canMarkDone}
             colors={colors}
+            style={styles.bulkButton}
           />
         </View>
         {status !== null && <Text style={[styles.caption, { color: colors.textMuted }]}>{status}</Text>}
@@ -611,7 +623,15 @@ export function DashboardScreen({
                 onClear={handleClear}
                 onAddPhoto={handleAddPhoto}
                 onRemovePhoto={handleRemovePhoto}
-                onOpenPhoto={setViewerPhoto}
+                onOpenPhoto={(photo) => {
+                  const list = photosByMeal[meal.id] ?? [];
+                  const index = Math.max(0, list.findIndex((p) => p.id === photo.id));
+                  setViewer({
+                    photos: list,
+                    index,
+                    context: `${category.name} · ${formatLongDate(date)}`,
+                  });
+                }}
                 uploadingPhoto={uploadingMealId === meal.id}
               />
             </View>
@@ -619,9 +639,21 @@ export function DashboardScreen({
         })}
       </View>
 
+      {/* The labelled template action sits below the meal list. */}
+      <View style={styles.templateRow}>
+        <Bar compact label={t('Dashboard_SaveDayTemplate')} onPress={handleSaveDayTemplate} colors={colors} />
+      </View>
+
       {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
-      {viewerPhoto !== null && (
-        <PhotoViewer photo={viewerPhoto} isDark={app.isDark} onClose={() => setViewerPhoto(null)} />
+      {viewer !== null && (
+        <PhotoViewer
+          photos={viewer.photos}
+          initialIndex={viewer.index}
+          context={viewer.context}
+          isDark={app.isDark}
+          onClose={() => setViewer(null)}
+          onRemove={(photo) => void handleRemovePhoto(photo)}
+        />
       )}
     </ScrollView>
   );
@@ -654,8 +686,11 @@ const styles = StyleSheet.create({
   },
   header: { paddingBottom: 2 },
   /** The date is the page title: 700 with a little negative tracking. */
-  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, marginBottom: 10 },
-  navRow: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.controlGap },
+  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, textAlign: 'center' },
+  /** Previous / date / next on one row; the date fills the centre. */
+  navRow: { flexDirection: 'row', alignItems: 'center', columnGap: metrics.controlGap },
+  dateButton: { flex: 1, minHeight: metrics.minTouch, alignItems: 'center', justifyContent: 'center' },
+  todayRow: { alignItems: 'center', marginTop: 6 },
   /** Bar plus its percentage, so the day can be read without measuring a bar. */
   progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginTop: 12 },
   track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
@@ -677,13 +712,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   /** Day-wide confirmations: one right-aligned line under the save actions. */
+  /** The two bulk actions share one equal-width row. */
   dayActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    gap: metrics.controlGap,
+    columnGap: metrics.controlGap,
     marginTop: 6,
   },
+  bulkButton: { flex: 1, justifyContent: 'center' },
+  templateRow: { alignItems: 'flex-start', marginTop: 14, paddingHorizontal: 2 },
   caption: { marginTop: 8, fontSize: 12 },
   /** Small caps section caption between the day header and the meal cards. */
   sectionLabel: {

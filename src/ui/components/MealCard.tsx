@@ -327,31 +327,34 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
         </View>
       ) : (
         <>
-          {meal.title !== '' && (
-            <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
-              {meal.title}
-            </Text>
-          )}
-          {meal.ingredients !== '' && (
-            <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={3}>
-              {meal.ingredients}
-            </Text>
-          )}
-          {/* An untouched card still has five available actions; the quiet
-              placeholder says why there is no text instead of leaving a hole. */}
-          {meal.title === '' && meal.ingredients === '' && (
-            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-              {t('Rn_MealEmpty')}
-            </Text>
-          )}
-          <View style={styles.bottomRow}>
+          <View style={styles.contentRow}>
+            <View style={styles.textColumn}>
+              {meal.title !== '' && (
+                <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+                  {meal.title}
+                </Text>
+              )}
+              {meal.ingredients !== '' && (
+                <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={3}>
+                  {meal.ingredients}
+                </Text>
+              )}
+              {/* An untouched card still has five available actions; the quiet
+                  placeholder says why there is no text instead of leaving a hole. */}
+              {meal.title === '' && meal.ingredients === '' && (
+                <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                  {t('Rn_MealEmpty')}
+                </Text>
+              )}
+            </View>
             <PhotoGallery
               photos={photos}
               colors={colors}
               uploading={props.uploadingPhoto === true}
               onOpen={props.onOpenPhoto}
-              onRemove={props.onRemovePhoto}
             />
+          </View>
+          <View style={styles.bottomRow}>
             {/* A hairline separates the meal from its tools, so the row of
                 glyphs stops floating in the same visual plane as the text. */}
             <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
@@ -438,6 +441,9 @@ const styles = StyleSheet.create({
    * (so three thumbnails always sit side by side instead of wrapping), and the
    * five action buttons keep their own line under a hairline.
    */
+  /** Text (flexible left) beside the photo strip (right, 12 pt apart). */
+  contentRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 12 },
+  textColumn: { flex: 1, minWidth: 0 },
   bottomRow: {
     flexDirection: 'column',
     alignItems: 'stretch',
