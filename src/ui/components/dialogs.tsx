@@ -102,6 +102,225 @@ export function ConfirmDialog({
   );
 }
 
+/**
+ * A question with more than two real answers - currently the photograph source
+ * (Camera / Gallery / Cancel).
+ *
+ * It is deliberately NOT a `ConfirmRequest`: in the old two-button dialog the
+ * cancel side had to carry "Gallery", so every dismissal (backdrop, Android
+ * back, and the Cancel row) launched the system picker. Here `onCancel` is the
+ * ONLY thing dismissal can do, and a picker starts only from an explicit
+ * choice. The card swallows its own touches so a tap on the text never counts
+ * as a backdrop tap.
+ */
+export interface ChoiceDialogRequest {
+  title: string;
+  message: string;
+  /** Neutral dismissal label ("Cancel"). */
+  cancelText: string;
+  /** Deliberate actions in reading order (e.g. Camera, Gallery). */
+  choices: Array<{ label: string; onPress: () => void }>;
+  onCancel: () => void;
+}
+
+export function ChoiceDialog({
+  request,
+  isDark,
+}: {
+  request: ChoiceDialogRequest;
+  isDark: boolean;
+}): React.JSX.Element {
+  const colors = themeColors(isDark);
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={request.onCancel}>
+      <Pressable
+        testID="choice-dialog-scrim"
+        style={[styles.scrim, { backgroundColor: colors.overlay }]}
+        onPress={request.onCancel}>
+        <View
+          testID="choice-dialog-card"
+          style={[styles.dialog, { backgroundColor: colors.surface }]}
+          // A responder on the card stops the tap from reaching the scrim, so the
+          // dialog body itself never dismisses it (children keep their own taps).
+          onStartShouldSetResponder={() => true}>
+          <View style={styles.content}>
+            <Text style={[styles.title, { color: colors.text }]}>{request.title}</Text>
+            <Text style={[styles.message, { color: colors.textSecondary }]}>{request.message}</Text>
+          </View>
+          <View style={styles.choices}>
+            {request.choices.map((choice) => (
+              <Pressable
+                key={choice.label}
+                accessibilityRole="button"
+                accessibilityLabel={choice.label}
+                onPress={choice.onPress}
+                style={({ pressed }) => [
+                  styles.choiceRow,
+                  { borderTopColor: colors.border },
+                  pressed && { backgroundColor: colors.surfaceVariant },
+                ]}>
+                <Text style={[styles.actionText, styles.actionTextStrong, { color: colors.accent }]}>
+                  {choice.label}
+                </Text>
+              </Pressable>
+            ))}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={request.cancelText}
+              onPress={request.onCancel}
+              style={({ pressed }) => [
+                styles.choiceRow,
+                { borderTopColor: colors.border },
+                pressed && { backgroundColor: colors.surfaceVariant },
+              ]}>
+              <Text style={[styles.actionText, { color: colors.textSecondary }]}>
+                {request.cancelText}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+/**
+ * A single-line text prompt that can REFUSE a value without closing.
+ *
+ * `ConfirmDialog` always closes on confirm and has no place for an error, which
+ * is how an invalid date used to fall through to a domain call. This dialog
+ * keeps the typed value and the form on screen while `validate` reports what is
+ * wrong; `today` only fills the field, it never applies anything.
+ */
+export interface PromptDialogRequest {
+  title: string;
+  message: string;
+  initialValue: string;
+  cancelText: string;
+  confirmText: string;
+  /** Optional shortcut that only FILLS the field with a known-good value. */
+  today?: { label: string; value: string };
+  /** Returns an error message, or null when the value is acceptable. */
+  validate: (value: string) => string | null;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}
+
+export function PromptDialog({
+  request,
+  isDark,
+}: {
+  request: PromptDialogRequest;
+  isDark: boolean;
+}): React.JSX.Element {
+  const colors = themeColors(isDark);
+  const [value, setValue] = useState(request.initialValue);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirm = (): void => {
+    const failure = request.validate(value);
+    if (failure !== null) {
+      // The dialog stays open: the typed value is still there to correct.
+      setError(failure);
+      return;
+    }
+    request.onConfirm(value.trim());
+  };
+
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={request.onCancel}>
+      <Pressable
+        testID="prompt-dialog-scrim"
+        style={[styles.scrim, { backgroundColor: colors.overlay }]}
+        onPress={request.onCancel}>
+        <View
+          testID="prompt-dialog-card"
+          style={[styles.dialog, { backgroundColor: colors.surface }]}
+          onStartShouldSetResponder={() => true}>
+          <View style={styles.content}>
+            <Text style={[styles.title, { color: colors.text }]}>{request.title}</Text>
+            <Text style={[styles.message, { color: colors.textSecondary }]}>{request.message}</Text>
+            <View style={styles.promptRow}>
+              <TextInput
+                accessibilityLabel={request.message}
+                style={[
+                  styles.promptInput,
+                  { color: colors.text, backgroundColor: colors.surfaceVariant },
+                  error !== null && { borderWidth: 1, borderColor: colors.error },
+                ]}
+                value={value}
+                onChangeText={(next) => {
+                  setValue(next);
+                  if (error !== null) {
+                    setError(null);
+                  }
+                }}
+                placeholder={request.initialValue}
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={120}
+              />
+              {request.today !== undefined && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={request.today.label}
+                  onPress={() => {
+                    setValue(request.today?.value ?? '');
+                    setError(null);
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.promptChip, { opacity: pressed ? 0.6 : 1 }]}>
+                  <Text style={[styles.promptChipText, { color: colors.accent }]}>
+                    {request.today.label}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+            {error !== null && (
+              <Text
+                testID="prompt-dialog-error"
+                style={[styles.promptError, { color: colors.error }]}>
+                {error}
+              </Text>
+            )}
+          </View>
+          <View style={styles.choices}>
+            {/* Full-width rows: "Apply template" is two words and would be
+                squeezed into a half-width strip (it wrapped on a 360 dp phone). */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={request.confirmText}
+              onPress={confirm}
+              style={({ pressed }) => [
+                styles.choiceRow,
+                { borderTopColor: colors.border },
+                pressed && { backgroundColor: colors.surfaceVariant },
+              ]}>
+              <Text style={[styles.actionText, styles.actionTextStrong, { color: colors.accent }]}>
+                {request.confirmText}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={request.cancelText}
+              onPress={request.onCancel}
+              style={({ pressed }) => [
+                styles.choiceRow,
+                { borderTopColor: colors.border },
+                pressed && { backgroundColor: colors.surfaceVariant },
+              ]}>
+              <Text style={[styles.actionText, { color: colors.textSecondary }]}>
+                {request.cancelText}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 /** Floating status caption (spec 6.6) - bottom-right above the tab bar. */
 export function StatusCaption(): React.JSX.Element | null {
   const { status, isDark } = useApp();
@@ -151,6 +370,34 @@ const styles = StyleSheet.create({
   actionDivider: { borderLeftWidth: StyleSheet.hairlineWidth },
   actionText: { fontSize: 17, textAlign: 'center' },
   actionTextStrong: { fontFamily: fonts.medium },
+  /** Stacked answer rows of the photo-source choice (Camera / Gallery / Cancel). */
+  choices: { marginTop: 4 },
+  choiceRow: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+  },
+  /** Text prompt: the field and its optional "Today" shortcut share one row. */
+  promptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 8,
+    alignSelf: 'stretch',
+    marginTop: 14,
+  },
+  promptInput: {
+    flex: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  promptChip: { minHeight: 40, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+  promptChipText: { fontSize: 13, fontFamily: fonts.medium },
+  promptError: { marginTop: 8, fontSize: 12, lineHeight: 17, textAlign: 'center' },
   captionHost: { position: 'absolute', right: 14, bottom: 100, left: 14, alignItems: 'flex-end' },
   caption: {
     borderRadius: 14,

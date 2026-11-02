@@ -15,7 +15,7 @@
 // Reporting only one of them is what made the old page easy to misread.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { PeriodProgress, addDays, forRange, formatDate } from '../../domain/analytics';
@@ -23,6 +23,8 @@ import { MealEntry } from '../../domain/models';
 import { getMealsInRange } from '../../data/repositories';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
+import { dateHandoff } from '../dates';
+import { createLatestRequestRunner } from '../latestRequest';
 import { IconButton, Segmented } from '../components/buttons';
 import { Icon } from '../components/icons';
 import {
@@ -46,6 +48,20 @@ import {
 
 /** Order of the segmented control (index == selection). */
 const MODES: Mode[] = ['daily', 'weekly', 'monthly', 'yearly'];
+
+/**
+ * One settled period: key, totals and rows travel together, so the heading can
+ * never be paired with another period's numbers while a load is in flight.
+ */
+interface PeriodSnapshot {
+  key: string;
+  period: PeriodProgress;
+  rows: BreakdownRow[];
+}
+
+/** Stable empty list while a period loads (keeps the selection effect quiet). */
+const NO_ROWS: BreakdownRow[] = [];
+
 import { mealNameKey, t, tFmt } from '../strings';
 
 export function StatisticsScreen(): React.JSX.Element {
@@ -56,31 +72,58 @@ export function StatisticsScreen(): React.JSX.Element {
   const today = formatDate(new Date());
   const [mode, setMode] = useState<Mode>('weekly');
   const [anchor, setAnchor] = useState(today);
-  const [period, setPeriod] = useState<PeriodProgress | null>(null);
-  const [rows, setRows] = useState<BreakdownRow[]>([]);
+  /**
+   * ONE settled snapshot per request. Heading, totals and rows are all derived
+   * from it, so they can never disagree with each other mid-load; the key says
+   * which period (and which "today") the numbers belong to.
+   */
+  const [snapshot, setSnapshot] = useState<PeriodSnapshot | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   /** Disclosures: the meal-type table and the calculation notes. */
   const [openByMeal, setOpenByMeal] = useState(false);
   const [openCalc, setOpenCalc] = useState(false);
+  /** Only the newest load may publish; older answers are dropped. */
+  const [runner] = useState(createLatestRequestRunner);
+
+  const range = periodRange(mode, anchor);
+  const requestKey = `${mode}|${anchor}|${today}`;
 
   const load = useCallback(async () => {
-    if (app.profile === null) {
+    const profile = app.profile;
+    if (profile === null) {
       return;
     }
-    const range = periodRange(mode, anchor);
-    const entries = await getMealsInRange(app.profile.id, range.from, range.to);
-    const byDate = new Map<string, MealEntry[]>();
-    for (const entry of entries) {
-      const list = byDate.get(entry.date) ?? [];
-      list.push(entry);
-      byDate.set(entry.date, list);
+    const requestedMode = mode;
+    const requestedAnchor = anchor;
+    const key = `${requestedMode}|${requestedAnchor}|${today}`;
+    try {
+      await runner.run(
+        async (): Promise<PeriodSnapshot> => {
+          const bounds = periodRange(requestedMode, requestedAnchor);
+          const entries = await getMealsInRange(profile.id, bounds.from, bounds.to);
+          const byDate = new Map<string, MealEntry[]>();
+          for (const entry of entries) {
+            const list = byDate.get(entry.date) ?? [];
+            list.push(entry);
+            byDate.set(entry.date, list);
+          }
+          // Sparse map: days without entries are still days (five pending slots
+          // each), which is exactly what the completion denominator counts.
+          const progress = forRange(bounds.from, bounds.to, byDate);
+          return {
+            key,
+            period: progress,
+            rows: buildRows(requestedMode, bounds.from, bounds.to, progress.days, today),
+          };
+        },
+        setSnapshot,
+      );
+    } catch (error) {
+      // A read that fails leaves the previous snapshot alone; the page keeps the
+      // loading state instead of showing a half-updated period.
+      console.warn('[statistics] the period could not be read', error);
     }
-    // Sparse map: days without entries are still days (five pending slots each),
-    // which is exactly what the completion denominator has to count.
-    const progress = forRange(range.from, range.to, byDate);
-    setPeriod(progress);
-    setRows(buildRows(mode, range.from, range.to, progress.days, today));
-  }, [app.profile, anchor, mode, today]);
+  }, [anchor, app.profile, mode, runner, today]);
 
   // Reloaded whenever the tab comes to the front (and on mount, period or anchor
   // change), so the numbers follow background cycles without a gesture.
@@ -92,12 +135,20 @@ export function StatisticsScreen(): React.JSX.Element {
 
   useEffect(() => subscribeDataChange(() => void load()), [load]);
 
-  /** A selection only survives while its row exists in the current period. */
+  const ready = snapshot !== null && snapshot.key === requestKey;
+  /** The snapshot that may be drawn right now - never the previous period's. */
+  const view = ready && snapshot !== null ? snapshot : null;
+  const rows = view === null ? NO_ROWS : view.rows;
+
+  /** A selection only survives while its row exists in the settled period. */
   useEffect(() => {
+    if (view === null) {
+      return;
+    }
     if (selectedKey !== null && !rows.some((row) => row.key === selectedKey)) {
       setSelectedKey(null);
     }
-  }, [rows, selectedKey]);
+  }, [rows, selectedKey, view]);
 
   const shift = (delta: number): void => {
     if (mode === 'daily') {
@@ -112,8 +163,7 @@ export function StatisticsScreen(): React.JSX.Element {
     }
   };
 
-  const range = periodRange(mode, anchor);
-  const counts = period === null ? emptyCounts() : countSlots(period.days, today);
+  const counts = view === null ? emptyCounts() : countSlots(view.period.days, today);
   const recorded = counts.done + counts.missed;
   /** Primary measure: done / every planned slot in the period. */
   const completion = counts.total === 0 ? 0 : Math.round((counts.done * 100) / counts.total);
@@ -132,13 +182,15 @@ export function StatisticsScreen(): React.JSX.Element {
   /** The tab navigator is untyped here, so the two destinations are named once. */
   const openRow = (row: BreakdownRow): void => {
     const nav = navigation as unknown as {
-      navigate: (name: string, params?: Record<string, unknown>) => void;
+      navigate: (name: string, params?: object) => void;
     };
     if (row.from === row.to) {
-      nav.navigate('DashboardTab', { date: row.from });
+      // A hand-off, not just a date: the diary must land on this day even when
+      // it was already asked for it earlier in the session.
+      nav.navigate('DashboardTab', dateHandoff(row.from));
       return;
     }
-    nav.navigate('CalendarTab', { date: row.from });
+    nav.navigate('CalendarTab', dateHandoff(row.from));
   };
 
   return (
@@ -189,7 +241,21 @@ export function StatisticsScreen(): React.JSX.Element {
         />
       </View>
 
-
+      {view === null ? (
+        /* The range above already names the requested period, so the body must
+           not show the previous period's totals and rows underneath it. */
+        <View
+          style={[
+            styles.loadingPanel,
+            { backgroundColor: colors.surface, borderColor: colors.border },
+          ]}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.textMuted }]}>
+            {t('Rn_StatLoading')}
+          </Text>
+        </View>
+      ) : (
+        <>
       {/* Primary panel: one measure, its fraction, the composition and the counts. */}
       <View style={[styles.panel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <View style={styles.panelHeading}>
@@ -226,7 +292,9 @@ export function StatisticsScreen(): React.JSX.Element {
             [
               ['done', counts.done, colors.done],
               ['missed', counts.missed, colors.missed],
-              ['pending', counts.pending, colors.pending],
+              // Pending is the quiet neutral segment: exact counts live in the
+              // three numbers under the bar, so it must not shout.
+              ['pending', counts.pending, colors.barPending],
             ] as const
           ).map(([key, value, color]) =>
             value === 0 ? null : <View key={key} style={{ flex: value, backgroundColor: color }} />,
@@ -281,9 +349,11 @@ export function StatisticsScreen(): React.JSX.Element {
                   isSelected && { backgroundColor: colors.surfaceVariant },
                   pressed && !isSelected && { backgroundColor: colors.hairline },
                 ]}>
+                {/* Month rows print a full compact range ("26 Oct – 1 Nov"); at
+                    larger text sizes it wraps instead of being cut off. */}
                 <Text
                   style={[styles.rowLabel, { color: isSelected ? colors.accent : colors.text }]}
-                  numberOfLines={1}>
+                  numberOfLines={2}>
                   {row.label}
                 </Text>
                 <View style={[styles.rowBar, { backgroundColor: colors.surfaceVariant }]}>
@@ -291,7 +361,7 @@ export function StatisticsScreen(): React.JSX.Element {
                     [
                       ['done', row.counts.done, colors.done],
                       ['missed', row.counts.missed, colors.missed],
-                      ['pending', row.counts.pending, colors.pending],
+                      ['pending', row.counts.pending, colors.barPending],
                     ] as const
                   ).map(([key, value, color]) =>
                     value === 0 ? null : (
@@ -363,8 +433,8 @@ export function StatisticsScreen(): React.JSX.Element {
             />
           </Pressable>
           {openByMeal &&
-            (period?.days[0]?.slots ?? []).map((slot) => {
-              const mealCounts = countSlots(period?.days ?? [], today, slot.mealCategoryKey);
+            (view.period.days[0]?.slots ?? []).map((slot) => {
+              const mealCounts = countSlots(view.period.days, today, slot.mealCategoryKey);
               return (
                 <View
                   key={slot.mealCategoryKey}
@@ -428,6 +498,8 @@ export function StatisticsScreen(): React.JSX.Element {
           </View>
         )}
       </View>
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -463,6 +535,17 @@ const styles = StyleSheet.create({
     columnGap: 8,
   },
   periodLabel: { fontSize: 14, fontFamily: fonts.medium, textAlign: 'center', flexShrink: 1 },
+  /** Placeholder while a period settles; same card frame as the primary panel. */
+  loadingPanel: {
+    marginTop: 10,
+    minHeight: 180,
+    borderRadius: 15,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    rowGap: 10,
+  },
+  loadingText: { fontSize: 12 },
   /** Primary panel: the one measure the page is about. */
   panel: {
     marginTop: 10,
@@ -521,7 +604,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 8,
   },
-  rowLabel: { width: 92, fontSize: 13, fontFamily: fonts.medium },
+  rowLabel: { width: 106, fontSize: 13, fontFamily: fonts.medium, lineHeight: 17 },
   rowBar: {
     flex: 1,
     flexDirection: 'row',
@@ -529,8 +612,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
+  /**
+   * The fraction grows with its own text instead of sitting in a fixed 52 pt
+   * box: a yearly total ("0 / 1825") and larger system text both stay complete.
+   */
   rowValue: {
-    width: 52,
+    minWidth: 54,
+    flexShrink: 0,
     textAlign: 'right',
     fontSize: 12,
     fontVariant: ['tabular-nums'],

@@ -52,6 +52,7 @@ import {
   tabBarBottomOffset,
 } from './src/ui/tabBar';
 import { t } from './src/ui/strings';
+import { dateHandoff } from './src/ui/dates';
 import { setAppActive, startSyncTriggers, stopSyncTriggers } from './src/cloud/syncEngine';
 import {
   ensureNotificationChannels,
@@ -161,15 +162,21 @@ function Tabs(): React.JSX.Element {
             <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} />
           ),
         }}>
-        {({ navigation, route }) => (
-          <CalendarScreen
-            /* Statistics can send the calendar to a specific period. */
-            initialDate={(route.params as { date?: string } | undefined)?.date}
-            onOpenDay={(date) => {
-              navigation.navigate('DashboardTab', { date } as never);
-            }}
-          />
-        )}
+        {({ navigation, route }) => {
+          // A date hand-off carries the day AND a request id, so a repeated tap
+          // on the diary date re-opens the same day even after the calendar was
+          // browsed to another month.
+          const params = route.params as { date?: string; requestId?: number } | undefined;
+          return (
+            <CalendarScreen
+              initialDate={params?.date}
+              initialDateRequestId={params?.requestId}
+              onOpenDay={(date) => {
+                navigation.navigate('DashboardTab', dateHandoff(date) as never);
+              }}
+            />
+          );
+        }}
       </Tab.Screen>
       <Tab.Screen
         name="StatisticsTab"

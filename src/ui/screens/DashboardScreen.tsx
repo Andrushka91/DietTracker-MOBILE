@@ -41,7 +41,7 @@ import {
 import { useApp } from '../appContext';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { journalDelete } from '../../cloud/journal';
-import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
+import { ChoiceDialog, ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { MealCard } from '../components/MealCard';
 import { BarButton, IconButton, localizedCode } from '../components/buttons';
 import { PhotoViewer } from '../components/PhotoViewer';
@@ -49,6 +49,7 @@ import { PhotoViewer } from '../components/PhotoViewer';
 const Bar = BarButton;
 
 import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../strings';
+import { dateHandoff, readDateHandoff } from '../dates';
 import { fonts, metrics, themeColors, type ThemeColors } from '../theme';
 import { Icon } from '../components/icons';
 import { useFloatingTabBarClearance } from '../tabBar';
@@ -56,7 +57,7 @@ import { useFloatingTabBarClearance } from '../tabBar';
 export function DashboardScreen({
   route,
 }: {
-  route: { params?: { date?: string; mealKey?: number } };
+  route: { params?: { date?: string; mealKey?: number; requestId?: number } };
 }): React.JSX.Element {
   const app = useApp();
   const navigation = useNavigation();
@@ -68,6 +69,12 @@ export function DashboardScreen({
   const [categories, setCategories] = useState<MealCategory[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
+  /**
+   * Meal whose photograph source is being chosen. Kept apart from `dialog`
+   * because the source question has three real answers and no confirmation
+   * semantics: dismissing it must never start a picker.
+   */
+  const [photoSource, setPhotoSource] = useState<MealEntry | null>(null);
   const [viewer, setViewer] = useState<{
     photos: MealPhoto[];
     index: number;
@@ -83,7 +90,13 @@ export function DashboardScreen({
   const photoBusyRef = useRef(false);
   const { width } = useWindowDimensions();
   const bottomClearance = useFloatingTabBarClearance();
+  /** The tab navigator is untyped here, so the Calendar destination is named once. */
+  const openCalendar = navigation as unknown as {
+    navigate: (name: string, params?: object) => void;
+  };
   const now = new Date();
+  /** The diary's own "today", computed once per render. */
+  const todayDate = formatDate(now);
   /** "Sun 1 Nov" + "2026": the compact two-line date control. */
   const compactDate = formatCompactDate(date);
   // Two cards per row once the screen is wide enough (tablet / landscape),
@@ -127,20 +140,23 @@ export function DashboardScreen({
     });
   }, [openEditors.length, reload]);
 
-  // Deep link from a notification: open the date and the card editor.
+  // Deep link from a notification or a hand-off from the Calendar / Statistics:
+  // open the requested date and, when asked, the card editor. The request id is
+  // part of the dependencies, so asking for the SAME date again (after the diary
+  // was browsed elsewhere) still lands on that day.
   useEffect(() => {
-    const target = route.params;
-    if (target?.date !== undefined) {
-      setDate(target.date);
+    const handoff = readDateHandoff(route.params);
+    if (handoff !== null) {
+      setDate(handoff.date);
     }
-    if (target?.mealKey !== undefined && meals !== null) {
-      const meal = meals.find((m) => m.mealCategoryKey === target.mealKey);
+    if (route.params?.mealKey !== undefined && meals !== null) {
+      const meal = meals.find((m) => m.mealCategoryKey === route.params?.mealKey);
       if (meal !== undefined) {
         setEditRequestId(meal.id);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.params?.date, route.params?.mealKey]);
+  }, [route.params?.date, route.params?.mealKey, route.params?.requestId]);
 
   const accountId = app.accountId;
   const progress = meals === null ? null : forDay(date, meals, photoCounts);
@@ -222,9 +238,11 @@ export function DashboardScreen({
    * Photograph pipeline, step 1: where does the picture come from?
    *
    * A meal photograph is often taken right now (the plate in front of the user),
-   * so the card offers the camera as well as the gallery. The dialog is the iOS
-   * two-button choice the rest of the app already uses: gallery on the left,
-   * camera on the right.
+   * so the card offers the camera as well as the gallery. The question has
+   * THREE answers - Camera, Gallery and Cancel - and only tapping Camera or
+   * Gallery starts the system picker. Back, backdrop, Cancel and Close just
+   * dismiss it, which is why this is a ChoiceDialog and not a two-button
+   * confirmation whose "cancel" side had to mean Gallery.
    */
   const handleAddPhoto = (entry: MealEntry): void => {
     // One photograph pipeline at a time: `uploadingMealId` only exists during
@@ -238,20 +256,7 @@ export function DashboardScreen({
       setStatus(t('Photo_LimitReached'));
       return;
     }
-    setDialog({
-      title: t('Photo_AddTitle'),
-      message: t('Photo_AddMessage'),
-      cancelText: t('Photo_ChooseGallery'),
-      confirmText: t('Photo_TakeCamera'),
-      onCancel: () => {
-        setDialog(null);
-        void pickPhotos(entry, 'gallery');
-      },
-      onConfirm: () => {
-        setDialog(null);
-        void pickPhotos(entry, 'camera');
-      },
-    });
+    setPhotoSource(entry);
   };
 
   /**
@@ -516,7 +521,12 @@ export function DashboardScreen({
             accessibilityRole="button"
             accessibilityLabel={formatLongDate(date)}
             accessibilityHint={t('Common_ChooseDate')}
-            onPress={() => navigation.navigate('CalendarTab' as never)}
+            onPress={() =>
+              // The day AND the request id travel with the tap: the Calendar
+              // opens on this exact date in its exact month, and asking for the
+              // same date twice still re-fires after it was browsed elsewhere.
+              openCalendar.navigate('CalendarTab', dateHandoff(date))
+            }
             style={styles.dateButton}>
             <Text style={[styles.datePrimary, { color: colors.text }]} numberOfLines={1}>
               {compactDate.primary}
@@ -527,6 +537,22 @@ export function DashboardScreen({
               </Text>
             )}
           </Pressable>
+          {/* The only shortcut that leaves the day: on today it would do nothing,
+              so it appears beside the date only while another day is open. It
+              lives in the date row instead of a separate row of its own, which
+              keeps the header short without hiding the action. */}
+          {date !== todayDate && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Rn_GoToToday')}
+              onPress={() => setDate(todayDate)}
+              hitSlop={8}
+              style={({ pressed }) => [styles.todayChip, { opacity: pressed ? 0.6 : 1 }]}>
+              <Text style={[styles.todayChipText, { color: colors.accent }]}>
+                {t('Calendar_Today')}
+              </Text>
+            </Pressable>
+          )}
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
@@ -536,22 +562,6 @@ export function DashboardScreen({
             colors={colors}
           />
         </View>
-        {/* The day shortcut only exists while another date is open: on today it
-            would be a button that does nothing. */}
-        {date !== formatDate(now) && (
-          <View style={styles.todayRow}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('Rn_GoToToday')}
-              onPress={() => setDate(formatDate(now))}
-              hitSlop={10}
-              style={({ pressed }) => [styles.todayLink, { opacity: pressed ? 0.6 : 1 }]}>
-              <Text style={[styles.todayLinkText, { color: colors.accent }]}>
-                {t('Rn_GoToToday')}
-              </Text>
-            </Pressable>
-          </View>
-        )}
         {progress !== null && (
           <>
             {/* Progress: one slim bar and ONE completion summary ("3 of 5
@@ -709,6 +719,37 @@ export function DashboardScreen({
         </Pressable>
       </View>
 
+      {photoSource !== null && (
+        <ChoiceDialog
+          isDark={app.isDark}
+          request={{
+            title: t('Photo_AddTitle'),
+            message: t('Photo_AddMessage'),
+            cancelText: t('Common_Cancel'),
+            choices: [
+              {
+                label: t('Photo_TakeCamera'),
+                onPress: () => {
+                  const target = photoSource;
+                  setPhotoSource(null);
+                  void pickPhotos(target, 'camera');
+                },
+              },
+              {
+                label: t('Photo_ChooseGallery'),
+                onPress: () => {
+                  const target = photoSource;
+                  setPhotoSource(null);
+                  void pickPhotos(target, 'gallery');
+                },
+              },
+            ],
+            // Dismissal (back button, backdrop, Close, Cancel) only closes the
+            // question. Nothing is picked, stored or journaled.
+            onCancel: () => setPhotoSource(null),
+          }}
+        />
+      )}
       {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
       {viewer !== null && (
         <PhotoViewer
@@ -763,10 +804,18 @@ const styles = StyleSheet.create({
   /** Previous / date / next on one row; the date fills the centre. */
   navRow: { flexDirection: 'row', alignItems: 'center', columnGap: metrics.controlGap },
   dateButton: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  /** Quiet accent link, only rendered while the diary shows another date. */
-  todayRow: { alignItems: 'center', marginTop: 2 },
-  todayLink: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
-  todayLinkText: { fontSize: 12, fontFamily: fonts.medium },
+  /**
+   * "Today" rides in the date row while another day is open: a quiet accent
+   * label with a full 44 pt touch target, instead of a separate row of its own.
+   */
+  todayChip: {
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayChipText: { fontSize: 12, fontFamily: fonts.medium },
   /** Bar plus its completion summary, so the day can be read without the bar. */
   progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 10 },
   track: { flex: 1, height: 5, borderRadius: 20, overflow: 'hidden' },

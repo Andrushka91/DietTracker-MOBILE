@@ -101,7 +101,10 @@ export function periodRange(mode: Mode, anchor: string): { from: string; to: str
 /** The exact range, always printed: a period the user cannot identify is useless. */
 export function periodLabel(mode: Mode, from: string, to: string): string {
   if (mode === 'daily') {
-    return formatCompactDate(from).primary;
+    // The year belongs in the label: "Sun 1 Nov" alone is ambiguous as soon as
+    // the user steps into another year.
+    const compact = formatCompactDate(from);
+    return compact.year === '' ? compact.primary : `${compact.primary} ${compact.year}`;
   }
   if (mode === 'monthly') {
     return formatMonthLabel(from.slice(0, 7));

@@ -132,6 +132,37 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_MealShortLunch: 'Lunch',
   Rn_MealShortAfternoonSnack: 'PM snack',
   Rn_MealShortDinner: 'Dinner',
+  /** Visible captions of the inline meal editor (persistent, not placeholders). */
+  Rn_FieldMealName: 'Meal name',
+  Rn_FieldNotes: 'Notes',
+  Rn_FieldPlannedTime: 'Planned time',
+  /** Template target-date prompt: its wording, validation and Today shortcut. */
+  Rn_TemplateDatePrompt: 'Enter the target date (yyyy-MM-dd)',
+  Rn_TemplateApplyConfirm: 'Apply template',
+  Rn_TemplateDateRequired: 'Enter a date first.',
+  Rn_TemplateDateFormat: 'Use the format yyyy-MM-dd, for example 2026-11-02.',
+  Rn_TemplateDateImpossible: 'That day does not exist. Check the day and the month.',
+  /** Read-only template contents, inspected before anything is applied. */
+  Rn_TemplatePreview: 'Preview contents',
+  Rn_TemplatePreviewHide: 'Hide contents',
+  Rn_TemplateNoTitle: 'No meal name',
+  Rn_TemplateNoTime: 'No time',
+  /** Statistics: shown instead of another period's totals while one settles. */
+  Rn_StatLoading: 'Loading statistics…',
+  /** Settings: the real photograph count and the storage it occupies here. */
+  Rn_PhotoCount: '{0} photos',
+  Rn_PhotoCountOne: '1 photo',
+  Rn_PhotoStorageSize: '{0} on this device',
+  /**
+   * Settings: expanded schedule copy, qualified by the current connection. It
+   * describes a sync ATTEMPT, never a guaranteed immediate upload.
+   */
+  Rn_ScheduleHintConnected:
+    'Saving a meal starts a sync attempt; this schedule decides how often the app also checks the cloud for changes from your other devices.',
+  Rn_ScheduleHintGuest:
+    'Not connected: nothing is uploaded yet and meals stay on this device. After you sign in, saving a meal starts a sync attempt and this schedule decides how often the app also checks the cloud.',
+  Rn_ScheduleHintOffline:
+    'Offline: a save cannot upload right now, so changes wait on this device and the next sync attempt follows when the connection returns. This schedule decides how often the app also checks the cloud.',
 };
 
 /**
@@ -249,13 +280,17 @@ export function formatCompactDate(date: string): { primary: string; year: string
 /**
  * "26 Oct" - the compact day-and-month the statistics range label and the
  * monthly breakdown rows use. The year is added once, at the end of the range.
+ *
+ * The day and the month are joined with a non-breaking space, so a range that
+ * has to wrap ("2 Nov – 8 Nov" at large text sizes) breaks at the dash instead
+ * of leaving "8" alone on the first line and "Nov" on the next.
  */
 export function formatShortDayMonth(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
   if (!year || !month || !day || month < 1 || month > 12) {
     return date;
   }
-  return `${day} ${MONTH_NAMES[month - 1].slice(0, 3)}`;
+  return `${day}\u00A0${MONTH_NAMES[month - 1].slice(0, 3)}`;
 }
 
 /** "Mon 26" - one day of a weekly breakdown row. */

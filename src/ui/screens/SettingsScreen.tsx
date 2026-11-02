@@ -13,15 +13,16 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { SyncFrequency, SyncState, SyncTrigger } from '../../domain/enums';
 import { databasePath } from '../../data/database';
 import { checkIntegrity, type IntegrityReport } from '../../data/integrity';
 import { backupsDir, createBackup, restoreBackup } from '../../data/backup';
-import { totalPhotoBytes, getActiveAccount } from '../../data/repositories';
+import { totalPhotoBytes, getActiveAccount, getPhotoCounts } from '../../data/repositories';
 import RNFS from '../../platform/fs';
 import { readTokens } from '../../cloud/auth';
-import { previewRestoreFromCloud, restoreFromCloud, runCycle } from '../../cloud/syncEngine';
+import { previewRestoreFromCloud, restoreFromCloud, runCycle, subscribeDataChange } from '../../cloud/syncEngine';
 import { getDeviceId } from '../../services/deviceId';
 import { showSyncResultNotification } from '../../services/reminders';
 import { getQuota } from '../../cloud/driveProvider';
@@ -46,6 +47,7 @@ export function SettingsScreen(): React.JSX.Element {
   const bottomClearance = useFloatingTabBarClearance();
   const [dbPath, setDbPath] = useState('');
   const [storageMb, setStorageMb] = useState('0.00');
+  const [photoCount, setPhotoCount] = useState(0);
   const [quotaLine, setQuotaLine] = useState<string | null>(null);
   const [accountIdentity, setAccountIdentity] = useState<{
     name: string;
@@ -60,11 +62,26 @@ export function SettingsScreen(): React.JSX.Element {
   const refreshFacts = useCallback(async () => {
     setDbPath(await databasePath());
     setStorageMb(formatMegabytes(await totalPhotoBytes()));
+    // The count and the size come from the same repository values the cards and
+    // the calendar read, so the row never invents a number.
+    const counts = await getPhotoCounts();
+    let total = 0;
+    counts.forEach((value) => {
+      total += value;
+    });
+    setPhotoCount(total);
   }, []);
 
-  useEffect(() => {
-    void refreshFacts();
-  }, [refreshFacts]);
+  // Mounted and re-entered: a photograph added or removed in the diary is
+  // reflected here without leaving the page open on a stale number.
+  useFocusEffect(
+    useCallback(() => {
+      void refreshFacts();
+    }, [refreshFacts]),
+  );
+
+  // A background cycle can add or delete photographs too.
+  useEffect(() => subscribeDataChange(() => void refreshFacts()), [refreshFacts]);
 
   useEffect(() => {
     if (!app.signedIn) {
@@ -524,7 +541,13 @@ export function SettingsScreen(): React.JSX.Element {
               colors={colors}
             />
             <Text style={[styles.hint, { color: colors.textMuted }]}>
-              {t('Settings_SyncFrequencyHint')}
+              {t(
+                !app.signedIn
+                  ? 'Rn_ScheduleHintGuest'
+                  : app.syncState === SyncState.Offline
+                    ? 'Rn_ScheduleHintOffline'
+                    : 'Rn_ScheduleHintConnected',
+              )}
             </Text>
           </View>
         )}
@@ -565,10 +588,15 @@ export function SettingsScreen(): React.JSX.Element {
           onPress={() => void exportCalendar()}
           colors={colors}
         />
+        {/* Real repository values: how many photographs are stored, and the
+            storage they occupy on this device. */}
         <SettingsRow
           icon="images-outline"
           label={t('Rn_PhotoStorage')}
-          trailing={`${storageMb} MB`}
+          detail={tFmt('Rn_PhotoStorageSize', `${storageMb} MB`)}
+          trailing={
+            photoCount === 1 ? t('Rn_PhotoCountOne') : tFmt('Rn_PhotoCount', photoCount)
+          }
           colors={colors}
         />
       </View>

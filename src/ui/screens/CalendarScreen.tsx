@@ -31,6 +31,7 @@ import { getMealsInRange, getPhotoCounts } from '../../data/repositories';
 import { ensureCategories } from '../../services/mealTracking';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
+import { isCalendarDate } from '../dates';
 import { BarButton, IconButton } from '../components/buttons';
 import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
@@ -48,6 +49,12 @@ export function CalendarScreen(props: {
   onOpenDay: (date: string) => void;
   /** Date the page should show on arrival (Statistics sends a period start). */
   initialDate?: string;
+  /**
+   * Id of the hand-off that carried `initialDate`. It only has to change for the
+   * arrival to be applied again - the same date may legitimately be requested
+   * twice (diary -> calendar, browse to another month, diary -> same date).
+   */
+  initialDateRequestId?: number;
 }): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
@@ -120,16 +127,19 @@ export function CalendarScreen(props: {
     setSelected(today);
   };
 
-  // Arriving from Statistics with a date selects it and opens its month; both
-  // halves matter, or the grid would stay on the month the user just left.
+  // Arriving with a date selects it and opens its month; both halves matter, or
+  // the grid would stay on the month the user just left. The request id is a
+  // dependency too, so a REPEATED request for the same date re-applies after the
+  // grid was browsed elsewhere, while an ordinary tab tap (no new parameters)
+  // leaves the calendar exactly where the user parked it.
   useEffect(() => {
     const target = props.initialDate;
-    if (target === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    if (target === undefined || !isCalendarDate(target)) {
       return;
     }
     setMonth(target.slice(0, 7));
     setSelected(target);
-  }, [props.initialDate]);
+  }, [props.initialDate, props.initialDateRequestId]);
 
   // The Windows grid starts on the Monday before the 1st and always shows whole
   // weeks, so the neighbouring months' days fill the first and last row. They
@@ -391,17 +401,18 @@ export function CalendarScreen(props: {
                 {time}
               </Text>
               <View style={styles.copy}>
+                {/* The category leads every row - an empty slot reads
+                    "Afternoon snack" in full ink with "No meal recorded" as the
+                    quiet explanation underneath, instead of five identical
+                    "No meal recorded" titles. */}
                 <Text
-                  style={[
-                    styles.agendaTitle,
-                    { color: slot.title !== '' ? colors.text : colors.textMuted },
-                  ]}
+                  style={[styles.agendaTitle, { color: colors.text }]}
                   numberOfLines={1}>
-                  {slot.title !== '' ? slot.title : t('Rn_NoMealRecorded')}
+                  {slot.title !== '' ? slot.title : name}
                 </Text>
                 <View style={styles.agendaMeta}>
                   <Text style={[styles.agendaDetail, { color: colors.textMuted }]} numberOfLines={1}>
-                    {name}
+                    {slot.title !== '' ? name : t('Rn_NoMealRecorded')}
                   </Text>
                   {slot.photoCount > 0 && (
                     <>

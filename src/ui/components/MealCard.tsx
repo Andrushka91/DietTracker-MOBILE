@@ -275,33 +275,50 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
 
       {editing ? (
         <View style={styles.editor}>
-          <TextInput
-            accessibilityLabel={t('Meal_Title')}
-            style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
-            value={draftTitle}
-            onChangeText={setDraftTitle}
-            placeholder={t('Meal_Title')}
-            placeholderTextColor={colors.textMuted}
-            maxLength={120}
-          />
-          <TextInput
-            accessibilityLabel={t('Meal_Ingredients')}
-            style={[styles.input, styles.field, styles.textarea, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
-            value={draftIngredients}
-            onChangeText={setDraftIngredients}
-            placeholder={t('Meal_Ingredients')}
-            placeholderTextColor={colors.textMuted}
-            multiline
-            maxLength={2000}
-          />
-          <TextInput
-            accessibilityLabel={t('Meal_PlannedTime')}
-            style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
-            value={draftTime}
-            onChangeText={setDraftTime}
-            placeholder="HH:MM"
-            placeholderTextColor={colors.textMuted}
-          />
+          {/* Persistent labels: a filled field alone gave no clue which value was
+              the meal name, the notes or the planned time. */}
+          <View style={styles.fieldGroup}>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+              {t('Rn_FieldMealName')}
+            </Text>
+            <TextInput
+              accessibilityLabel={t('Rn_FieldMealName')}
+              style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
+              value={draftTitle}
+              onChangeText={setDraftTitle}
+              placeholder={t('Rn_FieldMealName')}
+              placeholderTextColor={colors.textMuted}
+              maxLength={120}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+              {t('Rn_FieldNotes')}
+            </Text>
+            <TextInput
+              accessibilityLabel={t('Rn_FieldNotes')}
+              style={[styles.input, styles.field, styles.textarea, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
+              value={draftIngredients}
+              onChangeText={setDraftIngredients}
+              placeholder={t('Rn_FieldNotes')}
+              placeholderTextColor={colors.textMuted}
+              multiline
+              maxLength={2000}
+            />
+          </View>
+          <View style={styles.fieldGroup}>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+              {t('Rn_FieldPlannedTime')}
+            </Text>
+            <TextInput
+              accessibilityLabel={t('Rn_FieldPlannedTime')}
+              style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
+              value={draftTime}
+              onChangeText={setDraftTime}
+              placeholder="HH:MM"
+              placeholderTextColor={colors.textMuted}
+            />
+          </View>
           <View style={styles.editorRow}>
             <BarButton
               label={t('Common_Cancel')}
@@ -460,6 +477,9 @@ const styles = StyleSheet.create({
     columnGap: metrics.controlGap,
   },
   editor: { marginTop: 8, rowGap: 8 },
+  /** One labelled editor field: a persistent caption above its input. */
+  fieldGroup: { rowGap: 4 },
+  fieldLabel: { fontSize: 11, lineHeight: 15, fontFamily: fonts.medium, letterSpacing: 0.2 },
   field: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
   textarea: { minHeight: 64, textAlignVertical: 'top' },
   input: { width: '100%' },

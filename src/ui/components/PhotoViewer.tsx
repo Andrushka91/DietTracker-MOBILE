@@ -25,6 +25,7 @@ import {
   PanResponder,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -79,10 +80,23 @@ export function PhotoViewer(props: {
   const count = props.photos.length;
   const boundedIndex = Math.min(index, Math.max(count - 1, 0));
   const photo = props.photos[boundedIndex];
-  /** Tall enough for a portrait picture, short enough to keep the strip visible. */
-  const stageHeight = Math.round(Math.min(height * 0.56, width * 1.05));
+  /**
+   * The stage fills the room left between the header, the paging/zoom controls,
+   * the thumbnail strip and the hint. It used to be capped at 56 % of the
+   * screen, which left a large dead area under a portrait photograph. The
+   * fallback is only used for the first frame, before the frame is measured.
+   */
+  const [stageHeight, setStageHeight] = useState(
+    Math.round(Math.min(height * 0.7, width * 1.4)),
+  );
   const zoomed = scale > MIN_ZOOM + 0.01;
 
+  // The chrome is dark in both themes, so the system status icons must be light
+  // while the viewer is open. Unmounting restores the app's own bar style.
+  useEffect(() => {
+    StatusBar.setBarStyle('light-content', true);
+    return () => StatusBar.setBarStyle(themeColors(props.isDark).statusBarStyle, true);
+  }, [props.isDark]);
   const applyScale = (next: number): void => {
     const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
     scaleRef.current = clamped;
@@ -258,7 +272,17 @@ export function PhotoViewer(props: {
           </Pressable>
         </View>
 
-        <View style={[styles.stage, { height: stageHeight }]} {...panResponder.panHandlers}>
+        {/* The measured frame, not a guess: a portrait picture gets every point
+            the surrounding chrome does not need. */}
+        <View
+          style={styles.stage}
+          onLayout={(event) => {
+            const measured = Math.round(event.nativeEvent.layout.height);
+            if (measured > 0 && Math.abs(measured - stageHeight) > 1) {
+              setStageHeight(measured);
+            }
+          }}
+          {...panResponder.panHandlers}>
           <ScrollView
             ref={pagerRef}
             horizontal
@@ -538,7 +562,7 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, minWidth: 0, alignItems: 'center' },
   context: { fontSize: 15, fontFamily: fonts.medium, lineHeight: 20 },
   contextDetail: { fontSize: 12, lineHeight: 17 },
-  stage: { justifyContent: 'center' },
+  stage: { flex: 1, minHeight: 180, justifyContent: 'center' },
   pager: { flexGrow: 0 },
   image: { backgroundColor: 'transparent' },
   pagerRow: {

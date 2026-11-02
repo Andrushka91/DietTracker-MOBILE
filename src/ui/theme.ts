@@ -94,6 +94,12 @@ export interface ThemeColors {
   pending: string;
   /** Calendar day cell of a day with nothing decided (iOS gray wash). */
   cellPending: string;
+  /**
+   * Quiet fill of the PENDING segment in a statistics bar. A solid mid-grey
+   * pending fill dominated rows that were mostly empty; this is the neutral
+   * "line" tone the review design uses, while the counts keep the exact values.
+   */
+  barPending: string;
   success: string;
   warning: string;
   error: string;
@@ -150,6 +156,7 @@ export const lightColors: ThemeColors = {
   missed: MISSED_COLOR,
   pending: PENDING_COLOR,
   cellPending: CELL_PENDING_COLOR,
+  barPending: argb('#FFDCE3EC'),
   success: DONE_COLOR,
   warning: argb('#FFC77700'),
   error: MISSED_COLOR,
@@ -188,6 +195,7 @@ export const darkColors: ThemeColors = {
   missed: argb('#FFF87171'),
   pending: argb('#FF94A3B8'),
   cellPending: argb('#FF1B222B'),
+  barPending: argb('#FF333D4E'),
   success: argb('#FF34D399'),
   warning: argb('#FFF5A524'),
   error: argb('#FFF87171'),

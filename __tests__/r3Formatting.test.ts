@@ -27,8 +27,11 @@ describe('round-3 date formatting', () => {
   });
 
   it('prints the statistics labels the way the rows read them', () => {
-    expect(formatShortDayMonth('2026-10-26')).toBe('26 Oct');
-    expect(formatShortDayMonth('2026-11-01')).toBe('1 Nov');
+    // The day and the month are joined by a NON-BREAKING space, so a range that
+    // wraps at large text sizes breaks at the dash ("2 Nov –" / "8 Nov") instead
+    // of splitting "8" from "Nov".
+    expect(formatShortDayMonth('2026-10-26')).toBe('26\u00A0Oct');
+    expect(formatShortDayMonth('2026-11-01')).toBe('1\u00A0Nov');
     expect(formatWeekdayDay('2026-10-26')).toBe('Mon 26');
     expect(formatWeekdayDay('2026-11-01')).toBe('Sun 1');
   });
