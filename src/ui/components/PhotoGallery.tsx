@@ -12,7 +12,7 @@ import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'rea
 import { MealPhoto } from '../../domain/models';
 import { thumbnailUri } from '../../data/photoStore';
 import { t } from '../strings';
-import { type ThemeColors, metrics } from "../theme";
+import { type ThemeColors } from '../theme';
 
 /**
  * Tile edge in points. The strip has its own row above the action buttons, so
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
   tileHost: {
     width: TILE,
     height: TILE,
-    borderRadius: metrics.radiusSmall,
+    borderRadius: 9,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },

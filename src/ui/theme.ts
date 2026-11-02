@@ -310,6 +310,45 @@ export function statusColors(theme: ThemeColors): Record<number, string> {
 }
 
 /**
+ * Adds an alpha channel to a colour that is ALREADY in `#RRGGBB` / `#RRGGBBAA`
+ * form - which is what every theme colour is, because `argb()` converted it on
+ * the way in. Calling `withAlpha()` with a theme colour would convert twice and
+ * turn green into purple, so this helper only replaces the alpha byte.
+ */
+export function tintAlpha(value: string, alpha: string): string {
+  const rgb = /^#[0-9a-fA-F]{8}$/.test(value) ? value.slice(0, 7) : value;
+  return /^#[0-9a-fA-F]{6}$/.test(rgb) ? `${rgb}${alpha}` : value;
+}
+
+/**
+ * Fill + ink of a SOFT status pill: the state colour on a wash of itself, which
+ * is the pill the round-3 review design draws on a meal card and in the calendar
+ * agenda. It carries exactly the same information as `statusPillColors` (glyph,
+ * word and colour), one tone quieter, so the meal text stays the loudest thing on
+ * the card. Pending keeps the neutral control wash with secondary ink.
+ */
+export function softPillColors(
+  theme: ThemeColors,
+  status: number,
+): { fill: string; ink: string; dot: string } {
+  if (status === 1) {
+    return {
+      fill: tintAlpha(theme.done, theme.dark ? '2E' : '1A'),
+      ink: theme.done,
+      dot: theme.done,
+    };
+  }
+  if (status === 2) {
+    return {
+      fill: tintAlpha(theme.missed, theme.dark ? '2E' : '1A'),
+      ink: theme.missed,
+      dot: theme.missed,
+    };
+  }
+  return { fill: theme.surfaceVariant, ink: theme.textSecondary, dot: theme.pending };
+}
+
+/**
  * Fill + ink of a status pill.
  *
  * Done and missed keep their solid state colour with `onState` ink (white on the

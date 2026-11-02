@@ -26,6 +26,10 @@ export function IconButton(props: {
   danger?: boolean;
   /** Explicit glyph colour - the symbol only, the button chrome stays neutral. */
   tint?: string;
+  /** Glyph size in points (default 20). */
+  size?: number;
+  /** Square size in points (default metrics.minTouch). Never below 44. */
+  touch?: number;
   colors: ThemeColors;
 }): React.JSX.Element {
   const tint = props.disabled === true
@@ -48,11 +52,13 @@ export function IconButton(props: {
       style={({ pressed }) => [
         styles.iconButton,
         {
+          width: props.touch ?? metrics.minTouch,
+          height: props.touch ?? metrics.minTouch,
           backgroundColor: pressed ? props.colors.surfaceVariant : 'transparent',
           opacity: props.disabled === true ? 0.45 : 1,
         },
       ]}>
-      <Icon name={props.icon} size={20} color={tint} />
+      <Icon name={props.icon} size={props.size ?? 20} color={tint} />
     </Pressable>
   );
 }
@@ -180,15 +186,15 @@ export function Segmented(props: {
             hitSlop={4}
             style={[
               styles.segmentItem,
-              selected && [
-                styles.segmentSelected,
-                { backgroundColor: props.colors.accentFill },
-              ],
+              // The selected segment is a raised SURFACE with accent ink (the
+              // round-3 review design), not a second accent button: the page's
+              // one filled control must stay the primary action.
+              selected && [styles.segmentSelected, { backgroundColor: props.colors.surface }],
             ]}>
             <Text
               style={[
                 styles.segmentLabel,
-                { color: selected ? props.colors.accentFillText : props.colors.textSecondary },
+                { color: selected ? props.colors.accent : props.colors.textSecondary },
                 selected && styles.segmentLabelSelected,
               ]}>
               {label}

@@ -24,6 +24,114 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_PeriodYear: 'Year',
   /** Metadata caption on a template row. */
   Rn_Updated: 'Updated',
+  /**
+   * r3 day header: one completion summary instead of a bare percentage, so the
+   * number of planned slots is never implied by the bar's width alone.
+   */
+  Rn_DayProgress: '{0} of {1} completed',
+  /** Day shortcut shown only while the diary is showing another date. */
+  Rn_GoToToday: 'Go to today',
+  /**
+   * Labelled template action under the meal list. The generated Windows key
+   * ("Save as template") reads like a per-meal action, so the phone spells out
+   * that the whole day is being saved.
+   */
+  Rn_SaveDayTemplate: 'Save day as template',
+  /** Photo viewer chrome (the round-3 review design). */
+  Rn_ViewerPrevious: 'Previous photograph',
+  Rn_ViewerNext: 'Next photograph',
+  Rn_ViewerZoomIn: 'Zoom in',
+  Rn_ViewerZoomOut: 'Zoom out',
+  Rn_ViewerCount: '{0} of {1}',
+  Rn_ViewerHint: 'Swipe to browse · Pinch or double-tap to zoom',
+  Rn_ViewerOptions: 'Photo options',
+  Rn_ViewerDetails: 'Photo details',
+  Rn_ViewerRemove: 'Remove photo',
+  /** Expanded details of the photograph the viewer is showing. */
+  Rn_ViewerFile: 'File',
+  Rn_ViewerSize: 'Size',
+  Rn_ViewerAdded: 'Added',
+  Rn_ViewerSync: 'Cloud sync',
+  Rn_ViewerSyncPending: 'Pending upload',
+  Rn_ViewerSyncDone: 'Synced',
+  /** Settings (round-3 grouped layout): section captions and row labels. */
+  Rn_SectionCloud: 'Cloud sync',
+  Rn_SectionData: 'Data & backup',
+  Rn_SectionMore: 'More',
+  Rn_GuestAccount: 'Guest account',
+  Rn_GuestDetail: 'Meals are saved on this device',
+  Rn_ConnectedDetail: 'Connected across your devices',
+  Rn_ScheduledChecks: 'Scheduled cloud checks',
+  Rn_CloudContents: 'Cloud contents',
+  Rn_ExportDetail: 'Writes a backup file on this device',
+  Rn_RestoreDetail: 'Merge a saved backup into this device',
+  Rn_PhotoStorage: 'Photo storage',
+  Rn_PrivacyRow: 'Privacy & your data',
+  Rn_AdvancedRow: 'Advanced & diagnostics',
+  Rn_AboutApp: 'About DietTracker',
+  Rn_LocalDatabase: 'Local database',
+  Rn_CheckIntegrity: 'Check database integrity',
+  Rn_AccountDetails: 'Account details',
+  Rn_SyncAutoHint: 'When connected, saving a meal starts a sync attempt automatically.',
+  Rn_LastSync: 'Last sync',
+  /** Cloud-sync row states, one title + one detail each. */
+  Rn_SyncOk: 'Up to date',
+  Rn_SyncPending: 'Changes waiting to sync',
+  Rn_SyncOffline: 'Offline · saved on this device',
+  Rn_SyncResumes: 'Sync resumes when you reconnect',
+  Rn_SyncErrorTitle: 'Sync needs attention',
+  Rn_SyncErrorDetail: 'The last synchronization failed. Tap the refresh button to try again.',
+  Rn_SyncAuthTitle: 'Connection expired',
+  Rn_SyncAuthDetail: 'Sign in again to continue syncing.',
+  Rn_SyncPausedTitle: 'Sync paused',
+  Rn_SyncPausedDetail: 'Scheduled checks are paused on this device.',
+  Rn_SyncGuest: 'Not connected',
+  Rn_SyncGuestDetail: 'Sign in to sync across devices',
+  /** Calendar (round-3 design): subtitle, mark key and the selected-day summary. */
+  Rn_CalendarSubtitle: 'Your meals, day by day.',
+  Rn_CalendarMarks: 'Five marks · five meal slots',
+  Rn_CalendarDaySummary: '{0} done · {1} missed · {2} pending',
+  Rn_CalendarPhotoCount: '{0} photos',
+  Rn_NoMealRecorded: 'No meal recorded',
+  /** Photo count on one agenda row (a camera glyph plus this number). */
+  Rn_Agenda: 'Agenda',
+  /** Statistics (round-3 review design). */
+  Rn_StatSubtitle: 'A clearer picture of your meal journal.',
+  Rn_StatCompletion: 'Meal-slot completion',
+  Rn_StatPlannedCompleted: 'planned slots completed',
+  Rn_StatAllPlanned: 'All {0} planned slots in this {1}.',
+  Rn_StatIncludesUpcoming: 'Includes {0} upcoming slots.',
+  Rn_StatByMeal: 'By meal',
+  Rn_StatDailyBreakdown: 'Daily breakdown',
+  Rn_StatWeeklyBreakdown: 'Weekly breakdown',
+  Rn_StatMonthlyBreakdown: 'Monthly breakdown',
+  Rn_StatDoneOfPlanned: 'Done / planned',
+  Rn_StatEmptyTitle: 'No recorded outcomes yet',
+  Rn_StatEmptyBody: 'Record a meal in your diary to see its breakdown here.',
+  Rn_StatByMealType: 'By meal type',
+  Rn_StatHowItWorks: 'How the numbers work',
+  Rn_StatHowItWorksBody:
+    'Completion uses every planned slot in the selected period, including upcoming meals. Pending means no outcome has been recorded.',
+  Rn_StatAmongRecorded: 'Among recorded outcomes',
+  Rn_StatAmongRecordedBody:
+    'This second rate is Done ÷ (Done + Missed). Pending meals are excluded.',
+  Rn_StatNoRecorded: 'No recorded outcomes',
+  Rn_StatLater: 'Later',
+  Rn_StatDoneOfTotal: '{0} / {1}',
+  Rn_StatViewDay: 'View day',
+  Rn_StatOpenCalendar: 'Calendar',
+  Rn_StatDoneSuffix: '{0} / {1} done',
+  /** Lower-case period words used inside the context sentence. */
+  Rn_PeriodWordDay: 'day',
+  Rn_PeriodWordWeek: 'week',
+  Rn_PeriodWordMonth: 'month',
+  Rn_PeriodWordYear: 'year',
+  /** Short meal names for the day-mode breakdown rows. */
+  Rn_MealShortBreakfast: 'Breakfast',
+  Rn_MealShortMorningSnack: 'AM snack',
+  Rn_MealShortLunch: 'Lunch',
+  Rn_MealShortAfternoonSnack: 'PM snack',
+  Rn_MealShortDinner: 'Dinner',
 };
 
 /**
@@ -112,6 +220,52 @@ export function formatLongDate(date: string): string {
   }
   const value = new Date(year, month - 1, day);
   return `${WEEKDAY_NAMES[value.getDay()]}, ${day} ${MONTH_NAMES[month - 1]} ${year}`;
+}
+
+/**
+ * Three-letter weekday captions for the compact r3 day header ("Sun 1 Nov").
+ * The full weekday is a sentence opener, not a navigation label: at 26 pt it
+ * pushed the previous/next arrows and the date apart on a 360 pt phone.
+ */
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * The compact diary date: weekday, day number and month, with the year returned
+ * separately so the header can stack it ("Sun 1 Nov" over "2026"). Everything a
+ * user needs to know which day is open, in one line that never wraps.
+ */
+export function formatCompactDate(date: string): { primary: string; year: string } {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day || month < 1 || month > 12) {
+    return { primary: date, year: '' };
+  }
+  const weekday = WEEKDAY_SHORT[new Date(year, month - 1, day).getDay()] ?? '';
+  return {
+    primary: `${weekday} ${day} ${MONTH_NAMES[month - 1].slice(0, 3)}`,
+    year: String(year),
+  };
+}
+
+/**
+ * "26 Oct" - the compact day-and-month the statistics range label and the
+ * monthly breakdown rows use. The year is added once, at the end of the range.
+ */
+export function formatShortDayMonth(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day || month < 1 || month > 12) {
+    return date;
+  }
+  return `${day} ${MONTH_NAMES[month - 1].slice(0, 3)}`;
+}
+
+/** "Mon 26" - one day of a weekly breakdown row. */
+export function formatWeekdayDay(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day || month < 1 || month > 12) {
+    return date;
+  }
+  const weekday = WEEKDAY_SHORT[new Date(year, month - 1, day).getDay()] ?? '';
+  return `${weekday} ${day}`;
 }
 
 /**

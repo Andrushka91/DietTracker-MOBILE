@@ -20,7 +20,7 @@ import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
-import { argb, cardShadow, fonts, metrics, statusPillColors, themeColors } from '../theme';
+import { argb, cardShadow, fonts, metrics, softPillColors, themeColors } from '../theme';
 import { BarButton, IconButton, localizedCode } from './buttons';
 import { Icon, type IconName } from './icons';
 import { PhotoGallery } from './PhotoGallery';
@@ -102,8 +102,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
    */
   const statusIcon: IconName | null =
     meal.status === MealStatus.Done ? 'checkmark' : meal.status === MealStatus.Missed ? 'close' : null;
-  /** Fill + ink of the pill: solid state colour, or an outline for pending. */
-  const pill = statusPillColors(colors, meal.status);
+  /** Fill + ink of the pill: the state colour on a wash of itself. */
+  const pill = softPillColors(colors, meal.status);
   const effectiveTime =
     meal.plannedTime ?? (category.defaultTime !== '' ? category.defaultTime : null);
 
@@ -254,14 +254,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
           </Text>
         </View>
         <View
-          style={[
-            styles.pill,
-            {
-              backgroundColor: pill.fill,
-              borderWidth: pill.solid ? 0 : 1,
-              borderColor: colors.border,
-            },
-          ]}>
+          style={[styles.pill, { backgroundColor: pill.fill }]}>
           {statusIcon !== null ? (
             <Icon name={statusIcon} size={11} color={pill.ink} />
           ) : (
@@ -335,7 +328,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 </Text>
               )}
               {meal.ingredients !== '' && (
-                <Text style={[styles.body, { color: colors.textSecondary }]} numberOfLines={3}>
+                <Text style={[styles.body, { color: colors.textMuted }]} numberOfLines={3}>
                   {meal.ingredients}
                 </Text>
               )}
@@ -360,11 +353,11 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
             <View style={styles.actions}>
               <View style={styles.actionRow}>
-                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} colors={colors} />
-                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} colors={colors} />
-                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} tint={colors.done} colors={colors} />
+                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} size={18} touch={48} colors={colors} />
+                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} size={18} touch={48} colors={colors} />
+                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} size={18} touch={48} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} size={18} touch={48} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} size={18} touch={48} tint={colors.done} colors={colors} />
               </View>
             </View>
           </View>
@@ -407,35 +400,34 @@ const styles = StyleSheet.create({
   },
   /** Emoji sit on a soft tile so they align with the text block, not beside it. */
   iconTile: {
-    width: 38,
-    height: 38,
-    borderRadius: metrics.radiusSmall,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: { fontSize: 20 },
+  icon: { fontSize: 21 },
   headerText: { flexShrink: 1 },
-  headerTitle: { fontSize: 16, fontFamily: fonts.medium, letterSpacing: -0.2 },
-  headerTime: { fontSize: 12, marginTop: 1 },
+  headerTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
+  headerTime: { fontSize: 11, lineHeight: 15 },
   /** Capsule pill: the same shape and inset in every card, always top-right. */
   pill: {
     marginLeft: 'auto',
-    alignSelf: 'flex-start',
-    marginTop: 3,
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 4,
     borderRadius: metrics.radiusPill,
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     paddingVertical: 4,
   },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
   pillText: { fontSize: 11, fontFamily: fonts.medium },
   error: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 8 },
   errorText: { color: argb('#FFFFFFFF'), fontSize: 12 },
-  title: { fontSize: 16, lineHeight: 21, fontFamily: fonts.medium, marginTop: 10 },
-  body: { fontSize: 14, marginTop: 3, lineHeight: 19 },
-  emptyText: { fontSize: 13, fontStyle: 'italic', marginTop: 10 },
+  title: { fontSize: 16, lineHeight: 22, fontFamily: fonts.medium, marginTop: 10 },
+  body: { fontSize: 13, marginTop: 3, lineHeight: 19 },
+  emptyText: { fontSize: 12, marginTop: 12, paddingBottom: 2 },
   /**
    * Photo strip and action row, stacked: the pictures take the full card width
    * (so three thumbnails always sit side by side instead of wrapping), and the
@@ -450,16 +442,16 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     rowGap: 2,
   },
-  divider: { height: StyleSheet.hairlineWidth, marginTop: 10 },
+  divider: { height: StyleSheet.hairlineWidth, marginTop: 11 },
   /**
    * The action row ends on the card's text edge: the negative margin pulls the
-   * 44 pt touch squares back, so the last glyph lines up under the pill.
+   * 48 pt touch squares back, so the last glyph lines up under the pill.
    */
   actions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     flexShrink: 0,
-    marginRight: -10,
+    marginRight: -14,
   },
   actionRow: {
     flexDirection: 'row',

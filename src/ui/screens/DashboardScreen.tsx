@@ -48,8 +48,9 @@ import { PhotoViewer } from '../components/PhotoViewer';
 /** Short alias used throughout the JSX below. */
 const Bar = BarButton;
 
-import { t, tFmt, formatLongDate } from '../strings';
-import { fonts, metrics, pageTitleStyle, themeColors, typeScale, type ThemeColors } from '../theme';
+import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../strings';
+import { fonts, metrics, themeColors, type ThemeColors } from '../theme';
+import { Icon } from '../components/icons';
 import { useFloatingTabBarClearance } from '../tabBar';
 
 export function DashboardScreen({
@@ -83,6 +84,8 @@ export function DashboardScreen({
   const { width } = useWindowDimensions();
   const bottomClearance = useFloatingTabBarClearance();
   const now = new Date();
+  /** "Sun 1 Nov" + "2026": the compact two-line date control. */
+  const compactDate = formatCompactDate(date);
   // Two cards per row once the screen is wide enough (tablet / landscape),
   // otherwise one card per row - order is always preserved (spec 8.2).
   const twoColumns = width >= 600;
@@ -496,47 +499,66 @@ export function DashboardScreen({
           Previous / Today / Next, progress line, three state counters, day
           actions and the status caption (spec 8.2). */}
       <View style={styles.header}>
-        {/* Day navigation: previous day, the date centred between the arrows,
-            next day. Tapping the date opens the Calendar tab to choose a day. */}
+        {/* Compact day navigation: previous day, the date centred between the
+            arrows, next day. Tapping the date opens the Calendar tab to choose
+            a day - there is deliberately no ellipsis and no extra chevron next
+            to the date, so the header has exactly one job per control. */}
         <View style={styles.navRow}>
           <IconButton
             label={t('Dashboard_PreviousDay')}
             icon="chevron-back"
             onPress={() => setDate(addDays(date, -1))}
+            size={22}
+            touch={48}
             colors={colors}
           />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={formatLongDate(date)}
+            accessibilityHint={t('Common_ChooseDate')}
             onPress={() => navigation.navigate('CalendarTab' as never)}
             style={styles.dateButton}>
-            <Text style={[styles.dateTitle, { color: colors.text }]} numberOfLines={2}>
-              {formatLongDate(date)}
+            <Text style={[styles.datePrimary, { color: colors.text }]} numberOfLines={1}>
+              {compactDate.primary}
             </Text>
+            {compactDate.year !== '' && (
+              <Text style={[styles.dateYear, { color: colors.textMuted }]}>
+                {compactDate.year}
+              </Text>
+            )}
           </Pressable>
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
             onPress={() => setDate(addDays(date, 1))}
+            size={22}
+            touch={48}
             colors={colors}
           />
         </View>
-        {date !== formatDate(new Date()) && (
+        {/* The day shortcut only exists while another date is open: on today it
+            would be a button that does nothing. */}
+        {date !== formatDate(now) && (
           <View style={styles.todayRow}>
-            <Bar
-              compact
-              label={t('Common_Today')}
-              onPress={() => setDate(formatDate(new Date()))}
-              colors={colors}
-            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Rn_GoToToday')}
+              onPress={() => setDate(formatDate(now))}
+              hitSlop={10}
+              style={({ pressed }) => [styles.todayLink, { opacity: pressed ? 0.6 : 1 }]}>
+              <Text style={[styles.todayLinkText, { color: colors.accent }]}>
+                {t('Rn_GoToToday')}
+              </Text>
+            </Pressable>
           </View>
         )}
         {progress !== null && (
           <>
-            {/* Progress: the bar AND its number, so the width is never the only
-                way to read the day. */}
+            {/* Progress: one slim bar and ONE completion summary ("3 of 5
+                completed"), so the number of planned slots is never left to the
+                bar's width. */}
             <View style={styles.progressRow}>
-              <View style={[styles.track, { backgroundColor: colors.hairline }]}>
+              <View style={[styles.track, { backgroundColor: colors.surfaceVariant }]}>
                 <View
                   style={[
                     styles.fill,
@@ -544,28 +566,39 @@ export function DashboardScreen({
                   ]}
                 />
               </View>
-              <Text style={[styles.progressValue, { color: colors.textSecondary }]}>
-                {`${progress.percentage}%`}
+              <Text style={[styles.progressValue, { color: colors.textMuted }]}>
+                {tFmt('Rn_DayProgress', progress.completed, progress.totalSlots)}
               </Text>
             </View>
+            {/* Three equal columns: the counts line up under each other no
+                matter how wide the numbers get. */}
             <View style={styles.counters}>
-              <Counter label={t('Dashboard_CountDone')} value={progress.completed} color={colors.done} colors={colors} />
-              <Counter label={t('Dashboard_CountMissed')} value={progress.missed} color={colors.missed} colors={colors} />
-              <Counter label={t('Dashboard_CountPending')} value={progress.pending} color={colors.pending} colors={colors} />
+              <Count
+                icon="checkmark"
+                label={t('Dashboard_CountDone')}
+                value={progress.completed}
+                color={colors.done}
+                colors={colors}
+              />
+              <Count
+                icon="close"
+                label={t('Dashboard_CountMissed')}
+                value={progress.missed}
+                color={colors.missed}
+                colors={colors}
+              />
+              <Count
+                icon="time-outline"
+                label={t('Dashboard_CountPending')}
+                value={progress.pending}
+                color={colors.pending}
+                colors={colors}
+              />
             </View>
           </>
         )}
-        <View style={styles.actionsRow}>
-          <Bar
-            compact
-            label={t('Dashboard_SaveAll')}
-            onPress={handleSaveAll}
-            disabled={openEditors.length === 0}
-            colors={colors}
-          />
-        </View>
-        {/* Day-wide confirmations on their own right-aligned line: two labelled
-            buttons that used to be two unlabelled ✕ / ✓ chips. */}
+        {/* Day-wide actions: two equal-width buttons, the same distance from the
+            counts above them whatever their labels say. */}
         <View style={styles.dayActions}>
           <Bar
             compact
@@ -588,6 +621,21 @@ export function DashboardScreen({
             style={styles.bulkButton}
           />
         </View>
+        {/* Contextual batch save (spec 8.2): only an open inline editor can be
+            saved, so the button exists only while one is open - and it sits below
+            the two day-wide actions instead of pushing them around. */}
+        {openEditors.length > 0 && (
+          <View style={styles.actionsRow}>
+            <Bar
+              compact
+              label={t('Dashboard_SaveAll')}
+              onPress={handleSaveAll}
+              colors={colors}
+              accent
+              style={styles.saveAllButton}
+            />
+          </View>
+        )}
         {status !== null && <Text style={[styles.caption, { color: colors.textMuted }]}>{status}</Text>}
       </View>
 
@@ -629,7 +677,13 @@ export function DashboardScreen({
                   setViewer({
                     photos: list,
                     index,
-                    context: `${category.name} · ${formatLongDate(date)}`,
+                    // Same fallback the card header uses: a category row may
+                    // carry no custom name, and an empty viewer title would be
+                    // a nameless picture.
+                    context:
+                      category.name !== ''
+                        ? category.name
+                        : t(mealNameKey(category.fixedCategoryKey)),
                   });
                 }}
                 uploadingPhoto={uploadingMealId === meal.id}
@@ -639,9 +693,20 @@ export function DashboardScreen({
         })}
       </View>
 
-      {/* The labelled template action sits below the meal list. */}
+      {/* The labelled template action sits below the meal list, as a quiet text
+          button: it is a day-level extra, not a sixth meal tool. */}
       <View style={styles.templateRow}>
-        <Bar compact label={t('Dashboard_SaveDayTemplate')} onPress={handleSaveDayTemplate} colors={colors} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('Rn_SaveDayTemplate')}
+          onPress={handleSaveDayTemplate}
+          hitSlop={8}
+          style={({ pressed }) => [styles.templateButton, { opacity: pressed ? 0.6 : 1 }]}>
+          <Icon name="layers-outline" size={16} color={colors.accent} />
+          <Text style={[styles.templateLabel, { color: colors.accent }]}>
+            {t('Rn_SaveDayTemplate')}
+          </Text>
+        </Pressable>
       </View>
 
       {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
@@ -650,6 +715,8 @@ export function DashboardScreen({
           photos={viewer.photos}
           initialIndex={viewer.index}
           context={viewer.context}
+          contextDetail={formatLongDate(date)}
+          use12HourClock={app.use12HourClock}
           isDark={app.isDark}
           onClose={() => setViewer(null)}
           onRemove={(photo) => void handleRemovePhoto(photo)}
@@ -659,15 +726,16 @@ export function DashboardScreen({
   );
 }
 
-function Counter(props: {
+function Count(props: {
   label: string;
   value: number;
+  icon: React.ComponentProps<typeof Icon>['name'];
   color: string;
   colors: ThemeColors;
 }): React.JSX.Element {
   return (
     <View style={styles.counter}>
-      <View style={[styles.chip, { backgroundColor: props.color }]} />
+      <Icon name={props.icon} size={14} color={props.color} />
       <Text style={[styles.counterValue, { color: props.colors.text }]}>{props.value}</Text>
       <Text style={[styles.counterLabel, { color: props.colors.textMuted }]}>{props.label}</Text>
     </View>
@@ -685,50 +753,72 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   header: { paddingBottom: 2 },
-  /** The date is the page title: 700 with a little negative tracking. */
-  dateTitle: { ...pageTitleStyle, fontSize: typeScale.title2, textAlign: 'center' },
+  /**
+   * The date is a two-line control, not the page title: a 18 pt weekday line and
+   * an 11 pt year caption. Both fit between two 48 pt arrows on a 360 pt phone
+   * and neither can wrap.
+   */
+  datePrimary: { fontSize: 18, fontFamily: fonts.medium, letterSpacing: -0.3, lineHeight: 24 },
+  dateYear: { fontSize: 11, lineHeight: 15 },
   /** Previous / date / next on one row; the date fills the centre. */
   navRow: { flexDirection: 'row', alignItems: 'center', columnGap: metrics.controlGap },
-  dateButton: { flex: 1, minHeight: metrics.minTouch, alignItems: 'center', justifyContent: 'center' },
-  todayRow: { alignItems: 'center', marginTop: 6 },
-  /** Bar plus its percentage, so the day can be read without measuring a bar. */
-  progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 10, marginTop: 12 },
-  track: { flex: 1, height: 6, borderRadius: 3, overflow: 'hidden' },
-  fill: { height: 6, borderRadius: 3 },
-  progressValue: { fontSize: 12, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  counters: { flexDirection: 'row', alignItems: 'center', columnGap: 18, marginTop: 12 },
-  counter: { alignItems: 'center', flexDirection: 'row', columnGap: 6 },
-  /** iOS-style round counter dot. */
-  chip: { width: 8, height: 8, borderRadius: 4 },
-  /** Tabular figures keep the three counters aligned as the numbers change. */
-  counterValue: { fontFamily: fonts.medium, fontSize: 17, fontVariant: ['tabular-nums'] },
-  counterLabel: { fontSize: 12 },
-  /** Day actions wrap naturally instead of squeezing four labels into one line. */
-  actionsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: metrics.controlGap,
-    marginTop: 12,
+  dateButton: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  /** Quiet accent link, only rendered while the diary shows another date. */
+  todayRow: { alignItems: 'center', marginTop: 2 },
+  todayLink: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 8 },
+  todayLinkText: { fontSize: 12, fontFamily: fonts.medium },
+  /** Bar plus its completion summary, so the day can be read without the bar. */
+  progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 10 },
+  track: { flex: 1, height: 5, borderRadius: 20, overflow: 'hidden' },
+  fill: { height: 5, borderRadius: 20 },
+  progressValue: {
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
   },
-  /** Day-wide confirmations: one right-aligned line under the save actions. */
+  /** Three equal columns: Done / Missed / Pending always line up. */
+  counters: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
+  counter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    columnGap: 5,
+  },
+  /** Tabular figures keep the three counts aligned as the numbers change. */
+  counterValue: { fontFamily: fonts.medium, fontSize: 14, fontVariant: ['tabular-nums'] },
+  counterLabel: { fontSize: 11 },
+  /** Room for the contextual Save all row under the two day-wide actions. */
+  actionsRow: { flexDirection: 'row', marginTop: 8 },
+  saveAllButton: { flex: 1, justifyContent: 'center' },
   /** The two bulk actions share one equal-width row. */
   dayActions: {
     flexDirection: 'row',
-    columnGap: metrics.controlGap,
-    marginTop: 6,
+    columnGap: 10,
+    marginTop: 12,
   },
-  bulkButton: { flex: 1, justifyContent: 'center' },
-  templateRow: { alignItems: 'flex-start', marginTop: 14, paddingHorizontal: 2 },
+  bulkButton: { flex: 1, justifyContent: 'center', minHeight: 48 },
+  /** Day-level template action under the list: centred accent text, no chrome. */
+  templateRow: { alignItems: 'center', marginTop: 12 },
+  templateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 8,
+    minHeight: 44,
+    paddingHorizontal: 8,
+  },
+  templateLabel: { fontSize: 12, fontFamily: fonts.medium },
   caption: { marginTop: 8, fontSize: 12 },
   /** Small caps section caption between the day header and the meal cards. */
   sectionLabel: {
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 18,
     fontFamily: fonts.medium,
-    letterSpacing: 0.7,
+    letterSpacing: 1.1,
     textTransform: 'uppercase',
     marginTop: 18,
-    marginBottom: 8,
+    marginBottom: 7,
     marginLeft: 2,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.gridGap },
