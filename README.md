@@ -203,6 +203,15 @@ framed cards, reworked header/calendar/statistics, readable contrast, 44 pt
 targets, large-text fixes). The rollback point is the
 `backup/pre-redesign-20261101-2126` tag and its GitHub release.
 
+Round 3 (`redesign/ui-r3-20261102`) builds on that: a compact two-line day header
+with one completion summary and evenly aligned counts, photos as one horizontal
+row of 48 pt thumbnails beside the meal text, a full-screen viewer with paging,
+pinch/double-tap zoom and a confirmed remove action, a month board with five
+meal-state marks per recorded day, a statistics page with ONE primary measure
+(Done / all planned slots) plus an interactive breakdown, and a grouped Settings
+page. Its rollback point is the `backup/pre-redesign-r3-20261102-1244` tag and its
+GitHub release; evidence in [`docs/design/round3/`](./docs/design/round3/README.md).
+
 Evidence: [`docs/design/`](./docs/design/README.md) (first pass) and
 [`docs/design/round2/`](./docs/design/round2/README.md) (second pass, with the
 research, token table, spec departures, validation and screenshots).
