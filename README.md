@@ -506,7 +506,7 @@ src/
   services/   bootstrap, meal tracking facade, reminders (expo-notifications
               triggers), connectivity, device id
   ui/         theme (single source, system appearance), app context, shell
-              components (busy overlay, dialogs), screens: Dashboard, Calendar,
+              components (busy sheet, dialogs), screens: Dashboard, Calendar,
               Statistics, Templates, Settings
 ```
 
@@ -845,9 +845,11 @@ npm start
     are borderless and float on a soft shadow (`cardShadow` in `src/ui/theme.ts`), the
     typography follows the iOS text styles (`typeScale`: largeTitle 34 → caption2 11),
     buttons are capsules, the dialogs are iOS alerts (hairline action strip) and the
-    calendar paints soft state washes with the **whole day square** of today filled in
-    the accent blue (no circle around the number) instead of the Windows 2 px day
-    frames. All logic, data flow and wording stay identical.
+    calendar paints soft state washes over **square** day badges - today outlines its
+    badge in the accent blue and the selected day fills it, so the silhouette never
+    turns into a circle and never contradicts the square cells around it. The five
+    state marks under the grid spread across the full width instead of clustering in
+    the centre. All logic, data flow and wording stay identical.
   * Cards and counters use the exact iOS state colours of the palette in `src/ui/theme.ts`
     (done `#34C759`, missed `#FF3B30`, pending `#8E8E93`; calendar cells `#E5E5EA`), and
     `MealCategory.Color` is not painted as a card fill — the card keeps its neutral
@@ -883,17 +885,26 @@ npm start
     status pills already carry that state, and the date line was what pushed the grid
     down.
   * **Photographs on a card**: the strip has its own row above the action buttons
-    and draws three 56 pt tiles, so all three pictures of a meal fit side by side
-    on the narrowest phone instead of wrapping. Each tile carries two badges - the
-    **⤢ "Show"** button (bottom-left) opens the in-app full-screen viewer, and the
-    **✕** keeps its old top-right corner for removal; tapping the picture itself
-    still opens it too. The camera button on the card offers *Camera* / *Gallery*
+    and draws up to three 48 pt tiles, so all three pictures of a meal fit side by
+    side on the narrowest phone instead of wrapping. Each tile is ONE touch target
+    that opens the in-app full-screen viewer, where removal lives - no badge sits
+    on the picture. While a photograph is being saved the app-wide bottom busy
+    sheet reports the wait ("Saving the photograph…"); the card itself stays quiet
+    and the strip never shows a placeholder or a caption. The camera button offers
+    *Camera* / *Gallery*
     (`expo-image-picker.launchCameraAsync`, permission asked on first use), so a
     photograph can be taken while the meal is on the table.
+  * **Every wait is the same bottom sheet.** The app raises ONE "please wait"
+    surface - `LoadingSheet`/`LoadingDialog` in `src/ui/components/dialogs.tsx`, the
+    same grabber, rounded top edge and surface fill as every question the app asks,
+    driven by `busy`/`busyProgress` in `src/ui/appContext.tsx` and rendered by
+    `BusyOverlay` in `src/ui/components/shell.tsx`. "Synchronize now" and saving a
+    photograph use its plain spinner row; a stage that can count documents fills a
+    determinate bar from 0 % to 100 % instead. There is no dismiss control and the
+    back key is ignored, so the page behind stays untouched until the work settles.
   * **Signing out cannot skip the upload.** The account card opens the iOS-style
-    confirmation, then the global overlay shows a determinate bar from 0 % to 100 %
-    (`busyProgress` in `src/ui/appContext.tsx`, painted by `ProgressOverlay` in
-    `src/ui/components/shell.tsx`): every settled outbox document moves it, the
+    confirmation, then that same bottom sheet shows a determinate bar from 0 % to
+    100 % (`busyProgress`): every settled outbox document moves it, the
     failed-operation backoff window is ignored (`ignoreBackoff` in
     `src/cloud/syncEngine.ts`) and up to four deadline-bounded attempts ride out a
     short network drop. There is no "sign out anyway"/discard button any more - if

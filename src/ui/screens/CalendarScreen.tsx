@@ -5,10 +5,10 @@
 // (Monday first) and the grid of day cells.
 //
 // Day cell colors: gray = untouched/pending, green = every meal eaten,
-// red = at least one missed; today paints its whole cell with the accent
-// colour (a blue square, no circle around the number); tapping a cell selects
-// it, long press / "Open day" opens
-// the Dashboard for that date. A decided day shows its confirmed share of the five
+// red = at least one missed. Today and the selected day paint a SQUARE badge in
+// the accent colour - the same square silhouette as the day cells around it,
+// never a circle. Tapping a cell selects it; long press / "Open day" opens the
+// Dashboard for that date. A decided day shows its confirmed share of the five
 // slots ("1/5") and, when it holds pictures, the photo marker - an untouched day
 // shows its number and nothing else, because a pending meal never produces a
 // figure.
@@ -282,11 +282,11 @@ export function CalendarScreen(props: {
                     }}
                     onLongPress={() => props.onOpenDay(cell.date)}
                     style={[styles.cell, { opacity: cell.inMonth ? 1 : 0.38 }]}>
-                    {/* Selected = filled circle, today = outline, everything else
+                    {/* Selected = filled square, today = outline, everything else
                         is just the number. */}
                     <View
                       style={[
-                        styles.dayCircle,
+                        styles.dayBadge,
                         isSelected && { backgroundColor: colors.accent },
                         !isSelected && isToday && {
                           borderWidth: 1.5,
@@ -342,7 +342,7 @@ export function CalendarScreen(props: {
             {t('Rn_CalendarMarks')}
           </Text>
           <View style={styles.footToday}>
-            <View style={[styles.footRing, { borderColor: colors.accent }]} />
+            <View style={[styles.footSwatch, { borderColor: colors.accent }]} />
             <Text style={[styles.footText, { color: colors.textMuted }]}>
               {t('Calendar_Today')}
             </Text>
@@ -493,12 +493,17 @@ const styles = StyleSheet.create({
   /** Whole weeks of seven equal cells (no percentage drift). */
   grid: { rowGap: 2 },
   gridRow: { flexDirection: 'row' },
-  /** Cell = the day circle plus its five marks; 48 pt tall so it stays tappable. */
+  /** Cell = the day badge plus its five marks; 48 pt tall so it stays tappable. */
   cell: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', rowGap: 3 },
-  dayCircle: {
+  /**
+   * The day badge is SQUARE, matching the square cells it sits in: a 30 pt block
+   * with only a hint of corner rounding. Today outlines it in the accent, the
+   * selected day fills it - the same silhouette either way, never a circle.
+   */
+  dayBadge: {
     width: 30,
     height: 30,
-    borderRadius: 15,
+    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -509,13 +514,22 @@ const styles = StyleSheet.create({
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    columnGap: 18,
+    // The three states share the full width evenly, so the key reads across the
+    // whole board instead of sitting as a centred cluster.
+    justifyContent: 'space-between',
     borderTopWidth: StyleSheet.hairlineWidth,
     marginTop: 8,
     paddingTop: 10,
+    paddingHorizontal: 4,
   },
-  keyItem: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  /** One key entry: an equal third of the row, centred, so the three spread. */
+  keyItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 4,
+  },
   keyText: { fontSize: 11 },
   boardFoot: {
     flexDirection: 'row',
@@ -526,7 +540,8 @@ const styles = StyleSheet.create({
   },
   footText: { fontSize: 11 },
   footToday: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
-  footRing: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5 },
+  /** "Today" key swatch: the same square silhouette as the day badge. */
+  footSwatch: { width: 12, height: 12, borderRadius: 2, borderWidth: 1.5 },
   /** Selected date + its counts, with the explicit Open day action. */
   selectedRow: {
     flexDirection: 'row',

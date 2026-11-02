@@ -1,27 +1,24 @@
-// Cross-cutting shell component (spec 6): the busy overlay (6.4), the ONE wall
+// Cross-cutting shell component (spec 6): the busy sheet (6.4), the ONE surface
 // the app raises while an operation the user started is still running.
 //
-// Three presentations:
-//   account (sign in)             a transparent, centred spinner + sentence
-//                                 straight on the dimmed page - the screen stays
-//                                 recognisable and nothing else can be pressed
-//                                 until the account change is finished
-//   sign-out upload               the same wall with a DETERMINATE bar from 0 %
-//                                 to 100 %: every change the app saves to the
-//                                 account moves it, and there is deliberately no
-//                                 "skip" control - the records must reach the
-//                                 cloud before this device gives them up
-//   heavy work (restore, preview) the same scrim with a card that adds the
-//                                 "this can take a few seconds" hint
+// ONE presentation, the app's own bottom dialog: the same grabber, rounded top
+// edge and surface fill as every question the app asks, carrying a spinner and
+// the stage sentence. The sheet is a Modal of its own, so it swallows every
+// touch and the Android back key - nothing else can be pressed until the
+// operation is finished.
+//
+// A stage that can count its documents (the sign-out upload and the sign-in
+// download) also fills a DETERMINATE bar from 0 % to 100 % instead of the plain
+// spinner row, and there is deliberately no "skip" control: the records must
+// reach the cloud before this device gives them up.
 //
 // Background synchronization never raises it (spec change: silent sync).
 
 import React from 'react';
-import { ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 
-import { fonts, cardShadow, themeColors } from '../theme';
 import { useApp, type BusyStage } from '../appContext';
 import type { AccountSyncProgress } from '../../cloud/session';
+import { LoadingDialog } from './dialogs';
 import { t } from '../strings';
 
 /**
@@ -55,87 +52,47 @@ function progressRatio(progress: AccountSyncProgress): number {
   return Math.min(1, Math.max(0, progress.settled / progress.total));
 }
 
-/** Dark translucent scrim + spinner + stage sentence + hint (spec 6.4). */
+/**
+ * The app-wide "please wait" surface (spec 6.4): the SAME bottom sheet every
+ * question rises in, carrying a spinner and the stage sentence. A stage that can
+ * count its documents fills a determinate bar from 0 % to 100 % instead of the
+ * plain spinner row. The sheet lives in its own Modal window, so it swallows
+ * every touch and the Android back key - nothing else can be pressed until the
+ * operation has finished.
+ *
+ * No cancel/skip control exists on purpose: the data must travel before the local
+ * cache is deleted (sign-out) or shown (sign-in), so the only way out is to let
+ * it finish (or to wait for the refusal, which keeps all data and returns to the
+ * page).
+ */
 export function BusyOverlay(): React.JSX.Element | null {
   const { busy, busyProgress, isDark } = useApp();
   if (busy === null) {
     return null;
   }
-  const colors = themeColors(isDark);
   if (busyProgress !== null) {
-    return <ProgressOverlay busy={busy} progress={busyProgress} />;
+    return (
+      <LoadingDialog
+        name="busy-dialog"
+        message={progressTitle(busyProgress)}
+        detail={progressDetail(busyProgress)}
+        hint={SYNC_HINT}
+        progress={progressRatio(busyProgress)}
+        isDark={isDark}
+      />
+    );
   }
-  // The account flow is short and purely informational: spinner + sentence sit
-  // directly on the dimmed page (no card), with white ink because the scrim is
-  // the same dark wash in both themes.
-  const transparent = busy === 'signingIn' || busy === 'signingOut';
+  // The short steps are purely informational, so the sheet carries the sentence
+  // without the "this can take a few seconds" warning.
+  const shortFlow =
+    busy === 'signingIn' || busy === 'signingOut' || busy === 'savingPhoto';
   return (
-    // A Modal is its own native window: it swallows every touch and the Android
-    // back key (an empty handler keeps it open), so no other control of the app
-    // can be pressed while the operation runs.
-    <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
-      <View style={[styles.scrim, { backgroundColor: colors.overlay }]}>
-        {transparent ? (
-          <View style={styles.transparentHost}>
-            <ActivityIndicator size="large" color={colors.accentFillText} />
-            <Text style={[styles.transparentStage, { color: colors.accentFillText }]}>
-              {stageText(busy)}
-            </Text>
-          </View>
-        ) : (
-          <View style={[styles.scrimCard, { backgroundColor: colors.surface }]}>
-            <ActivityIndicator size="large" color={colors.accent} />
-            <Text style={[styles.stage, { color: colors.text }]}>{stageText(busy)}</Text>
-            <Text style={[styles.hint, { color: colors.textMuted }]}>{t('Busy_Hint')}</Text>
-          </View>
-        )}
-      </View>
-    </Modal>
-  );
-}
-/**
- * The account boundary bar: a blocking card with a bar that fills from 0 % to
- * 100 %. Signing out: every pending change reaches the account. Signing in:
- * every document of the account's dataset lands on the device - the user may
- * only continue once the app really holds their records.
- *
- * No cancel/skip button exists on purpose: the data must travel before the local
- * cache is deleted (sign-out) or shown (sign-in), so the only way out is to let
- * it finish (or to wait for the refusal, which keeps all data and returns to the
- * page).
- */
-function ProgressOverlay({
-  busy,
-  progress,
-}: {
-  busy: BusyStage;
-  progress: AccountSyncProgress;
-}): React.JSX.Element {
-  const { isDark } = useApp();
-  const colors = themeColors(isDark);
-  const ratio = progressRatio(progress);
-  const percent = Math.round(ratio * 100);
-  const title = progressTitle(progress);
-  const detail = progressDetail(progress);
-  return (
-    <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
-      <View style={[styles.scrim, { backgroundColor: colors.overlay }]}>
-        <View style={[styles.progressCard, { backgroundColor: colors.surface }]}>
-          <Text style={[styles.progressTitle, { color: colors.text }]}>{title}</Text>
-          <View style={[styles.track, { backgroundColor: colors.surfaceVariant }]}>
-            <View style={[styles.fill, { width: `${percent}%`, backgroundColor: colors.accent }]} />
-          </View>
-          <View style={styles.progressMeta}>
-            <Text style={[styles.percent, { color: colors.text }]}>{`${percent}%`}</Text>
-            <Text style={[styles.progressDetail, { color: colors.textMuted }]} numberOfLines={1}>
-              {detail}
-            </Text>
-          </View>
-          <Text style={[styles.hint, { color: colors.textMuted }]}>{SYNC_HINT}</Text>
-          <Text style={[styles.stageCaption, { color: colors.textMuted }]}>{stageText(busy)}</Text>
-        </View>
-      </View>
-    </Modal>
+    <LoadingDialog
+      name="busy-dialog"
+      message={stageText(busy)}
+      hint={shortFlow ? undefined : t('Busy_Hint')}
+      isDark={isDark}
+    />
   );
 }
 
@@ -182,6 +139,10 @@ function stageText(stage: BusyStage): string {
   switch (stage) {
     case 'sync':
       return t('Busy_Synchronizing');
+    case 'savingPhoto':
+      // Saving a photograph is local work: the sentence names the file being
+      // saved instead of the cloud, which is what the user is waiting for.
+      return t('Photo_Uploading');
     case 'uploading':
       return t('Busy_SyncingChanges');
     case 'downloading':
@@ -202,54 +163,5 @@ function stageText(stage: BusyStage): string {
   }
 }
 
-const styles = StyleSheet.create({
-  scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  scrimCard: {
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    minWidth: 240,
-    ...cardShadow,
-    elevation: 8,
-  },
-  stage: { marginTop: 16, fontSize: 16, fontFamily: fonts.medium, textAlign: 'center' },
-  hint: { marginTop: 6, fontSize: 13, textAlign: 'center' },
-  /**
-   * Sign-out upload bar: iOS alert proportions, a 8 pt rounded track and the
-   * accent fill - wide enough to read the percentage from arm's length.
-   */
-  progressCard: {
-    borderRadius: 20,
-    padding: 22,
-    alignItems: 'stretch',
-    width: '100%',
-    maxWidth: 330,
-    ...cardShadow,
-    elevation: 8,
-  },
-  progressTitle: { fontSize: 17, fontFamily: fonts.medium, textAlign: 'center' },
-  track: { height: 8, borderRadius: 4, marginTop: 18, overflow: 'hidden' },
-  fill: { height: 8, borderRadius: 4 },
-  progressMeta: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    columnGap: 10,
-    marginTop: 8,
-  },
-  percent: { fontSize: 20, fontFamily: fonts.medium },
-  progressDetail: { flexShrink: 1, fontSize: 12, textAlign: 'right' },
-  /** The stage sentence repeats the operation under the bar (e.g. "Signing out…"). */
-  stageCaption: { marginTop: 10, fontSize: 12, textAlign: 'center' },
-  /** Transparent presentation: only the spinner and its sentence. */
-  transparentHost: { alignItems: 'center', justifyContent: 'center', rowGap: 14 },
-  transparentStage: {
-    fontSize: 17,
-    fontFamily: fonts.medium,
-    textAlign: 'center',
-    // Readable on any wallpaper the dimmed page may show behind it.
-    textShadowColor: 'rgba(0, 0, 0, 0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-});
+// The busy sheet's own styles live with the shared surface in components/dialogs.tsx
+// (LoadingSheet), so this file only names the stages and the sentences.

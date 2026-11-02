@@ -302,8 +302,11 @@ export function DashboardScreen({
         assets = response.assets;
       }
       // Reading, hashing and thumbnailing a photograph takes a moment on a
-      // phone, so the card shows a spinner tile while it is being saved.
+      // phone, so the app raises its bottom busy sheet - the same surface every
+      // dialog uses - with "Saving the photograph…" while it happens. The card
+      // itself stays quiet, so the pictures that already landed keep the strip.
       setUploadingMealId(entry.id);
+      app.setBusy('savingPhoto');
       // "Photo first": an untouched card has no stored row yet, and its id is
       // minted fresh on every load. Writing the slot once before the first
       // photograph lands keeps that id stable, so the picture stays attached
@@ -329,9 +332,10 @@ export function DashboardScreen({
       setStatus(t('Error_photo_source_missing'));
     } finally {
       // The cloud sync itself continues in the background (the debounced cycle
-      // that notifyChanged scheduled). Waiting for it here kept the spinner on
-      // screen next to the saved photo and started a second, redundant cycle -
-      // the spinner now ends with the local save.
+      // that notifyChanged scheduled). Waiting for it here kept the busy sheet
+      // open next to the saved photo and started a second, redundant cycle - the
+      // wait now ends with the local save.
+      app.setBusy(null);
       setUploadingMealId(null);
       photoBusyRef.current = false;
     }

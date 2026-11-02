@@ -31,6 +31,7 @@ import { t } from './strings';
 /** Busy overlay stages (spec 6.4 stage sentences). */
 export type BusyStage =
   | 'sync'
+  | 'savingPhoto'
   | 'uploading'
   | 'downloading'
   | 'signingIn'

@@ -1,13 +1,15 @@
 // Photo gallery (spec 8.4) - up to three square thumbnails inside the meal
-// card. Every tile carries TWO small badges in its corners: an expand button
-// ("Show") that opens the photograph full screen, and the X that removes it -
-// tapping the picture itself does the same as "Show", the badge only makes the
-// gesture visible. While a photograph is being saved a compact caption with a
-// spinner sits under the thumbnails, so progress is visible without a
-// placeholder square appearing next to the pictures that already landed.
+// card. The whole tile is ONE touch target that opens the photograph full
+// screen; removal lives in the viewer, so no overlapping badges sit on the
+// picture.
+//
+// While a photograph is being saved the app-wide bottom busy sheet reports the
+// wait ("Saving the photograph…"), the same surface every dialog rises in. The
+// card itself stays quiet, so the pictures that already landed keep the whole
+// strip instead of a caption pushing them around.
 
 import React from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { MealPhoto } from '../../domain/models';
 import { thumbnailUri } from '../../data/photoStore';
@@ -28,7 +30,11 @@ const TILE = 48;
 export function PhotoGallery(props: {
   photos: MealPhoto[];
   colors: ThemeColors;
-  /** A photograph of this meal is being saved right now. */
+  /**
+   * A photograph of this meal is being saved right now. The strip stays mounted
+   * (so it does not blink away and back), but the wait itself is reported by the
+   * app-wide busy sheet - no caption sits on the card.
+   */
   uploading?: boolean;
   onOpen: (photo: MealPhoto) => void;
 }): React.JSX.Element | null {
@@ -55,14 +61,6 @@ export function PhotoGallery(props: {
           ))}
         </View>
       )}
-      {uploading && (
-        <View style={styles.uploadRow}>
-          <ActivityIndicator size="small" color={props.colors.accent} />
-          <Text style={[styles.caption, { color: props.colors.textMuted }]}>
-            {t('Photo_Uploading')}
-          </Text>
-        </View>
-      )}
     </View>
   );
 }
@@ -79,7 +77,4 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   tile: { width: '100%', height: '100%' },
-  /** Compact progress line under the thumbnails (no extra tile in the row). */
-  uploadRow: { flexDirection: 'row', alignItems: 'center', columnGap: 6, marginTop: 6 },
-  caption: { fontSize: 12 },
 });

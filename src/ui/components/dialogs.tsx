@@ -11,7 +11,7 @@
 // beside each other on a 360 dp phone.
 
 import React, { useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fonts, cardShadow, themeColors, type ThemeColors } from '../theme';
@@ -82,6 +82,98 @@ function Sheet(props: {
   return (
     <Modal transparent animationType="fade" visible onRequestClose={props.onDismiss}>
       <DialogSheet {...props} />
+    </Modal>
+  );
+}
+
+/**
+ * The bottom loading sheet: the SAME bottom-edge surface as every question
+ * (grabber, rounded top edge, surface fill) but carrying a spinner and one
+ * sentence instead of answer rows. It deliberately has no close control and its
+ * scrim never dismisses - the operation it reports owns the screen until it
+ * settles. `progress` turns the spinner row into a determinate bar for the
+ * account-boundary transfers that can count their documents.
+ */
+export function LoadingSheet(props: {
+  /** `busy-dialog` / `loading-dialog`: scrim and card ids. */
+  name: string;
+  /** The one sentence that says what is happening ("Saving the photograph…"). */
+  message: string;
+  /** Muted line under the message (document counts, "waiting for the connection"). */
+  detail?: string;
+  /** Muted hint at the very bottom ("this can take a few seconds"). */
+  hint?: string;
+  /** 0-1 determinate progress; null/undefined = indeterminate spinner. */
+  progress?: number | null;
+  isDark: boolean;
+}): React.JSX.Element {
+  const colors = themeColors(props.isDark);
+  const insets = useSafeAreaInsets();
+  const ratio =
+    props.progress === null || props.progress === undefined
+      ? null
+      : Math.min(1, Math.max(0, props.progress));
+  return (
+    // The scrim claims its own touches: a busy sheet is a report, not a question,
+    // so there is nothing to answer and nothing to dismiss.
+    <View
+      testID={`${props.name}-scrim`}
+      onStartShouldSetResponder={() => true}
+      style={[styles.scrim, { backgroundColor: colors.overlay }]}>
+      <View
+        testID={`${props.name}-card`}
+        style={[
+          styles.sheet,
+          { backgroundColor: colors.surface, paddingBottom: insets.bottom + 18 },
+        ]}
+        onStartShouldSetResponder={() => true}>
+        <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+        <View style={styles.loadingBody}>
+          <View style={styles.loadingHead}>
+            <ActivityIndicator size="large" color={colors.accent} />
+            <Text style={[styles.loadingMessage, { color: colors.text }]}>{props.message}</Text>
+          </View>
+          {ratio !== null && (
+            <View style={[styles.loadingTrack, { backgroundColor: colors.surfaceVariant }]}>
+              <View
+                style={[
+                  styles.loadingFill,
+                  { width: `${Math.round(ratio * 100)}%`, backgroundColor: colors.accent },
+                ]}
+              />
+            </View>
+          )}
+          {props.detail !== undefined && props.detail !== '' && (
+            <Text style={[styles.loadingDetail, { color: colors.textMuted }]}>{props.detail}</Text>
+          )}
+          {props.hint !== undefined && props.hint !== '' && (
+            <Text style={[styles.loadingHint, { color: colors.textMuted }]}>{props.hint}</Text>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The loading sheet inside its own Modal window: the app-wide "please wait"
+ * surface. There is no dismiss control and the Android back key is ignored, so
+ * the page behind stays untouched until the operation has settled.
+ */
+export function LoadingDialog({
+  name = 'loading-dialog',
+  ...rest
+}: {
+  message: string;
+  detail?: string;
+  hint?: string;
+  progress?: number | null;
+  name?: string;
+  isDark: boolean;
+}): React.JSX.Element {
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={() => {}}>
+      <LoadingSheet name={name} {...rest} />
     </Modal>
   );
 }
@@ -465,6 +557,14 @@ const styles = StyleSheet.create({
   promptChip: { minHeight: 40, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   promptChipText: { fontSize: 13, fontFamily: fonts.medium },
   promptError: { marginTop: 8, fontSize: 12, lineHeight: 17 },
+  /** Loading sheet body: spinner row, optional bar, optional muted lines. */
+  loadingBody: { paddingTop: 16, paddingHorizontal: 20, rowGap: 12 },
+  loadingHead: { flexDirection: 'row', alignItems: 'center', columnGap: 12 },
+  loadingMessage: { flex: 1, minWidth: 0, fontSize: 15, fontFamily: fonts.medium, lineHeight: 21 },
+  loadingTrack: { height: 8, borderRadius: 4, overflow: 'hidden' },
+  loadingFill: { height: 8, borderRadius: 4 },
+  loadingDetail: { fontSize: 12, lineHeight: 17 },
+  loadingHint: { fontSize: 12, lineHeight: 17 },
   captionHost: { position: 'absolute', right: 14, bottom: 100, left: 14, alignItems: 'flex-end' },
   caption: {
     borderRadius: 14,

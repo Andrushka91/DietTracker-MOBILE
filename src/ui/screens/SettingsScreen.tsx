@@ -5,11 +5,15 @@
 //  5 Privacy and backup card         6 About card
 //  7 Floating status line (StatusCaption, rendered by the shell)
 //
-// Signing in and out runs behind the GLOBAL busy overlay (shell.tsx), not a
-// button spinner: the account change touches the whole database, so no other
-// control of the app may be pressed while it runs. A sign-out first uploads
-// every pending change behind a 0-100 % bar ("busyProgress") and cannot be
-// skipped - the local cache is the only copy of those records until then.
+// Signing in and out runs behind the GLOBAL busy sheet (shell.tsx), not a button
+// spinner: the account change touches the whole database, so no other control of
+// the app may be pressed while it runs. A sign-out first uploads every pending
+// change behind a 0-100 % bar ("busyProgress") and cannot be skipped - the local
+// cache is the only copy of those records until then.
+//
+// "Synchronize now" raises the SAME bottom sheet with a plain spinner and the
+// "Synchronizing your data…" sentence, so every wait in the app looks alike and
+// the row's refresh glyph is only the trigger, never the progress report.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -55,7 +59,7 @@ export function SettingsScreen(): React.JSX.Element {
   }>({ name: '', email: '', photoUrl: '' });
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
   const [integrityText, setIntegrityText] = useState<string | null>(null);
-  /** True while the explicit "Synchronize now" cycle runs (inline spinner). */
+  /** True while the explicit "Synchronize now" cycle runs (shared busy sheet). */
   const [syncing, setSyncing] = useState(false);
 
   const refreshFacts = useCallback(async () => {
@@ -119,10 +123,12 @@ export function SettingsScreen(): React.JSX.Element {
     if (syncing) {
       return;
     }
-    // No blocking overlay for a synchronization: the card keeps its own small
-    // spinner for the few seconds the cycle takes, so the page stays usable and
-    // reads like a native pull-to-refresh instead of a modal wall.
+    // The cycle runs behind the app-wide bottom busy sheet (shell.tsx) - the same
+    // surface every dialog rises in. The row keeps its own `syncing` flag so the
+    // caption tells the truth afterwards, but the spinner the user watches is the
+    // shared one, not the refresh glyph in the row.
     setSyncing(true);
+    app.setBusy('sync');
     try {
       const result = await runCycle({ trigger: SyncTrigger.Manual });
       if (result.uploaded + result.downloaded > 0) {
@@ -139,6 +145,9 @@ export function SettingsScreen(): React.JSX.Element {
       }
       await app.refreshSyncState();
     } finally {
+      // The sheet must come down even when the cycle refused: the status caption
+      // carries the outcome, the busy sheet only reports that work is happening.
+      app.setBusy(null);
       setSyncing(false);
     }
   };
