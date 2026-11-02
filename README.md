@@ -75,8 +75,6 @@ else: no Metro, no Expo Go, no cable. Flags reach the script after `--`:
 | Stop the emulator gracefully (snapshot-safe) | `npm run emulator:stop` |
 
 Full details, flags and troubleshooting: [Local Android emulator](#local-android-emulator-android-studio-sdk).
-Reusable prompt that builds this same six-step command in another project:
-[PROMPT_ONE_COMMAND_PIPELINE.md](./PROMPT_ONE_COMMAND_PIPELINE.md).
 
 ## Install and run — step by step
 
