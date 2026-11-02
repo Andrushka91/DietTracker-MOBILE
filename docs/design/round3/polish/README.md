@@ -18,8 +18,10 @@ The APK installed before this pass was built at 15:26; the r3 commits landed at
 15:38. The selected-day **square** in the audit's screenshot therefore came from
 that older build, not from the current source: `CalendarScreen.styles.dayCircle`
 already specifies 30 × 30 with `borderRadius: 15`, and it was introduced by commit
-`f807a1a`, i.e. after the APK was built. No style was changed for V1; the shape
-was re-checked by reading the style and by running the checkpoint source.
+`f807a1a`, i.e. after the APK was built. No style was changed for V1. The shape
+was re-checked in the source and against the commit that added it; a fresh
+capture of the checkpoint build's grid was not taken during this pass, so the
+"circle on the current source" claim rests on that evidence, not on a screenshot.
 
 ## Findings
 
