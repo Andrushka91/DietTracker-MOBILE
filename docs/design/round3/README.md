@@ -15,6 +15,10 @@ untouched.
 | Recovered partial work | commit `3ac903c` (local checkpoint of the interrupted session) |
 | Merge / release | **not merged, no replacement production release published** — awaiting review |
 
+> **Finishing pass (2 November 2026):** the follow-up refinements live on branch
+> `r3/polish`, documented in [`polish/README.md`](polish/README.md) — checkpoint
+> tag `checkpoint/r3-liked-20261102-polish`. Nothing is merged.
+
 ## 0. Where this round started
 
 The previous session was stopped halfway. The work on disk was recovered instead
