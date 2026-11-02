@@ -35,7 +35,7 @@ import { isCalendarDate } from '../dates';
 import { BarButton, IconButton } from '../components/buttons';
 import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
-import { useFloatingTabBarClearance } from '../tabBar';
+import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
   formatLongDate,
   formatMonthLabel,
@@ -58,9 +58,6 @@ export function CalendarScreen(props: {
 }): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  // Room the floating tab bar needs below the last day row - measured from the
-  // device's own safe-area inset and the bar height (see src/ui/tabBar.ts).
-  const bottomClearance = useFloatingTabBarClearance();
   const today = formatDate(new Date());
   const [month, setMonth] = useState(today.slice(0, 7));
   const [selected, setSelected] = useState(today);
@@ -193,9 +190,9 @@ export function CalendarScreen(props: {
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // The floating tab bar sits on top of the page: the agenda stays readable
-        // above it on every device (no per-screen magic number).
-        { paddingBottom: bottomClearance },
+        // Air above the docked bar's divider (see src/ui/tabBar.ts): the agenda
+        // never ends flush against it.
+        { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <View style={styles.pageHead}>
         <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Calendar')}</Text>

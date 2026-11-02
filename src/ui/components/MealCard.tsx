@@ -3,10 +3,14 @@
 //  header: emoji icon (~36pt), fixed category name, effective planned time
 //          caption, status pill (Pending gray / Done green / Missed red)
 //  read:   title (2 lines), description (3 lines), closable error banner,
-//          photo gallery (left) + action bar (right)
-//  bar:    Add photo -> Edit -> Clear (red, disabled when empty) ->
+//          photo gallery (right of the text)
+//  bar:    ONE full-width hairline under the meal, then the five tools:
+//          Add photo -> Edit -> Clear (red, disabled when empty) ->
 //          Mark MISSED (disabled future/already) -> Mark DONE (disabled
-//          future/already-done/empty) - all with accessibility labels
+//          future/already-done/empty) - all with accessibility labels.
+//          The five glyphs are drawn at the same 20 pt as the reference card,
+//          in 48 pt touch squares 8 pt apart, so the row reads as one quiet
+//          line of tools instead of five crowded dots.
 //  editor: Title / Description / Planned time (HH:MM) / Cancel / Save;
 //          validation failures land on the card error line; Cancel resets
 //          only this card's draft.
@@ -24,6 +28,17 @@ import { argb, cardShadow, fonts, metrics, softPillColors, themeColors } from '.
 import { BarButton, IconButton, localizedCode } from './buttons';
 import { Icon, type IconName } from './icons';
 import { PhotoGallery } from './PhotoGallery';
+
+/**
+ * The meal card's tool row, measured off the reference card: the SAME five
+ * glyphs as before (camera, edit, clear, missed, done), drawn at 20 pt inside
+ * 48 pt touch squares, 8 pt apart. The touch square never shrinks below 48 -
+ * the glyph grew into it, so the row gets the airier rhythm of the reference
+ * without losing a single point of tappable area.
+ */
+export const CARD_TOOL_GLYPH = 20;
+export const CARD_TOOL_TOUCH = 48;
+export const CARD_TOOL_GAP = 8;
 
 export interface MealCardProps {
   meal: MealEntry;
@@ -365,16 +380,18 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             />
           </View>
           <View style={styles.bottomRow}>
-            {/* A hairline separates the meal from its tools, so the row of
-                glyphs stops floating in the same visual plane as the text. */}
-            <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
+            {/* One full-width line under the meal, exactly as the reference
+                card draws it: it closes the meal block and hands the space to
+                the tools. `cardDivider` is a deliberate step above the card
+                border, so the line is obvious on white AND on the dark card. */}
+            <View style={[styles.divider, { backgroundColor: colors.cardDivider }]} />
             <View style={styles.actions}>
               <View style={styles.actionRow}>
-                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} size={18} touch={48} colors={colors} />
-                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} size={18} touch={48} colors={colors} />
-                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} size={18} touch={48} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} size={18} touch={48} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} size={18} touch={48} tint={colors.done} colors={colors} />
+                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} colors={colors} />
+                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} colors={colors} />
+                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.missed} colors={colors} />
+                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.done} colors={colors} />
               </View>
             </View>
           </View>
@@ -408,6 +425,9 @@ const styles = StyleSheet.create({
   /**
    * Compact card body: roomier than the old 12 pt frame padding, because the
    * card no longer draws a coloured stroke - the air is what groups it now.
+   * `paddingBottom` equals the tool row's `rowGap`, so the air between the line
+   * and the glyphs is the same as between the glyphs and the card's bottom
+   * border.
    */
   cardContent: { paddingLeft: 15, paddingRight: 13, paddingTop: 12, paddingBottom: 6, flexGrow: 1 },
   header: {
@@ -457,24 +477,35 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'stretch',
     marginTop: 'auto',
-    rowGap: 2,
+    /**
+     * The gap between the line and the tool row. It is deliberately the same
+     * value as `cardContent.paddingBottom` below the tools, so the icon row sits
+     * exactly halfway between the line and the card's bottom border.
+     */
+    rowGap: 6,
   },
-  divider: { height: StyleSheet.hairlineWidth, marginTop: 11 },
+  /**
+   * The line that closes the meal block. 13 pt of air above it (the reference
+   * card's distance from the description) and a hairline of real ink - see the
+   * `colors.border` note at the call site.
+   */
+  divider: { height: StyleSheet.hairlineWidth, marginTop: 13 },
   /**
    * The action row ends on the card's text edge: the negative margin pulls the
-   * 48 pt touch squares back, so the last glyph lines up under the pill.
+   * 48 pt touch squares back by the glyph's own inset, so the last glyph lines
+   * up under the pill.
    */
   actions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     flexShrink: 0,
-    marginRight: -14,
+    marginRight: -(CARD_TOOL_TOUCH - CARD_TOOL_GLYPH) / 2,
   },
   actionRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
-    columnGap: metrics.controlGap,
+    columnGap: CARD_TOOL_GAP,
   },
   editor: { marginTop: 8, rowGap: 8 },
   /** One labelled editor field: a persistent caption above its input. */

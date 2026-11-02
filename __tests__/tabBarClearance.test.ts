@@ -1,106 +1,102 @@
-// Regression test for the room every page leaves below its last card, i.e. for
-// the floating tab bar's geometry (src/ui/tabBar.ts).
+// Regression test for the DOCKED bottom bar geometry (src/ui/tabBar.ts) and for
+// the room every page leaves above it.
 //
-// The old layout added a FIXED 110 pt to the device's bottom inset, so the air
-// between the last card and the bar depended on the phone: too little on a
-// device with an on-screen navigation bar, a huge hole on a phone without a
-// gesture area - and the calendar's day rows plus legend ended up flush against
-// the bar. The clearance is now derived from the bar's own geometry:
+// The bar used to FLOAT: absolutely positioned, 14 pt in from both edges, 66 pt
+// tall, with rounded outer corners and a raised shadow - and every page had to
+// reserve bottom inset + bar height + 32 pt of padding for it. The r3 mockups
+// dock the bar (`.ds-nav` in diettracker-r3-review-today.html / -settings.html):
+// full width, a normal sibling BELOW the pages, one hairline divider, its
+// surface covering the bottom safe area.
 //
-//   bottom offset (the device's safe-area inset, floor 10 pt)
-// + bar height   (what the navigator actually rendered, floor 66 pt)
-// + clearance gap (32 pt of air, a design constant)
-//
-// so the VISIBLE gap is identical on every device and every screen just asks
-// `useFloatingTabBarClearance()` for the number.
-
-jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-
-jest.mock('@react-navigation/bottom-tabs', () => ({
-  BottomTabBarHeightContext: {},
-}));
+// Because the navigator then reserves the bar's whole height itself, a page that
+// still reserved it would leave a hole above the bar - so the page gap is the
+// mockups' 18 pt of air and nothing else.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
-  TAB_BAR_CLEARANCE_GAP,
-  TAB_BAR_HEIGHT,
-  TAB_BAR_MIN_BOTTOM_OFFSET,
-  floatingTabBarClearance,
-  tabBarBottomOffset,
+  TAB_BAR_CONTENT_GAP,
+  TAB_BAR_CONTENT_HEIGHT,
+  TAB_BAR_EDGE_PADDING,
+  TAB_BAR_ITEM_HEIGHT,
+  TAB_BAR_ITEM_PADDING,
+  TAB_BAR_PADDING_TOP,
+  TAB_GLYPH_CHIP_HEIGHT,
+  TAB_LABEL_GAP,
+  TAB_LABEL_LINE_HEIGHT,
+  safeBottomInset,
+  tabBarHeight,
 } from '../src/ui/tabBar';
 
 /** Bottom insets real devices report: 0 (3-button bar) up to 48 (thick bar). */
 const INSETS = [0, 5, 10, 24, 34, 48];
 
-describe('Floating tab bar geometry (8.5 - one clearance for every device)', () => {
-  test('the bar keeps at least its minimum float above the bottom edge', () => {
-    expect(TAB_BAR_MIN_BOTTOM_OFFSET).toBe(10);
-    expect(TAB_BAR_HEIGHT).toBe(66);
-    expect(tabBarBottomOffset(0)).toBe(10);
-    expect(tabBarBottomOffset(5)).toBe(10);
-    expect(tabBarBottomOffset(10)).toBe(10);
-    // A real inset is used as it stands: the home indicator / gesture bar is not
-    // something the layout may ignore.
-    expect(tabBarBottomOffset(24)).toBe(24);
-    expect(tabBarBottomOffset(34)).toBe(34);
-    expect(tabBarBottomOffset(48)).toBe(48);
-  });
-
-  test('unmeasured or impossible insets fall back to the minimum float', () => {
-    expect(tabBarBottomOffset(Number.NaN)).toBe(TAB_BAR_MIN_BOTTOM_OFFSET);
-    // Landscape gesture areas can report negative insets.
-    expect(tabBarBottomOffset(-12)).toBe(TAB_BAR_MIN_BOTTOM_OFFSET);
-    expect(tabBarBottomOffset(Number.POSITIVE_INFINITY)).toBe(TAB_BAR_MIN_BOTTOM_OFFSET);
-  });
-
-  test('the clearance is float + bar + gap on every device', () => {
-    for (const bottomInset of INSETS) {
-      const clearance = floatingTabBarClearance({ bottomInset, barHeight: TAB_BAR_HEIGHT });
-      expect(clearance).toBe(
-        tabBarBottomOffset(bottomInset) + TAB_BAR_HEIGHT + TAB_BAR_CLEARANCE_GAP,
-      );
-      // The whole strip the bar covers is cleared...
-      expect(clearance).toBeGreaterThanOrEqual(tabBarBottomOffset(bottomInset) + TAB_BAR_HEIGHT);
-      // ...and the air above the bar is the SAME on every device.
-      expect(clearance - tabBarBottomOffset(bottomInset) - TAB_BAR_HEIGHT).toBe(
-        TAB_BAR_CLEARANCE_GAP,
-      );
-    }
-  });
-
-  test('a bigger inset only ever adds room, never takes it away', () => {
-    let previous = 0;
-    for (const bottomInset of INSETS) {
-      const clearance = floatingTabBarClearance({ bottomInset });
-      expect(clearance).toBeGreaterThanOrEqual(previous);
-      previous = clearance;
-    }
-  });
-
-  test('a missing or too small bar height is clamped to the constant', () => {
-    const floor = tabBarBottomOffset(24) + TAB_BAR_HEIGHT + TAB_BAR_CLEARANCE_GAP;
-    expect(floatingTabBarClearance({ bottomInset: 24, barHeight: null })).toBe(floor);
-    expect(floatingTabBarClearance({ bottomInset: 24 })).toBe(floor);
-    expect(floatingTabBarClearance({ bottomInset: 24, barHeight: Number.NaN })).toBe(floor);
-    expect(floatingTabBarClearance({ bottomInset: 24, barHeight: 40 })).toBe(floor);
-    // A bar that really is taller (a future second label line) wins.
-    expect(floatingTabBarClearance({ bottomInset: 24, barHeight: 92 })).toBe(
-      tabBarBottomOffset(24) + 92 + TAB_BAR_CLEARANCE_GAP,
+describe('Docked tab bar geometry (r3 `.ds-nav`)', () => {
+  test('one tab is the glyph chip, the gap and the caption - the mockups 52 pt row', () => {
+    expect(TAB_GLYPH_CHIP_HEIGHT).toBe(31);
+    expect(TAB_LABEL_GAP).toBe(5);
+    expect(TAB_LABEL_LINE_HEIGHT).toBe(16);
+    expect(TAB_BAR_ITEM_HEIGHT).toBe(
+      TAB_GLYPH_CHIP_HEIGHT + TAB_LABEL_GAP + TAB_LABEL_LINE_HEIGHT,
     );
+    expect(TAB_BAR_ITEM_HEIGHT).toBe(52);
+  });
+
+  test('the bar is one tab row plus its air, and the device inset is added on top', () => {
+    expect(TAB_BAR_PADDING_TOP).toBe(6);
+    // react-navigation pads every tab by 5 pt (tabVerticalUiKit) - the constant
+    // the content height is built on must stay in step with it.
+    expect(TAB_BAR_ITEM_PADDING).toBe(5);
+    expect(TAB_BAR_CONTENT_HEIGHT).toBe(
+      TAB_BAR_PADDING_TOP + TAB_BAR_ITEM_PADDING * 2 + TAB_BAR_ITEM_HEIGHT,
+    );
+    expect(TAB_BAR_EDGE_PADDING).toBe(4);
+
+    // The bar's own surface stops at its content; the bottom safe area is part
+    // of the bar's height, which is what lets its background cover the gesture
+    // indicator instead of letting the page show through.
+    expect(tabBarHeight(0)).toBe(TAB_BAR_CONTENT_HEIGHT);
+    for (const bottomInset of INSETS) {
+      expect(tabBarHeight(bottomInset)).toBe(TAB_BAR_CONTENT_HEIGHT + bottomInset);
+      expect(tabBarHeight(bottomInset)).toBeGreaterThanOrEqual(TAB_BAR_CONTENT_HEIGHT);
+    }
+  });
+
+  test('unmeasured or impossible insets add nothing', () => {
+    expect(safeBottomInset(Number.NaN)).toBe(0);
+    // Landscape gesture areas can report negative insets.
+    expect(safeBottomInset(-12)).toBe(0);
+    expect(safeBottomInset(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(tabBarHeight(Number.NaN)).toBe(TAB_BAR_CONTENT_HEIGHT);
+    expect(tabBarHeight(-12)).toBe(TAB_BAR_CONTENT_HEIGHT);
+  });
+
+  test('a page clears 18 pt of air, NOT the bar height (that would double-reserve)', () => {
+    expect(TAB_BAR_CONTENT_GAP).toBe(18);
+    expect(TAB_BAR_CONTENT_GAP).toBeLessThan(TAB_BAR_CONTENT_HEIGHT);
+    // Half of the old floating reserve is already more than a docked page needs.
+    expect(TAB_BAR_CONTENT_GAP * 2).toBeLessThan(TAB_BAR_CONTENT_HEIGHT);
   });
 
   test('the navigator and the pages read the SAME geometry', () => {
     const app = readFileSync(join(__dirname, '..', 'App.tsx'), 'utf8');
-    expect(app).toContain('const barBottom = tabBarBottomOffset(insets.bottom);');
-    expect(app).toContain('left: TAB_BAR_SIDE_INSET,');
-    expect(app).toContain('right: TAB_BAR_SIDE_INSET,');
-    expect(app).toContain('height: TAB_BAR_HEIGHT,');
+    expect(app).toContain('const barHeight = tabBarHeight(insets.bottom);');
+    expect(app).toContain('height: barHeight,');
+    expect(app).toContain('paddingTop: TAB_BAR_PADDING_TOP,');
+    expect(app).toContain('paddingHorizontal: TAB_BAR_EDGE_PADDING,');
+    // One hairline divider, opaque surface, no floating shadow and no floating
+    // geometry may come back.
+    expect(app).toContain('borderTopWidth: StyleSheet.hairlineWidth,');
+    expect(app).toContain('borderTopColor: colors.border,');
+    expect(app).toContain('elevation: 0,');
+    expect(app).not.toContain("position: 'absolute'");
+    expect(app).not.toContain('borderRadius');
+    expect(app).not.toContain('raisedShadow');
+    expect(app).not.toContain('tabBarBottomOffset');
 
-    // No page may guess the number again: every scrolling screen asks the hook.
+    // No page may reserve the bar's height again: every scrolling screen only
+    // adds the air above the divider.
     const screens = [
       'DashboardScreen',
       'CalendarScreen',
@@ -113,9 +109,10 @@ describe('Floating tab bar geometry (8.5 - one clearance for every device)', () 
         join(__dirname, '..', 'src', 'ui', 'screens', `${screen}.tsx`),
         'utf8',
       );
-      expect(source).toContain('const bottomClearance = useFloatingTabBarClearance();');
-      expect(source).toContain('paddingBottom: bottomClearance');
-      expect(source).not.toContain('floatingTabBarClearance +');
+      expect(source).toContain("import { TAB_BAR_CONTENT_GAP } from '../tabBar';");
+      expect(source).toContain('{ paddingBottom: TAB_BAR_CONTENT_GAP },');
+      expect(source).not.toContain('useFloatingTabBarClearance');
+      expect(source).not.toContain('floatingTabBarClearance');
     }
   });
 });

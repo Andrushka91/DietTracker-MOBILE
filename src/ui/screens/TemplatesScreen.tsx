@@ -18,7 +18,7 @@ import { BarButton } from '../components/buttons';
 import { PromptDialog } from '../components/dialogs';
 import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, cardShadow, themeColors } from '../theme';
-import { useFloatingTabBarClearance } from '../tabBar';
+import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
 import { dateInputProblem, isCalendarDate } from '../dates';
 
@@ -48,7 +48,6 @@ function formatUpdated(value: string, sameDay: boolean): string {
 export function TemplatesScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  const bottomClearance = useFloatingTabBarClearance();
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [categories, setCategories] = useState<MealCategory[]>([]);
   const [status, setStatus] = useState<string | null>(null);
@@ -120,9 +119,8 @@ export function TemplatesScreen(): React.JSX.Element {
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // Same bottom room as the other pages: the floating tab bar never
-        // covers the last template row.
-        { paddingBottom: bottomClearance },
+        // Same air above the docked bar as the other pages.
+        { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Templates')}</Text>
       <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>

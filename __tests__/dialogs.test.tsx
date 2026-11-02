@@ -8,9 +8,11 @@
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { Modal, TextInput } from 'react-native';
+import { Modal, StyleSheet, Text, TextInput } from 'react-native';
 
-import { ChoiceDialog, PromptDialog } from '../src/ui/components/dialogs';
+import { ChoiceDialog, ConfirmDialog, PromptDialog } from '../src/ui/components/dialogs';
+import { t } from '../src/ui/strings';
+import { fonts, lightColors } from '../src/ui/theme';
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -167,3 +169,133 @@ describe('the template target-date prompt', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 });
+describe('the shared dialog surface', () => {
+  /** A flattened style from a node whose `style` may still be a function. */
+  function styleOf(node: TestRenderer.ReactTestInstance): Record<string, unknown> {
+    const style = node.props.style;
+    const resolved = typeof style === 'function' ? style({ pressed: false }) : style;
+    return (StyleSheet.flatten(resolved) ?? {}) as Record<string, unknown>;
+  }
+
+  function nodeWithTestID(renderer: Renderer, testID: string) {
+    const found = renderer.root.findAll((node) => node.props?.testID === testID).pop();
+    if (found === undefined) {
+      throw new Error(`no node with testID ${testID}`);
+    }
+    return found;
+  }
+
+  function renderConfirm(destructive: boolean) {
+    const onCancel = jest.fn();
+    const onConfirm = jest.fn();
+    const renderer = render(
+      <ConfirmDialog
+        isDark={false}
+        request={{
+          title: 'Remove the photograph?',
+          message: 'The photograph is deleted from this device.',
+          confirmText: 'Delete photo',
+          destructive,
+          onCancel,
+          onConfirm,
+        }}
+      />,
+    );
+    return { renderer, onCancel, onConfirm };
+  }
+
+  test('rises from the bottom edge, not the middle of the screen', () => {
+    const { renderer } = renderConfirm(true);
+    // The scrim stacks its child at the bottom...
+    expect(styleOf(nodeWithTestID(renderer, 'confirm-dialog-scrim')).justifyContent).toBe('flex-end');
+    // ...and the sheet is a bottom sheet: only its TOP corners are rounded.
+    const sheet = styleOf(nodeWithTestID(renderer, 'confirm-dialog-card'));
+    expect(sheet.borderTopLeftRadius).toBe(20);
+    expect(sheet.borderTopRightRadius).toBe(20);
+    expect(sheet.borderBottomLeftRadius).toBeUndefined();
+  });
+
+  test('carries a bold title, a close X and 52 pt answer rows', () => {
+    const { renderer, onCancel, onConfirm } = renderConfirm(true);
+
+    const title = renderer.root
+      .findAllByType(Text)
+      .find((node) => node.props.children === 'Remove the photograph?');
+    expect(title).toBeDefined();
+    const titleStyle = styleOf(title!);
+    expect(titleStyle.fontFamily).toBe(fonts.bold);
+    expect(titleStyle.fontSize).toBe(20);
+
+    // The X is a real dismissal and every answer is a full-width row.
+    act(() => pressable(renderer, t('Common_Close')).props.onPress());
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    for (const label of ['No', 'Delete photo']) {
+      const row = styleOf(pressable(renderer, label));
+      expect(row.minHeight).toBe(52);
+      expect(row.flexDirection).toBe('row');
+    }
+    act(() => pressable(renderer, 'Delete photo').props.onPress());
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  test('paints a destructive answer in the red ink, with the trash glyph', () => {
+    const { renderer } = renderConfirm(true);
+    // The destructive row is red; the neutral row keeps the ordinary ink.
+    const destructiveLabel = renderer.root
+      .findAllByType(Text)
+      .find((node) => node.props.children === 'Delete photo');
+    expect(styleOf(destructiveLabel!).color).toBe(lightColors.error);
+    const glyphs = renderer.root
+      .findAll(
+        (node) =>
+          typeof node.props?.accessibilityLabel === 'string' &&
+          node.props.accessibilityLabel.startsWith('icon:'),
+      )
+      .map((node) => node.props.accessibilityLabel as string);
+    expect(glyphs).toContain('icon:trash-outline');
+
+    // A non-destructive confirm keeps the accent ink and the check.
+    const neutral = renderConfirm(false);
+    const neutralLabel = neutral.renderer.root
+      .findAllByType(Text)
+      .find((node) => node.props.children === 'Delete photo');
+    expect(styleOf(neutralLabel!).color).toBe(lightColors.accent);
+  });
+
+  test('the choice and prompt dialogs use the same surface', () => {
+    const chooser = render(
+      <ChoiceDialog
+        isDark={false}
+        request={{
+          title: 'Add a photograph',
+          message: 'Take a new picture now, or pick one already on the phone.',
+          cancelText: 'Cancel',
+          choices: [{ label: 'Camera', onPress: () => undefined }],
+          onCancel: () => undefined,
+        }}
+      />,
+    );
+    expect(styleOf(nodeWithTestID(chooser, 'choice-dialog-card')).borderTopLeftRadius).toBe(20);
+    expect(styleOf(pressable(chooser, 'Camera')).minHeight).toBe(52);
+
+    const prompt = render(
+      <PromptDialog
+        isDark={false}
+        request={{
+          title: 'Apply the template',
+          message: 'Enter the target date (yyyy-MM-dd)',
+          initialValue: '2026-11-02',
+          cancelText: 'Cancel',
+          confirmText: 'Apply template',
+          validate: () => null,
+          onCancel: () => undefined,
+          onConfirm: () => undefined,
+        }}
+      />,
+    );
+    expect(styleOf(nodeWithTestID(prompt, 'prompt-dialog-card')).borderTopLeftRadius).toBe(20);
+    expect(styleOf(pressable(prompt, 'Apply template')).minHeight).toBe(52);
+  });
+});
+

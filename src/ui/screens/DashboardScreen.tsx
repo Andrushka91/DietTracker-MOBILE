@@ -52,7 +52,7 @@ import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../stri
 import { dateHandoff, readDateHandoff } from '../dates';
 import { fonts, metrics, themeColors, type ThemeColors } from '../theme';
 import { Icon } from '../components/icons';
-import { useFloatingTabBarClearance } from '../tabBar';
+import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 
 export function DashboardScreen({
   route,
@@ -89,7 +89,6 @@ export function DashboardScreen({
   /** Guards the single photograph pipeline (picker + save) against re-entry. */
   const photoBusyRef = useRef(false);
   const { width } = useWindowDimensions();
-  const bottomClearance = useFloatingTabBarClearance();
   /** The tab navigator is untyped here, so the Calendar destination is named once. */
   const openCalendar = navigation as unknown as {
     navigate: (name: string, params?: object) => void;
@@ -496,9 +495,10 @@ export function DashboardScreen({
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={[
         styles.content,
-        // The floating tab bar sits ON TOP of the page: keep the same room the
-        // Settings page leaves, so Dinner (the last card) is never covered.
-        { paddingBottom: bottomClearance },
+        // The bar is docked BELOW the page (it is not an overlay any more), so
+        // this is only the visible air above its divider - the navigator already
+        // keeps the page out of the bar's own height.
+        { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       {/* header - part of the page, not a card: long date title,
           Previous / Today / Next, progress line, three state counters, day
@@ -596,6 +596,7 @@ export function DashboardScreen({
                 value={progress.missed}
                 color={colors.missed}
                 colors={colors}
+                glyphSize={MISSED_COUNTER_GLYPH_SIZE}
               />
               <Count
                 icon="time-outline"
@@ -729,6 +730,7 @@ export function DashboardScreen({
             choices: [
               {
                 label: t('Photo_TakeCamera'),
+                icon: 'camera-outline',
                 onPress: () => {
                   const target = photoSource;
                   setPhotoSource(null);
@@ -737,6 +739,7 @@ export function DashboardScreen({
               },
               {
                 label: t('Photo_ChooseGallery'),
+                icon: 'images-outline',
                 onPress: () => {
                   const target = photoSource;
                   setPhotoSource(null);
@@ -767,16 +770,37 @@ export function DashboardScreen({
   );
 }
 
+/**
+ * Glyph size of a counter (Done / Missed / Pending). The mockup draws these
+ * glyphs at the size of the action glyphs, not below them: 17 pt is the same
+ * ink as the meal-card tools and one step above the 14 pt count, so "✓ 3 Done"
+ * reads at a glance instead of the glyph hiding behind the number.
+ */
+const COUNTER_GLYPH_SIZE = 17;
+
+/**
+ * Ionicons' `close` fills less of its em box than `checkmark` does, so at the
+ * same 17 pt the missed ✕ reads a size smaller than the ✓ beside it. Two extra
+ * points make the three counters optically equal without changing the row.
+ */
+const MISSED_COUNTER_GLYPH_SIZE = 19;
+
 function Count(props: {
   label: string;
   value: number;
   icon: React.ComponentProps<typeof Icon>['name'];
   color: string;
   colors: ThemeColors;
+  /** Overrides `COUNTER_GLYPH_SIZE` for a glyph whose shape reads smaller. */
+  glyphSize?: number;
 }): React.JSX.Element {
   return (
     <View style={styles.counter}>
-      <Icon name={props.icon} size={14} color={props.color} />
+      <Icon
+        name={props.icon}
+        size={props.glyphSize ?? COUNTER_GLYPH_SIZE}
+        color={props.color}
+      />
       <Text style={[styles.counterValue, { color: props.colors.text }]}>{props.value}</Text>
       <Text style={[styles.counterLabel, { color: props.colors.textMuted }]}>{props.label}</Text>
     </View>

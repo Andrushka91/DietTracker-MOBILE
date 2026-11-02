@@ -34,7 +34,7 @@ import {
   themeColors,
   type ThemeColors,
 } from '../theme';
-import { useFloatingTabBarClearance } from '../tabBar';
+import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
   buildRows,
   countSlots,
@@ -68,7 +68,6 @@ export function StatisticsScreen(): React.JSX.Element {
   const app = useApp();
   const navigation = useNavigation();
   const colors = themeColors(app.isDark);
-  const bottomClearance = useFloatingTabBarClearance();
   const today = formatDate(new Date());
   const [mode, setMode] = useState<Mode>('weekly');
   const [anchor, setAnchor] = useState(today);
@@ -198,9 +197,8 @@ export function StatisticsScreen(): React.JSX.Element {
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // Same bottom room as the other pages: the floating tab bar never
-        // covers the last disclosure.
-        { paddingBottom: bottomClearance },
+        // Same air above the docked bar as the other pages.
+        { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Statistics')}</Text>
       <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('Rn_StatSubtitle')}</Text>
@@ -525,7 +523,7 @@ function StatCount(props: {
 const styles = StyleSheet.create({
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
   pageTitle: { ...pageTitleStyle },
-  subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+  subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2, fontFamily: fonts.regular },
   segmentWrap: { marginTop: 12 },
   periodRow: {
     flexDirection: 'row',
@@ -545,7 +543,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     rowGap: 10,
   },
-  loadingText: { fontSize: 12 },
+  loadingText: { fontSize: 12, fontFamily: fonts.regular },
   /** Primary panel: the one measure the page is about. */
   panel: {
     marginTop: 10,
@@ -565,7 +563,8 @@ const styles = StyleSheet.create({
   heroPercent: { fontSize: 38, lineHeight: 44, fontFamily: fonts.bold, letterSpacing: -1.2 },
   heroText: { flex: 1, minWidth: 0 },
   heroFraction: { fontSize: 15, fontFamily: fonts.medium },
-  heroCaption: { fontSize: 11, marginTop: 1 },
+  /** Caption of the fraction: a label, so it takes the semibold cut too. */
+  heroCaption: { fontSize: 11, marginTop: 1, fontFamily: fonts.medium },
   /** Composition bar: three flex segments, never a fixed width. */
   composition: {
     flexDirection: 'row',
@@ -583,8 +582,8 @@ const styles = StyleSheet.create({
     columnGap: 5,
   },
   statCountValue: { fontSize: 14, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  statCountLabel: { fontSize: 11 },
-  contextLine: { fontSize: 11, lineHeight: 16, marginTop: 10 },
+  statCountLabel: { fontSize: 11, fontFamily: fonts.medium },
+  contextLine: { fontSize: 11, lineHeight: 16, marginTop: 10, fontFamily: fonts.regular },
   breakdownHeading: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -593,7 +592,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   breakdownTitle: { fontSize: 15, fontFamily: fonts.medium },
-  breakdownCaption: { fontSize: 11 },
+  /** The column caption of the fraction column (`Done / planned`). */
+  breakdownCaption: { fontSize: 11, fontFamily: fonts.medium },
   rows: { marginTop: 2 },
   /** One breakdown row: label, stacked bar, "done / planned". */
   row: {
@@ -615,12 +615,14 @@ const styles = StyleSheet.create({
   /**
    * The fraction grows with its own text instead of sitting in a fixed 52 pt
    * box: a yearly total ("0 / 1825") and larger system text both stay complete.
+   * Semibold, because it is the number the row exists for.
    */
   rowValue: {
     minWidth: 54,
     flexShrink: 0,
     textAlign: 'right',
     fontSize: 12,
+    fontFamily: fonts.medium,
     fontVariant: ['tabular-nums'],
   },
   empty: {
@@ -631,7 +633,7 @@ const styles = StyleSheet.create({
     rowGap: 6,
   },
   emptyTitle: { fontSize: 14, fontFamily: fonts.medium, marginTop: 4 },
-  emptyBody: { fontSize: 12, textAlign: 'center', lineHeight: 17 },
+  emptyBody: { fontSize: 12, textAlign: 'center', lineHeight: 17, fontFamily: fonts.regular },
   /** Selection: what the chosen row holds and where to go with it. */
   selection: {
     flexDirection: 'row',
@@ -644,7 +646,7 @@ const styles = StyleSheet.create({
   },
   selectionCopy: { flex: 1, minWidth: 0 },
   selectionTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
-  selectionDetail: { fontSize: 11, marginTop: 2 },
+  selectionDetail: { fontSize: 11, marginTop: 2, fontFamily: fonts.regular },
   selectionAction: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 4 },
   selectionActionText: { fontSize: 12, fontFamily: fonts.medium },
   disclosure: { marginTop: 14 },
@@ -658,7 +660,7 @@ const styles = StyleSheet.create({
   },
   disclosureTitle: { fontSize: 13, fontFamily: fonts.medium },
   disclosureBody: { paddingBottom: 8, rowGap: 8 },
-  disclosureBodyText: { fontSize: 12, lineHeight: 17 },
+  disclosureBodyText: { fontSize: 12, lineHeight: 17, fontFamily: fonts.regular },
   /** "By meal type" rows: label left, done / total right, hairline between. */
   mealTypeRow: {
     flexDirection: 'row',
@@ -668,8 +670,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     columnGap: 10,
   },
-  mealTypeLabel: { fontSize: 12, flexShrink: 1 },
-  mealTypeValue: { fontSize: 12, fontVariant: ['tabular-nums'] },
+  mealTypeLabel: { fontSize: 12, flexShrink: 1, fontFamily: fonts.medium },
+  mealTypeValue: { fontSize: 12, fontVariant: ['tabular-nums'], fontFamily: fonts.medium },
   /** The separately labelled recorded-outcome rate. */
   outcomeRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12 },
   outcomeLabel: { fontSize: 13, fontFamily: fonts.medium },

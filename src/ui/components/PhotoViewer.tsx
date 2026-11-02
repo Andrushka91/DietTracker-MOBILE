@@ -1,16 +1,20 @@
 // Full-size in-app photo viewer (spec 11: Shell "open with" -> in-app
 // full-screen viewer on both platforms), following the round-3 review design:
 //
-//   header      Close (X) - meal name over its date - photo options (…)
+//   header      Close (X) - meal name over its date - delete photo (trash)
 //   stage       the original image, contained (never stretched), swipeable
 //   pager       ‹ n of m › and explicit zoom out / zoom in
 //   strip       the meal's thumbnails, the current one ringed in the accent
 //   hint        "Swipe to browse · Pinch or double-tap to zoom"
-//   sheet       Photo details + Remove photo, which always asks first
+//   confirm     "Remove the photograph?" - asked before anything is deleted
+//
+// There is deliberately NO "…" options area: the header carries one delete
+// tool, and photo details (file, size, added, sync) are no longer shown. One
+// glyph, one action, and the destructive step still asks first.
 //
 // The chrome is deliberately dark in both themes: a photograph is judged against
 // a neutral background, and a white frame around a picture changes how bright it
-// looks. The options sheet itself follows the app theme.
+// looks. The confirmation panel itself follows the app theme.
 //
 // Zoom is implemented with PanResponder + Animated (no extra native dependency):
 // two fingers pinch between 1x and 4x, a double tap toggles 2.5x, and a zoomed
@@ -38,8 +42,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { MealPhoto } from '../../domain/models';
 import { fileUri, thumbnailUri } from '../../data/photoStore';
-import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
-import { argb, fonts, themeColors, type ThemeColors } from '../theme';
+import { t, tFmt } from '../strings';
+import { argb, fonts, themeColors } from '../theme';
+import { DialogSheet, SheetRow } from './dialogs';
 import { Icon } from './icons';
 
 /** Zoom limits shared by the pinch, the double tap and the two buttons. */
@@ -69,8 +74,6 @@ export function PhotoViewer(props: {
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(props.initialIndex);
   const [scale, setScale] = useState(MIN_ZOOM);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const pagerRef = useRef<React.ComponentRef<typeof ScrollView> | null>(null);
   const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -220,20 +223,22 @@ export function PhotoViewer(props: {
     lastTapRef.current = now;
   };
 
-  const closeSheet = (): void => {
-    setSheetOpen(false);
+  const closeConfirm = (): void => {
     setConfirming(false);
-    setDetailsOpen(false);
   };
 
-  /** Viewer chrome is dark in both themes; only the sheet follows the app. */
+  /** Viewer chrome is dark in both themes; only the confirmation follows the app. */
   const chrome = argb('#FF0B0F14');
   const chromeText = argb('#FFF5F7FA');
   const chromeMuted = argb('#FF9AA8BA');
 
 
   return (
-    <Modal animationType="fade" visible statusBarTranslucent onRequestClose={props.onClose}>
+    <Modal
+      animationType="fade"
+      visible
+      statusBarTranslucent
+      onRequestClose={() => (confirming ? closeConfirm() : props.onClose())}>
       <View
         style={[
           styles.host,
@@ -264,11 +269,11 @@ export function PhotoViewer(props: {
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={t('Rn_ViewerOptions')}
-            onPress={() => setSheetOpen(true)}
+            accessibilityLabel={t('Rn_ViewerRemove')}
+            onPress={() => setConfirming(true)}
             hitSlop={6}
             style={({ pressed }) => [styles.headerButton, { opacity: pressed ? 0.6 : 1 }]}>
-            <Icon name="ellipsis-horizontal" size={22} color={chromeText} />
+            <Icon name="trash-outline" size={22} color={chromeText} />
           </Pressable>
         </View>
 
@@ -402,152 +407,39 @@ export function PhotoViewer(props: {
         <Text style={[styles.hint, { color: chromeMuted }]}>{t('Rn_ViewerHint')}</Text>
 
 
-        {sheetOpen && photo !== undefined && (
-          <View style={styles.sheetLayer}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('Common_Close')}
-              onPress={closeSheet}
-              style={styles.scrim}
-            />
-            <View
-              style={[
-                styles.sheet,
-                { backgroundColor: colors.surface, paddingBottom: insets.bottom + 14 },
-              ]}>
-              <View style={[styles.grabber, { backgroundColor: colors.border }]} />
-              <View style={styles.sheetHeader}>
-                <Text style={[styles.sheetTitle, { color: colors.text }]}>
-                  {t('Rn_ViewerOptions')}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Common_Close')}
-                  onPress={closeSheet}
-                  hitSlop={8}
-                  style={styles.sheetClose}>
-                  <Icon name="close" size={20} color={colors.textSecondary} />
-                </Pressable>
-              </View>
-              <Text style={[styles.sheetDetail, { color: colors.textMuted }]}>
-                {`${props.context} · ${tFmt('Rn_ViewerCount', boundedIndex + 1, count)}`}
-              </Text>
-              <View style={[styles.sheetDivider, { backgroundColor: colors.hairline }]} />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('Rn_ViewerDetails')}
-                accessibilityState={{ expanded: detailsOpen }}
-                onPress={() => setDetailsOpen((open) => !open)}
-                style={({ pressed }) => [
-                  styles.sheetRow,
-                  pressed && { backgroundColor: colors.surfaceVariant },
-                ]}>
-                <Icon name="information-circle-outline" size={20} color={colors.textSecondary} />
-                <Text style={[styles.sheetRowLabel, { color: colors.text }]}>
-                  {t('Rn_ViewerDetails')}
-                </Text>
-                <Icon
-                  name={detailsOpen ? 'chevron-up' : 'chevron-down'}
-                  size={16}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-              {detailsOpen && (
-                <View style={styles.details}>
-                  <DetailLine
-                    label={t('Rn_ViewerFile')}
-                    value={photo.originalFileName}
-                    colors={colors}
-                  />
-                  <DetailLine
-                    label={t('Rn_ViewerSize')}
-                    value={formatMegabytes(photo.fileSize)}
-                    colors={colors}
-                  />
-                  <DetailLine
-                    label={t('Rn_ViewerAdded')}
-                    value={formatInstant(photo.createdAt, props.use12HourClock)}
-                    colors={colors}
-                  />
-                  <DetailLine
-                    label={t('Rn_ViewerSync')}
-                    value={
-                      photo.cloudObjectId === null
-                        ? t('Rn_ViewerSyncPending')
-                        : t('Rn_ViewerSyncDone')
-                    }
-                    colors={colors}
-                  />
-                </View>
-              )}
-              <View style={[styles.sheetDivider, { backgroundColor: colors.hairline }]} />
-              {confirming ? (
-                <View style={styles.confirm}>
-                  <Text style={[styles.confirmText, { color: colors.text }]}>
-                    {t('Photo_RemoveMessage')}
-                  </Text>
-                  <View style={styles.confirmRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('Common_No')}
-                      onPress={() => setConfirming(false)}
-                      style={[styles.actionButton, { borderColor: colors.border }]}>
-                      <Text style={[styles.actionText, { color: colors.text }]}>
-                        {t('Common_No')}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('Rn_ViewerRemove')}
-                      onPress={() => props.onRemove(photo)}
-                      style={[
-                        styles.actionButton,
-                        { backgroundColor: colors.missed, borderColor: colors.missed },
-                      ]}>
-                      <Text style={[styles.actionText, { color: colors.onState }]}>
-                        {t('Rn_ViewerRemove')}
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ) : (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Rn_ViewerRemove')}
-                  onPress={() => setConfirming(true)}
-                  style={({ pressed }) => [
-                    styles.sheetRow,
-                    pressed && { backgroundColor: colors.surfaceVariant },
-                  ]}>
-                  <Icon name="trash-outline" size={20} color={colors.missed} />
-                  <Text style={[styles.sheetRowLabel, { color: colors.missed }]}>
-                    {t('Rn_ViewerRemove')}
-                  </Text>
-                </Pressable>
-              )}
+        {/* Destructive step: the header's trash opens THIS, and only the red
+            row deletes. It uses the app's shared sheet (no nested Modal, which
+            Android stacks unreliably), so the question looks like every other
+            question in the app. */}
+        {confirming && photo !== undefined && (
+          <DialogSheet
+            name="viewer-confirm"
+            title={t('Photo_RemoveTitle')}
+            caption={t('Photo_RemoveMessage')}
+            isDark={props.isDark}
+            onDismiss={closeConfirm}>
+            <View style={styles.confirmRows}>
+              <SheetRow
+                label={t('Common_No')}
+                icon="close"
+                onPress={closeConfirm}
+                colors={themeColors(props.isDark)}
+              />
+              <SheetRow
+                label={t('Rn_ViewerRemove')}
+                icon="trash-outline"
+                tone="danger"
+                onPress={() => props.onRemove(photo)}
+                colors={themeColors(props.isDark)}
+              />
             </View>
-          </View>
+          </DialogSheet>
         )}
       </View>
     </Modal>
   );
 }
 
-
-function DetailLine(props: {
-  label: string;
-  value: string;
-  colors: ThemeColors;
-}): React.JSX.Element {
-  return (
-    <View style={styles.detailLine}>
-      <Text style={[styles.detailLabel, { color: props.colors.textMuted }]}>{props.label}</Text>
-      <Text style={[styles.detailValue, { color: props.colors.text }]} numberOfLines={1}>
-        {props.value}
-      </Text>
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   host: { flex: 1 },
@@ -586,49 +478,7 @@ const styles = StyleSheet.create({
   },
   thumb: { width: '100%', height: '100%' },
   hint: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingTop: 8 },
-  sheetLayer: { ...StyleSheet.absoluteFill, justifyContent: 'flex-end' },
-  scrim: { ...StyleSheet.absoluteFill, backgroundColor: argb('#99000000') },
-  sheet: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2 },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
-  sheetTitle: { fontSize: 18, fontFamily: fonts.bold, letterSpacing: -0.3 },
-  sheetClose: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  sheetDetail: { fontSize: 12, marginTop: 2, marginBottom: 8 },
-  sheetDivider: { height: StyleSheet.hairlineWidth, marginHorizontal: -16 },
-  sheetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 12,
-    minHeight: 52,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-  },
-  sheetRowLabel: { flex: 1, fontSize: 14, fontFamily: fonts.medium },
-  details: { paddingBottom: 8, rowGap: 4, paddingHorizontal: 4 },
-  detailLine: { flexDirection: 'row', columnGap: 12, alignItems: 'flex-start' },
-  detailLabel: { fontSize: 12, width: 76 },
-  detailValue: { flex: 1, fontSize: 12, textAlign: 'right' },
-  confirm: { paddingTop: 10, rowGap: 10 },
-  confirmText: { fontSize: 13, lineHeight: 19 },
-  confirmRow: { flexDirection: 'row', columnGap: 8 },
-  actionButton: {
-    flex: 1,
-    minHeight: 44,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionText: { fontSize: 14, fontFamily: fonts.medium },
+  /** The shared sheet's rows inside the viewer (no Modal, no scrim of our own). */
+  confirmRows: { marginTop: 12 },
 });
 

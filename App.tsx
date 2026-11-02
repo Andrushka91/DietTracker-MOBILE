@@ -36,7 +36,7 @@ import {
 } from '@expo-google-fonts/open-sans';
 
 import { AppProvider, useApp } from './src/ui/appContext';
-import { TabBarGlyph, TabBarLabel, tabActivePillFill } from './src/ui/components/TabBar';
+import { TabBarGlyph, TabBarLabel, tabActiveChipFill } from './src/ui/components/TabBar';
 import { BusyOverlay } from './src/ui/components/shell';
 import { StatusCaption } from './src/ui/components/dialogs';
 import { DashboardScreen } from './src/ui/screens/DashboardScreen';
@@ -44,11 +44,12 @@ import { CalendarScreen } from './src/ui/screens/CalendarScreen';
 import { StatisticsScreen } from './src/ui/screens/StatisticsScreen';
 import { TemplatesScreen } from './src/ui/screens/TemplatesScreen';
 import { SettingsScreen } from './src/ui/screens/SettingsScreen';
-import { raisedShadow, themeColors } from './src/ui/theme';
+import { themeColors } from './src/ui/theme';
 import {
-  TAB_BAR_HEIGHT,
-  TAB_BAR_SIDE_INSET,
-  tabBarBottomOffset,
+  TAB_BAR_EDGE_PADDING,
+  TAB_BAR_PADDING_TOP,
+  TAB_GLYPH_CHIP_HEIGHT,
+  tabBarHeight,
 } from './src/ui/tabBar';
 import { t } from './src/ui/strings';
 import { dateHandoff } from './src/ui/dates';
@@ -87,24 +88,31 @@ function loadGoogleConfig(): void {
 }
 
 /**
- * Bottom-tab item (spec 6.2): ONE icon family for the five tabs, filled while
- * the tab is active and outlined while it is not, plus the tinted capsule the
- * active tab wears behind its glyph and the bolder caption under it. Both
- * pieces live in `src/ui/components/TabBar.tsx`; the navigator's tint carries
- * the accent / muted colours, so neither hardcodes an ink.
+ * Bottom-tab item (spec 6.2, r3 mockup `.ds-nav`): ONE outline glyph per tab -
+ * house, calendar, bar chart, layers, gear - drawn unchanged in both states
+ * exactly as the mockup does. The active tab is told apart by the tinted chip
+ * behind its glyph and the bolder caption under it (accent ink on both), never
+ * by swapping the glyph for a filled twin. Layers and gear are Ionicons; the
+ * house, the calendar and the stats bars have no Ionicons twin of the mockup's
+ * shape, so they come from Feather and MaterialCommunityIcons (see the glyph
+ * exceptions in `src/ui/components/icons.tsx`). Both pieces live in
+ * `src/ui/components/TabBar.tsx`; the navigator's tint carries the accent /
+ * muted colours, so neither hardcodes an ink.
  */
 function Tabs(): React.JSX.Element {
   const { isDark } = useApp();
   const colors = themeColors(isDark);
   const insets = useSafeAreaInsets();
   /** Wash behind the ACTIVE tab's glyph - one accent tint for every theme. */
-  const pillFill = tabActivePillFill(colors);
-  // The bar floats TAB_BAR_SIDE_INSET from both edges and clears the home
-  // indicator, so the pages keep their own background right up to the system
-  // edges. Both numbers come from src/ui/tabBar.ts, which is also what every
-  // page asks for the room it has to leave below its last card - the bar and
-  // the pages can therefore never disagree about the space.
-  const barBottom = tabBarBottomOffset(insets.bottom);
+  const chipFill = tabActiveChipFill(colors);
+  // DOCKED bar (r3 mockups, `.ds-nav`): react-navigation lays it out as a normal
+  // sibling BELOW the pages, so the pages are inset by its full height and can
+  // never slide under it - no absolute positioning, no side insets, no rounded
+  // outer corners, no floating shadow. Its own surface paints across the bottom
+  // safe area (the navigator supplies that inset as the bar's paddingBottom), so
+  // no page background shows around or below it. Height and content gap come
+  // from src/ui/tabBar.ts, which is also the only number the pages read.
+  const barHeight = tabBarHeight(insets.bottom);
   return (
     <Tab.Navigator
       screenOptions={{
@@ -112,29 +120,23 @@ function Tabs(): React.JSX.Element {
         // the month, "Statistics"...).
         headerShown: false,
         tabBarStyle: {
-          position: 'absolute',
-          left: TAB_BAR_SIDE_INSET,
-          right: TAB_BAR_SIDE_INSET,
-          bottom: barBottom,
-          height: TAB_BAR_HEIGHT,
-          // The active tab's capsule makes the glyph group a little taller, so
-          // the bar gives it the same breathing room it had before instead of
-          // pushing the captions against the bottom edge.
-          paddingTop: 6,
-          paddingBottom: 6,
-          borderRadius: 22,
+          // Everything the floating bar used to add is gone on purpose.
+          height: barHeight,
+          paddingTop: TAB_BAR_PADDING_TOP,
+          paddingHorizontal: TAB_BAR_EDGE_PADDING,
+          // Opaque, theme-aware surface with ONE hairline divider as its edge.
+          // The navigator's own theme is light-only here, so both colours are
+          // set from ours.
           backgroundColor: colors.surface,
-          borderTopWidth: 0,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.border,
-          // The bar floats above the page: raiseShadow keeps the depth order
-          // page < card < bar in both themes.
-          ...raisedShadow,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: colors.border,
+          // A docked bar casts no shadow: the divider separates it from the page.
+          elevation: 0,
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         /**
-         * A custom label so the active caption can be bold and so the five
+         * A custom label so the active caption can be semibold and so the five
          * single-word captions stay whole on a 360 pt phone with large system
          * text. This is the one place where the scale is capped (1.15); every
          * page keeps following the system font scale.
@@ -144,8 +146,17 @@ function Tabs(): React.JSX.Element {
             {children}
           </TabBarLabel>
         ),
-        tabBarIconStyle: { marginTop: 2 },
-        tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
+        // The navigator reserves a fixed 31 x 28 box for the glyph; the chip is
+        // 49 x 31, so the box is set to the chip's height to keep the tab at
+        // exactly TAB_BAR_ITEM_HEIGHT and every caption on the same baseline.
+        tabBarIconSize: TAB_GLYPH_CHIP_HEIGHT,
+        tabBarIconStyle: { marginTop: 0 },
+        // react-navigation already pads a tab by 5 pt; anything more here would
+        // push the caption off the bar's bottom edge.
+        tabBarItemStyle: { paddingVertical: 0, paddingHorizontal: 0 },
+        // With the keyboard up the window shrinks (adjustResize): the docked bar
+        // would eat most of the editor, so it steps out of the way instead.
+        tabBarHideOnKeyboard: true,
       }}>
       <Tab.Screen
         name="DashboardTab"
@@ -153,10 +164,10 @@ function Tabs(): React.JSX.Element {
           title: t('Nav_Dashboard'),
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
-              name={focused ? 'home' : 'home-outline'}
+              feather="home"
               color={color}
               focused={focused}
-              pillFill={pillFill}
+              chipFill={chipFill}
             />
           ),
         }}
@@ -168,10 +179,10 @@ function Tabs(): React.JSX.Element {
           title: t('Nav_Calendar'),
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
-              name={focused ? 'calendar' : 'calendar-outline'}
+              material="calendar-month-outline"
               color={color}
               focused={focused}
-              pillFill={pillFill}
+              chipFill={chipFill}
             />
           ),
         }}>
@@ -195,13 +206,15 @@ function Tabs(): React.JSX.Element {
         name="StatisticsTab"
         component={StatisticsScreen}
         options={{
-          title: t('Nav_Statistics'),
+          // The bar caption is the mockup's short "Stats" (all five captions
+          // share one row); the page itself keeps its "Statistics" title.
+          title: t('Rn_NavStats'),
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
-              name={focused ? 'stats-chart' : 'stats-chart-outline'}
+              feather="bar-chart"
               color={color}
               focused={focused}
-              pillFill={pillFill}
+              chipFill={chipFill}
             />
           ),
         }}
@@ -213,10 +226,10 @@ function Tabs(): React.JSX.Element {
           title: t('Nav_Templates'),
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
-              name={focused ? 'albums' : 'albums-outline'}
+              name="layers-outline"
               color={color}
               focused={focused}
-              pillFill={pillFill}
+              chipFill={chipFill}
             />
           ),
         }}
@@ -228,10 +241,10 @@ function Tabs(): React.JSX.Element {
           title: t('Nav_Settings'),
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
-              name={focused ? 'settings' : 'settings-outline'}
+              name="settings-outline"
               color={color}
               focused={focused}
-              pillFill={pillFill}
+              chipFill={chipFill}
             />
           ),
         }}

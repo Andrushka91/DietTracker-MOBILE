@@ -9,6 +9,13 @@ jest.mock('@react-native-community/netinfo', () => ({
   },
 }));
 
+// Safe-area insets are native. Every component that pads by the bar or the
+// home indicator asks `useSafeAreaInsets`; in the tests there is no window
+// manager, so a phone with no notch is the honest default.
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
+
 jest.mock('expo-sqlite', () => ({
   openDatabaseSync: jest.fn(() => ({
     closeSync: jest.fn(),
@@ -50,6 +57,29 @@ jest.mock('@expo/vector-icons/Ionicons', () => {
     __esModule: true,
     default: (props: { name: string }) =>
       React.createElement(Text, { accessibilityLabel: `icon:${props.name}` }),
+  };
+});
+
+// Same ESM problem, same decoration-only treatment. The Today/Stats tabs use
+// Feather glyphs and the Calendar tab a MaterialCommunityIcons one, so each mock
+// prefixes its label to tell the faces apart.
+jest.mock('@expo/vector-icons/Feather', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props: { name: string }) =>
+      React.createElement(Text, { accessibilityLabel: `feather:${props.name}` }),
+  };
+});
+
+jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => {
+  const React = require('react');
+  const { Text } = require('react-native');
+  return {
+    __esModule: true,
+    default: (props: { name: string }) =>
+      React.createElement(Text, { accessibilityLabel: `material:${props.name}` }),
   };
 });
 

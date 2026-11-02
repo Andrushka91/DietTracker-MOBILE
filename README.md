@@ -33,9 +33,9 @@ Diet Tracker - Android dev session (6 steps)
 [1/6] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
        JDK C:\Program Files\Eclipse Adoptium\jdk-21.0.13.9-hotspot\   adb ...\platform-tools\adb.exe
 [2/6] Packages    OK    npm install 1 s - dependencies up to date
-[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.0-universal.apk 83.7 MB  +  DietTracker-1.0.0.0-arm64-v8a.apk 29 MB (version 1.0.0.0)
+[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.1-universal.apk 83.7 MB  +  DietTracker-1.0.0.1-arm64-v8a.apk 29 MB (version 1.0.0.1)
 [4/6] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - booted in 4 s
-[5/6] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[5/6] Install     OK    DietTracker-1.0.0.1-universal.apk (83.7 MB, x86_64, version 1.0.0.1) installed
 [6/6] Launch      OK    com.diettracker.app (pid 13289) started from the release APK
 
 Ready - the release build runs on emulator-5554.
@@ -188,7 +188,7 @@ visual change never touches logic, navigation or data:
 |---|---|
 | Colours (light + dark), state colours, radii, spacing, text scale, elevation | `src/ui/theme.ts` (`themeColors`, `metrics`, `typeScale`, `pageTitleStyle`, `cardShadow`, `raisedShadow`) |
 | Icons — one family for tabs, actions, pills and chrome | `src/ui/components/icons.tsx` (`Ionicons` from the Expo-pinned `@expo/vector-icons`) |
-| Before / after screenshots of every screen in both themes, plus the validation log | [`docs/design/`](./docs/design/README.md) |
+| Dialogs — one bottom-sheet surface (grabber, title + X, icon rows) | `src/ui/components/dialogs.tsx` (`DialogSheet`, `SheetRow`) |
 
 Rules that keep it coherent: cards are always lighter than the page and lifted by
 `cardShadow`; the accent (indigo) is the only interactive colour; the three state
@@ -210,11 +210,12 @@ pinch/double-tap zoom and a confirmed remove action, a month board with five
 meal-state marks per recorded day, a statistics page with ONE primary measure
 (Done / all planned slots) plus an interactive breakdown, and a grouped Settings
 page. Its rollback point is the `backup/pre-redesign-r3-20261102-1244` tag and its
-GitHub release; evidence in [`docs/design/round3/`](./docs/design/round3/README.md).
+GitHub release.
 
-Evidence: [`docs/design/`](./docs/design/README.md) (first pass) and
-[`docs/design/round2/`](./docs/design/round2/README.md) (second pass, with the
-research, token table, spec departures, validation and screenshots).
+The design rounds' screenshot archives were removed from the repository to keep
+it lean; the code, the token table above and the tests are the record of the
+final look (every screen is covered by `__tests__/`, and the emulator run is
+described in the release notes).
 
 ## Standalone release APK
 
@@ -222,8 +223,8 @@ research, token table, spec departures, validation and screenshots).
 
 | Artifact | Size | For |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | ~29 MB | every modern phone (64-bit ARM) |
-| `release\DietTracker-1.0.0.0-universal.apk` | ~84 MB | any device, including 32-bit ARM and x86 emulators |
+| `release\DietTracker-1.0.0.1-arm64-v8a.apk` | ~29 MB | every modern phone (64-bit ARM) |
+| `release\DietTracker-1.0.0.1-universal.apk` | ~84 MB | any device, including 32-bit ARM and x86 emulators |
 
 The JavaScript is bundled inside the APK (Hermes bytecode, ~3.2 MB), so the app starts on its own -
 no Metro, no USB cable, no Expo Go. The release variant is signed with the standard **Android debug
@@ -231,14 +232,14 @@ key** (`android/app/build.gradle`, `signingConfig signingConfigs.debug`): that i
 sideloading work, and it can update a build that was signed with the same key. A Google Play upload
 needs its own keystore.
 
-The version comes from `android/app/build.gradle` (`versionName "1.0.0.0"`, `versionCode 1`), which is
+The version comes from `android/app/build.gradle` (`versionName "1.0.0.1"`, `versionCode 2`), which is
 the identity the release is tagged with. `app.json` deliberately keeps the three-part `1.0.0`, because
 iOS requires `CFBundleShortVersionString` in that form and `expo prebuild` would otherwise overwrite
 the Android version with it.
 
 Install: copy the APK to the phone, open it, allow *install unknown apps* for the app you opened it
 from, and confirm. On a connected device the same thing is
-`adb install -r release\DietTracker-1.0.0.0-arm64-v8a.apk`.
+`adb install -r release\DietTracker-1.0.0.1-arm64-v8a.apk`.
 
 ## Keyword: **“same version”** — commit, push, deploy APK
 
@@ -248,20 +249,20 @@ and the whole release round runs, with **no version bump anywhere**:
 | Step | Command | Guard |
 |---|---|---|
 | 1. Verify | `npm run check` (`tsc --noEmit` + `eslint .` + `jest`) | must be green; 0 errors, tests all passing |
-| 2. Bundle both APKs | `npm run apk` (`scripts\build-apk.bat`) | rewrites `release\DietTracker-1.0.0.0-arm64-v8a.apk` + `-universal.apk` |
+| 2. Bundle both APKs | `npm run apk` (`scripts\build-apk.bat`) | rewrites `release\DietTracker-1.0.0.1-arm64-v8a.apk` + `-universal.apk` |
 | 3. Commit | `git add -A` + `git commit -m "<what changed>"` (one message in English, no `--amend`) | working tree of the previous round is clean |
 | 4. Push | `git push origin main` | remote `https://github.com/Andrushka91/DietTracker-MOBILE.git` |
-| 5. **Publish on the release page** | `gh release upload v1.0.0.0 release\DietTracker-1.0.0.0-arm64-v8a.apk release\DietTracker-1.0.0.0-universal.apk --clobber` | the SAME `v1.0.0.0` release is reused, its two assets are replaced |
-| 6. Report | APK names, sizes, SHA-256 (local `sha256sum` **and** the asset digest from `gh release view v1.0.0.0 --json assets`) | the digests must match |
+| 5. **Publish on the release page** | `gh release upload v1.0.0.1 release\DietTracker-1.0.0.1-arm64-v8a.apk release\DietTracker-1.0.0.1-universal.apk --clobber` | the SAME `v1.0.0.1` release is reused, its two assets are replaced |
+| 6. Report | APK names, sizes, SHA-256 (local `sha256sum` **and** the asset digest from `gh release view v1.0.0.1 --json assets`) | the digests must match |
 
 Rules that make this reproducible:
 
 * **Steps 2 and 5 always run together.** A build that only sits in `release\`
-  is not a release: the APKs are uploaded to the `v1.0.0.0` release with
+  is not a release: the APKs are uploaded to the `v1.0.0.1` release with
   `--clobber`, which replaces the previous files of the same name
-  ([releases/tag/v1.0.0.0](https://github.com/Andrushka91/DietTracker-MOBILE/releases/tag/v1.0.0.0)).
+  ([releases/tag/v1.0.0.1](https://github.com/Andrushka91/DietTracker-MOBILE/releases/tag/v1.0.0.1)).
 * **The version never changes in this flow.** `android/app/build.gradle`
-  (`versionName "1.0.0.0"`, `versionCode 1`) and `app.json` (`version: "1.0.0"`)
+  (`versionName "1.0.0.1"`, `versionCode 2`) and `app.json` (`version: "1.0.0"`)
   stay exactly as they are — the new APKs replace the previous files of the
   same name on disk and on the release page, and `adb install -r` /
   sideloading updates the installed app because the debug key is unchanged.
@@ -279,8 +280,8 @@ Expected artifacts after a run (both on disk and on the release page):
 
 | File | ~Size | Local SHA-256 |
 |---|---|---|
-| `release\DietTracker-1.0.0.0-arm64-v8a.apk` | 30 MB | `c0c74efb…e93f44c8` (1.0.0.0 / 2026-11-01, parallel sync) |
-| `release\DietTracker-1.0.0.0-universal.apk` | 88 MB | `997f8fa2…49f9e60b` (1.0.0.0 / 2026-11-01, parallel sync) |
+| `release\DietTracker-1.0.0.1-arm64-v8a.apk` | 30 MB | `c0c74efb…e93f44c8` (1.0.0.1 / 2026-11-01, parallel sync) |
+| `release\DietTracker-1.0.0.1-universal.apk` | 88 MB | `997f8fa2…49f9e60b` (1.0.0.1 / 2026-11-01, parallel sync) |
 
 
 ## Local Android emulator (Android Studio SDK)
@@ -307,7 +308,7 @@ Gradle, no Metro:
 ```
 [1/4] Toolchain   OK    SDK C:\Users\<you>\AppData\Local\Android\Sdk
 [2/4] Device      OK    emulator-5554 (Medium_Phone_API_37.0) - already running
-[3/4] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[3/4] Install     OK    DietTracker-1.0.0.1-universal.apk (83.7 MB, x86_64, version 1.0.0.1) installed
 [4/4] Launch      OK    com.diettracker.app (pid 13112) started from the release APK
 
 Ready - the release build runs on emulator-5554.
@@ -347,8 +348,8 @@ otherwise type by hand (`npm install`, `npm run apk`, install, launch):
 
 ```
 [2/6] Packages    OK    npm install 1 s - dependencies up to date
-[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.0-universal.apk 83.7 MB  +  DietTracker-1.0.0.0-arm64-v8a.apk 29 MB (version 1.0.0.0)
-[5/6] Install     OK    DietTracker-1.0.0.0-universal.apk (83.7 MB, x86_64, version 1.0.0.0) installed
+[3/6] Release     ..........OK    1 m 12 s - DietTracker-1.0.0.1-universal.apk 83.7 MB  +  DietTracker-1.0.0.1-arm64-v8a.apk 29 MB (version 1.0.0.1)
+[5/6] Install     OK    DietTracker-1.0.0.1-universal.apk (83.7 MB, x86_64, version 1.0.0.1) installed
 [6/6] Launch      OK    com.diettracker.app (pid 13886) started from the release APK
 ```
 
@@ -799,7 +800,7 @@ npm start
   the parallel download pipeline (ordered prefetch window, per-document failure
   isolation, cancel, one folder listing per cycle).
 * Verified on the local Android emulator (API 37, x86_64 release APK
-  `DietTracker-1.0.0.0-universal.apk` installed over the previous build):
+  `DietTracker-1.0.0.1-universal.apk` installed over the previous build):
   first launch straight into the dashboard (no sign-in wall) → guest mode,
   the five permanent cards, inline edit + **one-tap save with the keyboard
   open** (title and description written, editor closed, no second press),
@@ -910,15 +911,26 @@ npm start
     `mipmap-anydpi-v26` adaptive icon (72 dp safe zone over the same blue
     `#1A7AC5`) and `assets/icon.png` / `assets/adaptive-icon.png` for Expo.
   * The bottom bar makes the **current tab** obvious: the active tab's glyph sits
-    in a tinted capsule and its caption is bold, the other four stay quiet grey
-    outline glyphs. Both halves live in `src/ui/components/TabBar.tsx`
-    (`TabBarGlyph`, `TabBarLabel`), the capsule is a wash of the theme accent
-    (`tabActivePillFill`: 10 % light / 18 % dark), and the navigator's tint still
-    carries the ink - no colour is hardcoded, so both themes follow. The capsule
+    in a tinted chip and its caption is bold, while all five glyphs stay the same
+    quiet outline - `layers-outline` and `settings-outline` from Ionicons, the
+    house and the stats bars from Feather, the calendar from
+    MaterialCommunityIcons. Those three are the UI's only non-Ionicons glyphs,
+    each picked because Ionicons has no twin of the mockup's shape: its house
+    carries an eaved roof and a chimney stub, its calendars are heavier with a
+    thick header band and larger dots, and its bar charts carry a left/bottom
+    axis with hollow bars (`FeatherIcon` / `MaterialIcon` in
+    `src/ui/components/icons.tsx`). The mockup never swaps a glyph for a filled
+    twin either, so the selection reads from the chip, the accent ink and the
+    caption weight. The statistics caption is the
+    short `Stats` (`Rn_NavStats`) while the page itself keeps its `Statistics`
+    title. Both halves live in `src/ui/components/TabBar.tsx` (`TabBarGlyph`,
+    `TabBarLabel`), the chip is a wash of the theme accent
+    (`tabActiveChipFill`: 10 % light / 18 % dark), and the navigator's tint still
+    carries the ink - no colour is hardcoded, so both themes follow. The chip
     is reserved on every tab, so switching tabs never moves a glyph, and the bar's
     height/inset/clearance in `src/ui/tabBar.ts` are unchanged.
-    `__tests__/tabBarAppearance.test.tsx` pins the capsule geometry and fill, the
-    bold active caption, and that all five tabs use them.
+    `__tests__/tabBarAppearance.test.tsx` pins the chip geometry and fill, the
+    bold active caption, the five outline glyphs and the five captions.
   * Every scrolling page leaves room for the **floating tab bar** below its last
     card, and that room is now *measured* instead of guessed: `src/ui/tabBar.ts` is
     the single source of truth for the bar's geometry (`TAB_BAR_HEIGHT` 66,

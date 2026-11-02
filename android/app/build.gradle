@@ -92,12 +92,12 @@ android {
         applicationId 'com.diettracker.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        // The release identity of this app is 1.0.0.0 (the same four-part number the Windows package
+        versionCode 2
+        // The release identity of this app is 1.0.0.1 (the same four-part number the Windows package
         // and the GitHub tag use). app.json keeps the three-part 1.0.0 because iOS requires
         // CFBundleShortVersionString in that form; a fresh `expo prebuild` would rewrite this line
         // from it, which is why the version is set here explicitly.
-        versionName "1.0.0.0"
+        versionName "1.0.0.1"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

@@ -11,7 +11,7 @@ rem which is what makes sideloading work. It is not a Google Play upload: Play n
 setlocal
 cd /d "%~dp0.."
 
-set VERSION=1.0.0.0
+set VERSION=1.0.0.1
 if not defined ANDROID_HOME set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
 if not defined JAVA_HOME if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
 set "PATH=%JAVA_HOME%\bin;%ANDROID_HOME%\platform-tools;%PATH%"

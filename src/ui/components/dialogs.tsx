@@ -1,13 +1,135 @@
 // Confirm dialogs (spec 6.5) + the floating status caption (6.6).
 // Every dialog has two buttons; dismissal (back/scrim tap) equals the
 // CANCEL action - "default No" for destructive prompts.
+//
+// ONE surface for every question (the round-3 review sheet): the dialog rises
+// from the bottom edge with a grabber, a bold title with a close X, an optional
+// muted caption and a hairline, and the answers are full-width ROWS with a
+// leading glyph - a destructive answer in the red ink, the neutral one quiet.
+// A row is used instead of an iOS-style split strip because the app's questions
+// have long, explicit labels ("Apply template", "Delete photo") that do not fit
+// beside each other on a 360 dp phone.
 
 import React, { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fonts, cardShadow, themeColors } from '../theme';
+import { fonts, cardShadow, themeColors, type ThemeColors } from '../theme';
 import { useApp } from '../appContext';
 import { t } from '../strings';
+import { Icon, type IconName } from './icons';
+
+
+/**
+ * The sheet itself, without a Modal around it, so a surface that already IS a
+ * modal (the full-screen photo viewer) can stack the same question inside its
+ * own window - Android does not stack two Modals reliably.
+ */
+export function DialogSheet(props: {
+  /** `choice-dialog` / `prompt-dialog` / `confirm-dialog`: scrim and card ids. */
+  name: string;
+  title: string;
+  /** Second line under the title (the question's explanation). */
+  caption?: string;
+  isDark: boolean;
+  onDismiss: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const colors = themeColors(props.isDark);
+  const insets = useSafeAreaInsets();
+  return (
+    <Pressable
+      testID={`${props.name}-scrim`}
+      style={[styles.scrim, { backgroundColor: colors.overlay }]}
+      onPress={props.onDismiss}>
+      <View
+        testID={`${props.name}-card`}
+        style={[
+          styles.sheet,
+          { backgroundColor: colors.surface, paddingBottom: insets.bottom + 12 },
+        ]}
+        onStartShouldSetResponder={() => true}>
+        <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Common_Close')}
+            onPress={props.onDismiss}
+            hitSlop={6}
+            style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}>
+            <Icon name="close" size={20} color={colors.textMuted} />
+          </Pressable>
+        </View>
+        {props.caption !== undefined && props.caption !== '' && (
+          <Text style={[styles.sheetCaption, { color: colors.textMuted }]}>{props.caption}</Text>
+        )}
+        {props.children}
+      </View>
+    </Pressable>
+  );
+}
+
+/** The one dialog surface inside a Modal: everything the app asks, everywhere. */
+function Sheet(props: {
+  name: string;
+  title: string;
+  caption?: string;
+  isDark: boolean;
+  onDismiss: () => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={props.onDismiss}>
+      <DialogSheet {...props} />
+    </Modal>
+  );
+}
+
+/** One answer row: leading glyph, label, optional chevron, hairline above. */
+export function SheetRow(props: {
+  label: string;
+  /** Glyph before the label - every row has one, so the rows line up. */
+  icon: IconName;
+  onPress: () => void;
+  colors: ThemeColors;
+  /** `accent` = the action that does something, `danger` = it deletes. */
+  tone?: 'accent' | 'danger' | 'neutral';
+  /** An action that opens something else, not one that finishes the dialog. */
+  chevron?: boolean;
+}): React.JSX.Element {
+  const tone = props.tone ?? 'neutral';
+  const ink =
+    tone === 'danger'
+      ? props.colors.error
+      : tone === 'accent'
+        ? props.colors.accent
+        : props.colors.textSecondary;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      onPress={props.onPress}
+      style={({ pressed }) => [
+        styles.row,
+        { borderTopColor: props.colors.hairline },
+        pressed && { backgroundColor: props.colors.surfaceVariant },
+      ]}>
+      <Icon name={props.icon} size={20} color={ink} />
+      <Text
+        style={[
+          styles.rowLabel,
+          { color: tone === 'neutral' ? props.colors.text : ink },
+          tone !== 'neutral' && styles.rowLabelStrong,
+        ]}>
+        {props.label}
+      </Text>
+      {props.chevron === true && (
+        <Icon name="chevron-forward" size={16} color={props.colors.textMuted} />
+      )}
+    </Pressable>
+  );
+}
 
 export interface ConfirmRequest {
   title: string;
@@ -44,61 +166,43 @@ export function ConfirmDialog({
   const colors = themeColors(isDark);
   const [value, setValue] = useState(request.inputDefaultValue ?? '');
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={request.onCancel}>
-      <Pressable
-        style={[styles.scrim, { backgroundColor: colors.overlay }]}
-        onPress={request.onCancel}>
-        <View style={[styles.dialog, { backgroundColor: colors.surface }]}>
-          <View style={styles.content}>
-            <Text style={[styles.title, { color: colors.text }]}>{request.title}</Text>
-            <Text style={[styles.message, { color: colors.textSecondary }]}>{request.message}</Text>
-            {request.inputDefaultValue !== undefined && (
-              <TextInput
-                accessibilityLabel={request.message}
-                style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
-                value={value}
-                onChangeText={setValue}
-                placeholder={request.inputDefaultValue}
-                placeholderTextColor={colors.textMuted}
-                maxLength={120}
-              />
-            )}
-          </View>
-          {/* iOS alert actions: a hairline-separated strip across the full
-              width; the tint marks both buttons, a destructive confirm in red,
-              the default action in medium weight. */}
-          <View style={[styles.actions, { borderTopColor: colors.border }]}>
-            {request.singleAction === true ? null : (
-              <Pressable
-                accessibilityRole="button"
-                onPress={request.onCancel}
-                style={styles.action}>
-                <Text style={[styles.actionText, { color: colors.accent }]}>
-                  {request.cancelText ?? t('Common_No')}
-                </Text>
-              </Pressable>
-            )}
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => request.onConfirm(value)}
-              style={[
-                styles.action,
-                request.singleAction === true ? null : styles.actionDivider,
-                request.singleAction === true ? null : { borderLeftColor: colors.border },
-              ]}>
-              <Text
-                style={[
-                  styles.actionText,
-                  styles.actionTextStrong,
-                  { color: request.destructive === true ? colors.error : colors.accent },
-                ]}>
-                {request.confirmText}
-              </Text>
-            </Pressable>
-          </View>
+    <Sheet
+      name="confirm-dialog"
+      title={request.title}
+      caption={request.message}
+      isDark={isDark}
+      onDismiss={request.onCancel}>
+      {request.inputDefaultValue !== undefined && (
+        <View style={styles.body}>
+          <TextInput
+            accessibilityLabel={request.message}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
+            value={value}
+            onChangeText={setValue}
+            placeholder={request.inputDefaultValue}
+            placeholderTextColor={colors.textMuted}
+            maxLength={120}
+          />
         </View>
-      </Pressable>
-    </Modal>
+      )}
+      <View style={styles.rows}>
+        {request.singleAction === true ? null : (
+          <SheetRow
+            label={request.cancelText ?? t('Common_No')}
+            icon="close"
+            onPress={request.onCancel}
+            colors={colors}
+          />
+        )}
+        <SheetRow
+          label={request.confirmText}
+          icon={request.destructive === true ? 'trash-outline' : 'checkmark'}
+          tone={request.destructive === true ? 'danger' : 'accent'}
+          onPress={() => request.onConfirm(value)}
+          colors={colors}
+        />
+      </View>
+    </Sheet>
   );
 }
 
@@ -119,7 +223,7 @@ export interface ChoiceDialogRequest {
   /** Neutral dismissal label ("Cancel"). */
   cancelText: string;
   /** Deliberate actions in reading order (e.g. Camera, Gallery). */
-  choices: Array<{ label: string; onPress: () => void }>;
+  choices: Array<{ label: string; onPress: () => void; icon?: IconName }>;
   onCancel: () => void;
 }
 
@@ -132,55 +236,32 @@ export function ChoiceDialog({
 }): React.JSX.Element {
   const colors = themeColors(isDark);
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={request.onCancel}>
-      <Pressable
-        testID="choice-dialog-scrim"
-        style={[styles.scrim, { backgroundColor: colors.overlay }]}
-        onPress={request.onCancel}>
-        <View
-          testID="choice-dialog-card"
-          style={[styles.dialog, { backgroundColor: colors.surface }]}
-          // A responder on the card stops the tap from reaching the scrim, so the
-          // dialog body itself never dismisses it (children keep their own taps).
-          onStartShouldSetResponder={() => true}>
-          <View style={styles.content}>
-            <Text style={[styles.title, { color: colors.text }]}>{request.title}</Text>
-            <Text style={[styles.message, { color: colors.textSecondary }]}>{request.message}</Text>
-          </View>
-          <View style={styles.choices}>
-            {request.choices.map((choice) => (
-              <Pressable
-                key={choice.label}
-                accessibilityRole="button"
-                accessibilityLabel={choice.label}
-                onPress={choice.onPress}
-                style={({ pressed }) => [
-                  styles.choiceRow,
-                  { borderTopColor: colors.border },
-                  pressed && { backgroundColor: colors.surfaceVariant },
-                ]}>
-                <Text style={[styles.actionText, styles.actionTextStrong, { color: colors.accent }]}>
-                  {choice.label}
-                </Text>
-              </Pressable>
-            ))}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={request.cancelText}
-              onPress={request.onCancel}
-              style={({ pressed }) => [
-                styles.choiceRow,
-                { borderTopColor: colors.border },
-                pressed && { backgroundColor: colors.surfaceVariant },
-              ]}>
-              <Text style={[styles.actionText, { color: colors.textSecondary }]}>
-                {request.cancelText}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Pressable>
-    </Modal>
+    <Sheet
+      name="choice-dialog"
+      title={request.title}
+      caption={request.message}
+      isDark={isDark}
+      onDismiss={request.onCancel}>
+      <View style={styles.rows}>
+        {request.choices.map((choice) => (
+          <SheetRow
+            key={choice.label}
+            label={choice.label}
+            icon={choice.icon ?? 'ellipse-outline'}
+            tone="accent"
+            chevron
+            onPress={choice.onPress}
+            colors={colors}
+          />
+        ))}
+        <SheetRow
+          label={request.cancelText}
+          icon="close"
+          onPress={request.onCancel}
+          colors={colors}
+        />
+      </View>
+    </Sheet>
   );
 }
 
@@ -228,96 +309,74 @@ export function PromptDialog({
   };
 
   return (
-    <Modal transparent animationType="fade" visible onRequestClose={request.onCancel}>
-      <Pressable
-        testID="prompt-dialog-scrim"
-        style={[styles.scrim, { backgroundColor: colors.overlay }]}
-        onPress={request.onCancel}>
-        <View
-          testID="prompt-dialog-card"
-          style={[styles.dialog, { backgroundColor: colors.surface }]}
-          onStartShouldSetResponder={() => true}>
-          <View style={styles.content}>
-            <Text style={[styles.title, { color: colors.text }]}>{request.title}</Text>
-            <Text style={[styles.message, { color: colors.textSecondary }]}>{request.message}</Text>
-            <View style={styles.promptRow}>
-              <TextInput
-                accessibilityLabel={request.message}
-                style={[
-                  styles.promptInput,
-                  { color: colors.text, backgroundColor: colors.surfaceVariant },
-                  error !== null && { borderWidth: 1, borderColor: colors.error },
-                ]}
-                value={value}
-                onChangeText={(next) => {
-                  setValue(next);
-                  if (error !== null) {
-                    setError(null);
-                  }
-                }}
-                placeholder={request.initialValue}
-                placeholderTextColor={colors.textMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={120}
-              />
-              {request.today !== undefined && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={request.today.label}
-                  onPress={() => {
-                    setValue(request.today?.value ?? '');
-                    setError(null);
-                  }}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.promptChip, { opacity: pressed ? 0.6 : 1 }]}>
-                  <Text style={[styles.promptChipText, { color: colors.accent }]}>
-                    {request.today.label}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-            {error !== null && (
-              <Text
-                testID="prompt-dialog-error"
-                style={[styles.promptError, { color: colors.error }]}>
-                {error}
-              </Text>
-            )}
-          </View>
-          <View style={styles.choices}>
-            {/* Full-width rows: "Apply template" is two words and would be
-                squeezed into a half-width strip (it wrapped on a 360 dp phone). */}
+    <Sheet
+      name="prompt-dialog"
+      title={request.title}
+      caption={request.message}
+      isDark={isDark}
+      onDismiss={request.onCancel}>
+      <View style={styles.body}>
+        <View style={styles.promptRow}>
+          <TextInput
+            accessibilityLabel={request.message}
+            style={[
+              styles.promptInput,
+              { color: colors.text, backgroundColor: colors.surfaceVariant },
+              error !== null && { borderWidth: 1, borderColor: colors.error },
+            ]}
+            value={value}
+            onChangeText={(next) => {
+              setValue(next);
+              if (error !== null) {
+                setError(null);
+              }
+            }}
+            placeholder={request.initialValue}
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxLength={120}
+          />
+          {request.today !== undefined && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={request.confirmText}
-              onPress={confirm}
-              style={({ pressed }) => [
-                styles.choiceRow,
-                { borderTopColor: colors.border },
-                pressed && { backgroundColor: colors.surfaceVariant },
-              ]}>
-              <Text style={[styles.actionText, styles.actionTextStrong, { color: colors.accent }]}>
-                {request.confirmText}
+              accessibilityLabel={request.today.label}
+              onPress={() => {
+                setValue(request.today?.value ?? '');
+                setError(null);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [styles.promptChip, { opacity: pressed ? 0.6 : 1 }]}>
+              <Text style={[styles.promptChipText, { color: colors.accent }]}>
+                {request.today.label}
               </Text>
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={request.cancelText}
-              onPress={request.onCancel}
-              style={({ pressed }) => [
-                styles.choiceRow,
-                { borderTopColor: colors.border },
-                pressed && { backgroundColor: colors.surfaceVariant },
-              ]}>
-              <Text style={[styles.actionText, { color: colors.textSecondary }]}>
-                {request.cancelText}
-              </Text>
-            </Pressable>
-          </View>
+          )}
         </View>
-      </Pressable>
-    </Modal>
+        {error !== null && (
+          <Text testID="prompt-dialog-error" style={[styles.promptError, { color: colors.error }]}>
+            {error}
+          </Text>
+        )}
+      </View>
+      <View style={styles.rows}>
+        {/* Full-width rows: "Apply template" is two words and would be squeezed
+            into a half-width strip (it wrapped on a 360 dp phone). */}
+        <SheetRow
+          label={request.confirmText}
+          icon="checkmark"
+          tone="accent"
+          onPress={confirm}
+          colors={colors}
+        />
+        <SheetRow
+          label={request.cancelText}
+          icon="close"
+          onPress={request.onCancel}
+          colors={colors}
+        />
+      </View>
+    </Sheet>
   );
 }
 
@@ -338,46 +397,56 @@ export function StatusCaption(): React.JSX.Element | null {
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  /** iOS alert: narrow centered card, 14 pt corners, hairline action strip. */
-  dialog: {
-    borderRadius: 16,
-    width: '78%',
-    maxWidth: 320,
+  /**
+   * The sheet rises from the bottom edge over a dim scrim - the round-3 review
+   * dialog surface. `maxWidth` keeps it from stretching across a tablet, and the
+   * card claims its own touches so only the scrim dismisses.
+   */
+  scrim: { ...StyleSheet.absoluteFill, justifyContent: 'flex-end' },
+  sheet: {
+    width: '100%',
+    maxWidth: 620,
+    alignSelf: 'center',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 8,
     overflow: 'hidden',
-    ...cardShadow,
   },
-  content: { paddingHorizontal: 18, paddingTop: 20, alignItems: 'center' },
-  title: { fontSize: 17, fontFamily: fonts.medium, textAlign: 'center' },
-  message: { fontSize: 14, marginTop: 6, lineHeight: 20, textAlign: 'center' },
+  /** The little handle that says "this sheet came up from the bottom". */
+  grabber: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 8,
+    paddingLeft: 16,
+    paddingRight: 8,
+    marginTop: 8,
+    minHeight: 40,
+  },
+  close: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  /** The question's explanation, muted, under the title. */
+  sheetCaption: { fontSize: 13, lineHeight: 19, paddingHorizontal: 16, marginTop: 2 },
+  /** Content between the caption and the rows (input fields, errors). */
+  body: { paddingHorizontal: 16, paddingTop: 14 },
+  rows: { marginTop: 12 },
+  /** One answer row: 52 pt tall, leading glyph, hairline above. */
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 12,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  rowLabel: { flex: 1, minWidth: 0, fontSize: 15, fontFamily: fonts.regular },
+  rowLabelStrong: { fontFamily: fonts.medium },
+  /** The sheet's headline: bold, left aligned, with the close X beside it. */
+  title: { flex: 1, minWidth: 0, fontSize: 20, fontFamily: fonts.bold, letterSpacing: -0.3 },
   input: {
-    marginTop: 14,
-    alignSelf: 'stretch',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 9,
     fontSize: 14,
-    textAlign: 'center',
-  },
-  actions: { flexDirection: 'row', marginTop: 16, borderTopWidth: StyleSheet.hairlineWidth },
-  action: {
-    flex: 1,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-  actionDivider: { borderLeftWidth: StyleSheet.hairlineWidth },
-  actionText: { fontSize: 17, textAlign: 'center' },
-  actionTextStrong: { fontFamily: fonts.medium },
-  /** Stacked answer rows of the photo-source choice (Camera / Gallery / Cancel). */
-  choices: { marginTop: 4 },
-  choiceRow: {
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
   },
   /** Text prompt: the field and its optional "Today" shortcut share one row. */
   promptRow: {
@@ -385,7 +454,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     columnGap: 8,
     alignSelf: 'stretch',
-    marginTop: 14,
   },
   promptInput: {
     flex: 1,
@@ -393,11 +461,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 9,
     fontSize: 14,
-    textAlign: 'center',
   },
   promptChip: { minHeight: 40, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   promptChipText: { fontSize: 13, fontFamily: fonts.medium },
-  promptError: { marginTop: 8, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  promptError: { marginTop: 8, fontSize: 12, lineHeight: 17 },
   captionHost: { position: 'absolute', right: 14, bottom: 100, left: 14, alignItems: 'flex-end' },
   caption: {
     borderRadius: 14,

@@ -10,6 +10,12 @@ import { STRINGS } from './strings.generated';
  * These are presentation labels only - no business string is defined here.
  */
 export const RN_STRINGS: Record<string, string> = {
+  /**
+   * Bottom-bar caption of the statistics tab. The generated Windows key
+   * (`Nav_Statistics`) stays the page title; the r3 mockup labels the TAB
+   * "Stats", which keeps all five captions comfortably on one row.
+   */
+  Rn_NavStats: 'Stats',
   /** Section caption above the five meal cards on the dashboard. */
   Rn_Meals: 'Meals',
   /** Placeholder on a meal card that has neither a title nor a description. */
@@ -44,16 +50,11 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_ViewerZoomOut: 'Zoom out',
   Rn_ViewerCount: '{0} of {1}',
   Rn_ViewerHint: 'Swipe to browse · Pinch or double-tap to zoom',
-  Rn_ViewerOptions: 'Photo options',
-  Rn_ViewerDetails: 'Photo details',
-  Rn_ViewerRemove: 'Remove photo',
-  /** Expanded details of the photograph the viewer is showing. */
-  Rn_ViewerFile: 'File',
-  Rn_ViewerSize: 'Size',
-  Rn_ViewerAdded: 'Added',
-  Rn_ViewerSync: 'Cloud sync',
-  Rn_ViewerSyncPending: 'Pending upload',
-  Rn_ViewerSyncDone: 'Synced',
+  /**
+   * The viewer's one tool: the trash in its header. The label is the action the
+   * user is about to take, and it is also the confirm button's caption.
+   */
+  Rn_ViewerRemove: 'Delete photo',
   /** Settings (round-3 grouped layout): section captions and row labels. */
   Rn_SectionCloud: 'Cloud sync',
   Rn_SectionData: 'Data & backup',

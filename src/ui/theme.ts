@@ -70,8 +70,13 @@ export interface ThemeColors {
   surfaceVariant: string;
   border: string;
   /**
-   * Hairline between a card's content and its action row. One step lighter than
-   * `border`, so a divider separates without drawing a second frame.
+   * The meal card's line, between the meal and its tools. One deliberate step
+   * stronger than `border`: on the dark card a plain `hairline`/`border` line is
+   * barely there, and the reference card draws a line you can actually see.
+   */
+  cardDivider: string;
+  /**
+   * Quietest separator in the app: sheets, calendar rows and settings panels.
    */
   hairline: string;
   /** Fill of a disabled control (never a washed accent - see buttons.tsx). */
@@ -141,6 +146,9 @@ export const lightColors: ThemeColors = {
   // page tint so a chip reads as a chip on both the page and a white card.
   surfaceVariant: argb('#FFE9EEF5'),
   border: argb('#FFDCE3EC'),
+  // One step stronger than the card border: the line under a meal has to be
+  // visible on white without turning into a second frame.
+  cardDivider: argb('#FFC9D4E3'),
   hairline: argb('#FFEDF1F6'),
   disabledFill: argb('#FFE9EEF5'),
   disabledText: argb('#FF7C8798'),
@@ -179,6 +187,9 @@ export const darkColors: ThemeColors = {
   cardFill: argb('#FF151B23'),
   surfaceVariant: argb('#FF1F2833'),
   border: argb('#FF2A3542'),
+  // The `hairline`/`border` steps disappear on the dark card, so the meal line
+  // gets its own, brighter step.
+  cardDivider: argb('#FF3A4859'),
   hairline: argb('#FF222B36'),
   disabledFill: argb('#FF1B222B'),
   disabledText: argb('#FF8B98A9'),
@@ -233,9 +244,9 @@ export const metrics = {
   /** Minimum square a finger needs - the tab bar and every icon button. */
   minTouch: 44,
   /**
-   * Gap between two adjacent icon buttons. The Dashboard puts the ✓ / ✕ pair
-   * on its action row and every meal card puts the same pair in its bottom
-   * right corner, so both read them from here and keep the exact same distance.
+   * Gap between two adjacent icon buttons in the dashboard's bulk action row.
+   * The meal card keeps its own, wider `CARD_TOOL_GAP` (MealCard.tsx): five
+   * tools need more air than a ✓ / ✕ pair.
    */
   controlGap: 4,
   /**

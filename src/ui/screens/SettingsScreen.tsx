@@ -31,7 +31,7 @@ import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, themeColors, type ThemeColors } from '../theme';
-import { useFloatingTabBarClearance } from '../tabBar';
+import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
 
 /**
@@ -44,7 +44,6 @@ const SIGN_OUT_UPLOAD_FAILED =
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  const bottomClearance = useFloatingTabBarClearance();
   const [dbPath, setDbPath] = useState('');
   const [storageMb, setStorageMb] = useState('0.00');
   const [photoCount, setPhotoCount] = useState(0);
@@ -402,9 +401,9 @@ export function SettingsScreen(): React.JSX.Element {
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[
         styles.content,
-        // The floating tab bar sits ON TOP of the page; the extra room keeps the
-        // last row fully readable above it.
-        { paddingBottom: bottomClearance },
+        // The bar is docked below the page, so this is only the air above its
+        // divider - the last row never sits under the bar.
+        { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
 
@@ -656,11 +655,11 @@ export function SettingsScreen(): React.JSX.Element {
         <SettingsRow
           icon="information-circle-outline"
           label={t('Rn_AboutApp')}
-          trailing="1.0.0"
+          trailing="1.0.0.1"
           onPress={() =>
             setDialog({
               title: t('Rn_AboutApp'),
-              message: tFmt('Settings_AboutText', '1.0.0', 'React Native'),
+              message: tFmt('Settings_AboutText', '1.0.0.1', 'React Native'),
               confirmText: t('Common_Ok'),
               singleAction: true,
               onCancel: () => setDialog(null),
