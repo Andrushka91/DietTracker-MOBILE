@@ -134,6 +134,29 @@ while another day is open. The header is ~30 dp shorter, the date stays centred
 between the arrows, and the shortcut is still one tap. Verified at 360 dp and
 411 dp, 1.0 and 1.3 text scales.
 
+### P8 — Bottom bar: the active tab is visible
+
+The review screenshot draws a tinted capsule behind the active tab's glyph and a
+bolder caption under it; the app had neither, so on a dark bar the current tab was
+only a slightly different tint. `src/ui/components/TabBar.tsx` (new) now owns the
+two items the shell hands to the navigator:
+
+* `TabBarGlyph` - the glyph sits in a 46 × 26 capsule with fully rounded ends
+  (`TAB_GLYPH_PILL_*`), 20 pt glyph. The capsule is laid out on **every** tab (so
+  nothing shifts when the selection changes) and only the active one is filled
+  with `tabActivePillFill()` = the theme accent as a wash of itself
+  (`#4655D61A` light, `#8B95F62E` dark - the stronger alpha is needed because a
+  10 % tint disappears on the near-black surface).
+* `TabBarLabel` - the active caption is set in the bold weight, so the state reads
+  without relying on colour; one line and the 1.15 × scale cap are unchanged.
+
+The bar's geometry is untouched (`src/ui/tabBar.ts`: height 66, side inset 14,
+clearance 32 pt below every page); the bar's own top/bottom padding only went
+from 7 to 6 pt so the slightly taller glyph group keeps the same air.
+Light and dark, 411 dp, 1.0 and 1.3 text: five captions stay whole, nothing is
+clipped. Captures: `after/tab-bar-dark-settings.png` (dark, Settings active),
+`after/tab-bar-light-large-text.png` (light, 1.3 text, Today active).
+
 ### V1 — Calendar selected-day shape
 
 No change (see the note at the top): the source already draws a circle; the
@@ -145,7 +168,7 @@ audit's square came from the older installed build.
 |---|---|
 | `tsc --noEmit` | clean |
 | `eslint` on the touched files | **0 errors**, warnings only from the existing rule families (`no-void`, `react-native/no-inline-styles`) |
-| `jest` | **19 suites / 128 tests pass** (16 pre-existing untouched, 3 new) |
+| `jest` | **20 suites / 135 tests pass** (the r3 suites untouched plus the four focused files below) |
 
 New focused coverage:
 
@@ -158,6 +181,10 @@ New focused coverage:
   navigation parameters being ignored.
 * `__tests__/latestRequest.test.ts` — a slow earlier answer can never overwrite a
   newer one; a rejected load applies nothing; `invalidate` drops a pending answer.
+* `__tests__/tabBarAppearance.test.tsx` — the active capsule is an accent wash
+  (stronger in dark), sized as a capsule around the glyph, drawn only when the
+  tab is focused and reserved on the others; the active caption is bold and keeps
+  the tint, one line and the scale cap; all five tabs use both.
 
 `__tests__/r3Formatting.test.ts` was updated for the deliberate non-breaking
 space in `formatShortDayMonth` (the comment explains why).

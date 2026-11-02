@@ -19,7 +19,6 @@ import {
   Platform,
   StatusBar,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import {
@@ -37,7 +36,7 @@ import {
 } from '@expo-google-fonts/open-sans';
 
 import { AppProvider, useApp } from './src/ui/appContext';
-import { Icon, type IconName } from './src/ui/components/icons';
+import { TabBarGlyph, TabBarLabel, tabActivePillFill } from './src/ui/components/TabBar';
 import { BusyOverlay } from './src/ui/components/shell';
 import { StatusCaption } from './src/ui/components/dialogs';
 import { DashboardScreen } from './src/ui/screens/DashboardScreen';
@@ -45,7 +44,7 @@ import { CalendarScreen } from './src/ui/screens/CalendarScreen';
 import { StatisticsScreen } from './src/ui/screens/StatisticsScreen';
 import { TemplatesScreen } from './src/ui/screens/TemplatesScreen';
 import { SettingsScreen } from './src/ui/screens/SettingsScreen';
-import { fonts, raisedShadow, themeColors } from './src/ui/theme';
+import { raisedShadow, themeColors } from './src/ui/theme';
 import {
   TAB_BAR_HEIGHT,
   TAB_BAR_SIDE_INSET,
@@ -88,18 +87,18 @@ function loadGoogleConfig(): void {
 }
 
 /**
- * Bottom-tab icon (spec 6.2): ONE icon family for the five tabs, filled while
- * the tab is active and outlined while it is not. The navigator's tint already
- * carries the accent / muted colours, so the glyph itself never hardcodes one.
+ * Bottom-tab item (spec 6.2): ONE icon family for the five tabs, filled while
+ * the tab is active and outlined while it is not, plus the tinted capsule the
+ * active tab wears behind its glyph and the bolder caption under it. Both
+ * pieces live in `src/ui/components/TabBar.tsx`; the navigator's tint carries
+ * the accent / muted colours, so neither hardcodes an ink.
  */
-function TabIcon({ name, color }: { name: IconName; color: string }): React.JSX.Element {
-  return <Icon name={name} size={23} color={color} />;
-}
-
 function Tabs(): React.JSX.Element {
   const { isDark } = useApp();
   const colors = themeColors(isDark);
   const insets = useSafeAreaInsets();
+  /** Wash behind the ACTIVE tab's glyph - one accent tint for every theme. */
+  const pillFill = tabActivePillFill(colors);
   // The bar floats TAB_BAR_SIDE_INSET from both edges and clears the home
   // indicator, so the pages keep their own background right up to the system
   // edges. Both numbers come from src/ui/tabBar.ts, which is also what every
@@ -118,8 +117,11 @@ function Tabs(): React.JSX.Element {
           right: TAB_BAR_SIDE_INSET,
           bottom: barBottom,
           height: TAB_BAR_HEIGHT,
-          paddingTop: 7,
-          paddingBottom: 7,
+          // The active tab's capsule makes the glyph group a little taller, so
+          // the bar gives it the same breathing room it had before instead of
+          // pushing the captions against the bottom edge.
+          paddingTop: 6,
+          paddingBottom: 6,
           borderRadius: 22,
           backgroundColor: colors.surface,
           borderTopWidth: 0,
@@ -132,14 +134,15 @@ function Tabs(): React.JSX.Element {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textMuted,
         /**
-         * A custom label so the five single-word captions stay whole on a 360 pt
-         * phone with large system text. This is the one place where the scale is
-         * capped (1.15); every page keeps following the system font scale.
+         * A custom label so the active caption can be bold and so the five
+         * single-word captions stay whole on a 360 pt phone with large system
+         * text. This is the one place where the scale is capped (1.15); every
+         * page keeps following the system font scale.
          */
-        tabBarLabel: ({ color, children }) => (
-          <Text numberOfLines={1} maxFontSizeMultiplier={1.15} style={[styles.tabLabel, { color }]}>
+        tabBarLabel: ({ color, focused, children }) => (
+          <TabBarLabel color={color} focused={focused}>
             {children}
-          </Text>
+          </TabBarLabel>
         ),
         tabBarIconStyle: { marginTop: 2 },
         tabBarItemStyle: { paddingVertical: 2, paddingHorizontal: 0 },
@@ -149,7 +152,12 @@ function Tabs(): React.JSX.Element {
         options={{
           title: t('Nav_Dashboard'),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'home' : 'home-outline'} color={color} />
+            <TabBarGlyph
+              name={focused ? 'home' : 'home-outline'}
+              color={color}
+              focused={focused}
+              pillFill={pillFill}
+            />
           ),
         }}
         component={DashboardScreen as unknown as React.ComponentType<object>}
@@ -159,7 +167,12 @@ function Tabs(): React.JSX.Element {
         options={{
           title: t('Nav_Calendar'),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'calendar' : 'calendar-outline'} color={color} />
+            <TabBarGlyph
+              name={focused ? 'calendar' : 'calendar-outline'}
+              color={color}
+              focused={focused}
+              pillFill={pillFill}
+            />
           ),
         }}>
         {({ navigation, route }) => {
@@ -184,7 +197,12 @@ function Tabs(): React.JSX.Element {
         options={{
           title: t('Nav_Statistics'),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} />
+            <TabBarGlyph
+              name={focused ? 'stats-chart' : 'stats-chart-outline'}
+              color={color}
+              focused={focused}
+              pillFill={pillFill}
+            />
           ),
         }}
       />
@@ -194,7 +212,12 @@ function Tabs(): React.JSX.Element {
         options={{
           title: t('Nav_Templates'),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'albums' : 'albums-outline'} color={color} />
+            <TabBarGlyph
+              name={focused ? 'albums' : 'albums-outline'}
+              color={color}
+              focused={focused}
+              pillFill={pillFill}
+            />
           ),
         }}
       />
@@ -204,7 +227,12 @@ function Tabs(): React.JSX.Element {
         options={{
           title: t('Nav_Settings'),
           tabBarIcon: ({ focused, color }) => (
-            <TabIcon name={focused ? 'settings' : 'settings-outline'} color={color} />
+            <TabBarGlyph
+              name={focused ? 'settings' : 'settings-outline'}
+              color={color}
+              focused={focused}
+              pillFill={pillFill}
+            />
           ),
         }}
       />
@@ -340,14 +368,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: themeColors(false).background,
-  },
-  /** Tab caption: one line, capped scale, regular weight (see the navigator). */
-  tabLabel: {
-    fontSize: 10.5,
-    fontFamily: fonts.regular,
-    letterSpacing: 0,
-    marginTop: 1,
-    textAlign: 'center',
   },
 });
 

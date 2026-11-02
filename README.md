@@ -909,6 +909,16 @@ npm start
     `mipmap-*dpi/ic_launcher.png`, the circular `ic_launcher_round.png`, the
     `mipmap-anydpi-v26` adaptive icon (72 dp safe zone over the same blue
     `#1A7AC5`) and `assets/icon.png` / `assets/adaptive-icon.png` for Expo.
+  * The bottom bar makes the **current tab** obvious: the active tab's glyph sits
+    in a tinted capsule and its caption is bold, the other four stay quiet grey
+    outline glyphs. Both halves live in `src/ui/components/TabBar.tsx`
+    (`TabBarGlyph`, `TabBarLabel`), the capsule is a wash of the theme accent
+    (`tabActivePillFill`: 10 % light / 18 % dark), and the navigator's tint still
+    carries the ink - no colour is hardcoded, so both themes follow. The capsule
+    is reserved on every tab, so switching tabs never moves a glyph, and the bar's
+    height/inset/clearance in `src/ui/tabBar.ts` are unchanged.
+    `__tests__/tabBarAppearance.test.tsx` pins the capsule geometry and fill, the
+    bold active caption, and that all five tabs use them.
   * Every scrolling page leaves room for the **floating tab bar** below its last
     card, and that room is now *measured* instead of guessed: `src/ui/tabBar.ts` is
     the single source of truth for the bar's geometry (`TAB_BAR_HEIGHT` 66,
