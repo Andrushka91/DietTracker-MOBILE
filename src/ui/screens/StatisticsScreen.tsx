@@ -3,7 +3,10 @@
 //
 //   period      Day / Week / Month / Year with the exact range printed
 //   primary     Done / ALL planned slots (percentage + "19 of 35")
-//   composition one status bar plus the three aligned counts
+//   composition one status bar, then the three counts (glyph + bold number over
+//               the label, each in its own third of the row) and the closing
+//               sentence with the period total set apart - see
+//               components/SlotCounts.tsx for the mockup's layout
 //   breakdown   interactive rows (meals, days, partial weeks or months)
 //   selection   counts of the chosen row and an explicit day/calendar action
 //   disclosures "By meal type" and "How the numbers work"
@@ -27,12 +30,12 @@ import { dateHandoff } from '../dates';
 import { createLatestRequestRunner } from '../latestRequest';
 import { IconButton, Segmented } from '../components/buttons';
 import { Icon } from '../components/icons';
+import { SlotCounts } from '../components/SlotCounts';
 import {
   fonts,
   metrics,
   pageTitleStyle,
   themeColors,
-  type ThemeColors,
 } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
@@ -299,16 +302,7 @@ export function StatisticsScreen(): React.JSX.Element {
           )}
         </View>
 
-        <View style={styles.statCounts}>
-          <StatCount icon="checkmark" label={t('Dashboard_CountDone')} value={counts.done} color={colors.done} colors={colors} />
-          <StatCount icon="close" label={t('Dashboard_CountMissed')} value={counts.missed} color={colors.missed} colors={colors} />
-          <StatCount icon="time-outline" label={t('Dashboard_CountPending')} value={counts.pending} color={colors.pending} colors={colors} />
-        </View>
-
-        <Text style={[styles.contextLine, { color: colors.textMuted }]}>
-          {tFmt('Rn_StatAllPlanned', counts.total, periodWord(mode))}
-          {counts.upcoming > 0 ? ` ${tFmt('Rn_StatIncludesUpcoming', counts.upcoming)}` : ''}
-        </Text>
+        <SlotCounts counts={counts} period={periodWord(mode)} colors={colors} />
       </View>
 
 
@@ -502,24 +496,6 @@ export function StatisticsScreen(): React.JSX.Element {
   );
 }
 
-/** One status count of the primary panel: glyph, number and label. */
-function StatCount(props: {
-  icon: React.ComponentProps<typeof Icon>['name'];
-  label: string;
-  value: number;
-  color: string;
-  colors: ThemeColors;
-}): React.JSX.Element {
-  return (
-    <View style={styles.statCount}>
-      <Icon name={props.icon} size={14} color={props.color} />
-      <Text style={[styles.statCountValue, { color: props.colors.text }]}>{props.value}</Text>
-      <Text style={[styles.statCountLabel, { color: props.colors.textMuted }]}>{props.label}</Text>
-    </View>
-  );
-}
-
-
 const styles = StyleSheet.create({
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
   pageTitle: { ...pageTitleStyle },
@@ -573,17 +549,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginTop: 12,
   },
-  statCounts: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
-  statCount: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    columnGap: 5,
-  },
-  statCountValue: { fontSize: 14, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  statCountLabel: { fontSize: 11, fontFamily: fonts.medium },
-  contextLine: { fontSize: 11, lineHeight: 16, marginTop: 10, fontFamily: fonts.regular },
   breakdownHeading: {
     flexDirection: 'row',
     alignItems: 'flex-end',

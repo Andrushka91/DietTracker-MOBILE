@@ -31,10 +31,10 @@ export const RN_STRINGS: Record<string, string> = {
   /** Metadata caption on a template row. */
   Rn_Updated: 'Updated',
   /**
-   * r3 day header: one completion summary instead of a bare percentage, so the
-   * number of planned slots is never implied by the bar's width alone.
+   * r3 day header: the fraction INSIDE the progress ring, with no spaces
+   * ("3/5"), plus the two day-wide action labels under the counts.
    */
-  Rn_DayProgress: '{0} of {1} completed',
+  Rn_DayDoneOfTotal: '{0}/{1}',
   /** Day shortcut shown only while the diary is showing another date. */
   Rn_GoToToday: 'Go to today',
   /**
@@ -55,6 +55,23 @@ export const RN_STRINGS: Record<string, string> = {
    * user is about to take, and it is also the confirm button's caption.
    */
   Rn_ViewerRemove: 'Delete photo',
+  /**
+   * The save row of the day header, which only exists while an editor is open.
+   * "1 editor open" means a card holds edits waiting for Save - the row never
+   * claims the cloud has anything (only the next sync attempt can say that).
+   */
+  Rn_EditorOpenOne: '1 editor open',
+  Rn_EditorsOpen: '{0} editors open',
+  Rn_Saving: 'Saving…',
+  /** A batch save that left some cards open ("2 of 3 saved"). */
+  Rn_SaveAllPartialRow: '{0} of {1} saved',
+  /**
+   * The "Delete this photo?" card: its title and what the answer removes. The
+   * badge, the two pills and the action keep their own strings.
+   */
+  Rn_PhotoRemoveTitle: 'Delete this photo?',
+  Rn_PhotoRemoveBody:
+    'Removed from this device now and from your cloud account at the next sync.',
   /** Settings (round-3 grouped layout): section captions and row labels. */
   Rn_SectionCloud: 'Cloud sync',
   Rn_SectionData: 'Data & backup',
@@ -88,12 +105,10 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_SyncPausedDetail: 'Scheduled checks are paused on this device.',
   Rn_SyncGuest: 'Not connected',
   Rn_SyncGuestDetail: 'Sign in to sync across devices',
-  /** Calendar (round-3 design): subtitle, mark key and the selected-day summary. */
-  Rn_CalendarSubtitle: 'Your meals, day by day.',
-  Rn_CalendarMarks: 'Five marks · five meal slots',
+  /** Calendar (round-3 design): mark key and the selected-day summary. */
+  Rn_CalendarDots: '5 dots = 5 meals',
   Rn_CalendarDaySummary: '{0} done · {1} missed · {2} pending',
   Rn_CalendarPhotoCount: '{0} photos',
-  Rn_NoMealRecorded: 'No meal recorded',
   /** Photo count on one agenda row (a camera glyph plus this number). */
   Rn_Agenda: 'Agenda',
   /** Statistics (round-3 review design). */
@@ -135,7 +150,11 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_MealShortDinner: 'Dinner',
   /** Visible captions of the inline meal editor (persistent, not placeholders). */
   Rn_FieldMealName: 'Meal name',
-  Rn_FieldNotes: 'Notes',
+  /**
+   * The card's "Description" (the entry's `ingredients` column, unchanged): the
+   * label says what the field holds rather than where it is stored.
+   */
+  Rn_FieldDescription: 'Description',
   Rn_FieldPlannedTime: 'Planned time',
   /** Template target-date prompt: its wording, validation and Today shortcut. */
   Rn_TemplateDatePrompt: 'Enter the target date (yyyy-MM-dd)',
@@ -143,6 +162,18 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_TemplateDateRequired: 'Enter a date first.',
   Rn_TemplateDateFormat: 'Use the format yyyy-MM-dd, for example 2026-11-02.',
   Rn_TemplateDateImpossible: 'That day does not exist. Check the day and the month.',
+  /**
+   * Save-as-template name prompt: a name is required. The field starts empty and
+   * the day's date is never suggested or used as a fallback.
+   */
+  Rn_TemplateNameRequired: 'Enter a name for the template.',
+  /**
+   * The "Clear this meal?" card: what the answer removes, then the consequence
+   * line. The badge, the answers ("Cancel" / "Clear meal") and the title are the
+   * existing strings.
+   */
+  Rn_ClearMealBody: "This clears the meal's details and status, and deletes all attached photos.",
+  Rn_ClearMealWarning: "This can't be undone.",
   /** Read-only template contents, inspected before anything is applied. */
   Rn_TemplatePreview: 'Preview contents',
   Rn_TemplatePreviewHide: 'Hide contents',
@@ -164,6 +195,55 @@ export const RN_STRINGS: Record<string, string> = {
     'Not connected: nothing is uploaded yet and meals stay on this device. After you sign in, saving a meal starts a sync attempt and this schedule decides how often the app also checks the cloud.',
   Rn_ScheduleHintOffline:
     'Offline: a save cannot upload right now, so changes wait on this device and the next sync attempt follows when the connection returns. This schedule decides how often the app also checks the cloud.',
+  /**
+   * The two account cards (the centered surface of `ConfirmRequest.layout:
+   * 'card'`). The sign-out card promises the upload BEFORE it happens; the
+   * failure card states that it did not happen and that the session is still
+   * open, so the red "Try again" answer is safe to press. Both use
+   * `Account_SignOutTitle` ("Sign out?") and `Common_Cancel` ("Cancel").
+   */
+  Rn_SignOutMessage: "We'll sync your latest changes before signing you out.",
+  Rn_SignOutConfirm: 'Sync & sign out',
+  Rn_SignOutFailedTitle: "Couldn't sync",
+  Rn_SignOutFailedMessage: "Your latest changes haven't synced yet.",
+  Rn_SignOutFailedNoteTitle: 'Sync failed',
+  Rn_SignOutFailedNoteMessage: "Check your connection and try again. You're still signed in.",
+  Rn_SignOutRetry: 'Try again',
+  /**
+   * The sign-out card while it works (the round-3 mockup): the title and the
+   * caption change to say the session is waiting for the upload, and the block
+   * under them is the bar, the counted line and the reassurance - no spinner,
+   * because the bar already reports the progress.
+   */
+  Rn_SignOutSyncingTitle: 'Syncing before sign-out',
+  Rn_SignOutSyncingMessage: "You'll be signed out when syncing finishes.",
+  Rn_SignOutSyncingCount: '{0} of {1} changes synced',
+  Rn_SignOutSyncingCountOne: '{0} of {1} change synced',
+  Rn_SignOutSyncingHint: 'Please keep the app open.',
+  /**
+   * The sign-in sheet: a whole-screen-worthy card that rises from the bottom
+   * edge while the account's dataset is downloaded (the round-3 mockup). The
+   * title is constant, the subtitle names the current step, and the line under
+   * the bar counts the documents that actually arrived.
+   */
+  Rn_SyncSheetTitle: 'Syncing your data',
+  Rn_SyncSheetPreparing: 'Preparing your account',
+  Rn_SyncSheetUploading: 'Uploading the meals saved on this device',
+  Rn_SyncSheetDownloading: 'Downloading your saved meals and photos',
+  Rn_SyncSheetWaiting: 'Waiting for the connection… retrying',
+  Rn_SyncSheetOpening: 'Opening your account',
+  Rn_SyncSheetReceived: '{0} of {1} items received',
+  Rn_SyncSheetSent: '{0} of {1} items sent',
+  Rn_SyncSheetHint: 'Keep the app open until syncing finishes.',
+  /**
+   * Sign-in outcomes that are NOT failures. The bar's deadline lets the user in
+   * while the rest of the dataset is still arriving (the background triggers
+   * finish it), and a few documents may fail to apply once and be retried - in
+   * both cases the old wording ("the data could not be loaded yet, use
+   * Synchronize now") was wrong and alarming, because the data WAS being loaded.
+   */
+  Rn_SignInStillArriving: 'Signed in. The rest of your data is still arriving and will appear in a moment.',
+  Rn_SignInPartial: 'Signed in. {0} item(s) could not be loaded yet; the app will keep trying.',
 };
 
 /**

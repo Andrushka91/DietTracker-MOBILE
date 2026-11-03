@@ -49,14 +49,16 @@ jest.mock('expo-secure-store', () => ({
 // require without transforming all of node_modules. The icon is pure decoration
 // in the tests - the component tests assert content and behaviour, and the icon
 // NAMES are already checked at build time by TypeScript - so it renders as an
-// empty Text carrying the name as its accessibility label.
+// empty Text carrying the name as its accessibility label. `color` is forwarded
+// as well: a glyph's INK is a design decision too (the meal card's bin is drawn
+// in the card's ink, not the missed red), and it is otherwise unreachable.
 jest.mock('@expo/vector-icons/Ionicons', () => {
   const React = require('react');
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    default: (props: { name: string }) =>
-      React.createElement(Text, { accessibilityLabel: `icon:${props.name}` }),
+    default: (props: { name: string; color?: string }) =>
+      React.createElement(Text, { accessibilityLabel: `icon:${props.name}`, color: props.color }),
   };
 });
 
@@ -68,8 +70,8 @@ jest.mock('@expo/vector-icons/Feather', () => {
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    default: (props: { name: string }) =>
-      React.createElement(Text, { accessibilityLabel: `feather:${props.name}` }),
+    default: (props: { name: string; color?: string }) =>
+      React.createElement(Text, { accessibilityLabel: `feather:${props.name}`, color: props.color }),
   };
 });
 
@@ -78,8 +80,8 @@ jest.mock('@expo/vector-icons/MaterialCommunityIcons', () => {
   const { Text } = require('react-native');
   return {
     __esModule: true,
-    default: (props: { name: string }) =>
-      React.createElement(Text, { accessibilityLabel: `material:${props.name}` }),
+    default: (props: { name: string; color?: string }) =>
+      React.createElement(Text, { accessibilityLabel: `material:${props.name}`, color: props.color }),
   };
 });
 

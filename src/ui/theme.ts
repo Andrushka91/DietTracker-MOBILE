@@ -245,8 +245,8 @@ export const metrics = {
   minTouch: 44,
   /**
    * Gap between two adjacent icon buttons in the dashboard's bulk action row.
-   * The meal card keeps its own, wider `CARD_TOOL_GAP` (MealCard.tsx): five
-   * tools need more air than a ✓ / ✕ pair.
+   * The meal card keeps its own `CARD_TOOL_GAP` (MealCard.tsx): its tiles are
+   * compact buttons on a strip, so they sit closer together than the day actions.
    */
   controlGap: 4,
   /**

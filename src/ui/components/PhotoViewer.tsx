@@ -44,7 +44,7 @@ import type { MealPhoto } from '../../domain/models';
 import { fileUri, thumbnailUri } from '../../data/photoStore';
 import { t, tFmt } from '../strings';
 import { argb, fonts, themeColors } from '../theme';
-import { DialogSheet, SheetRow } from './dialogs';
+import { DialogCard, DialogCardAction } from './dialogs';
 import { Icon } from './icons';
 
 /** Zoom limits shared by the pinch, the double tap and the two buttons. */
@@ -407,33 +407,36 @@ export function PhotoViewer(props: {
         <Text style={[styles.hint, { color: chromeMuted }]}>{t('Rn_ViewerHint')}</Text>
 
 
-        {/* Destructive step: the header's trash opens THIS, and only the red
-            row deletes. It uses the app's shared sheet (no nested Modal, which
-            Android stacks unreliably), so the question looks like every other
-            question in the app. */}
+        {/* Destructive step: the header's trash opens THIS, and only the red pill
+            deletes. It is the app's centered CARD without its own Modal - the
+            viewer already IS a modal and Android does not stack two of them
+            reliably - so the question looks like the clear-meal card: badge,
+            title, what happens, then Cancel / Delete photo. */}
         {confirming && photo !== undefined && (
-          <DialogSheet
+          <DialogCard
             name="viewer-confirm"
-            title={t('Photo_RemoveTitle')}
-            caption={t('Photo_RemoveMessage')}
+            title={t('Rn_PhotoRemoveTitle')}
+            body={t('Rn_PhotoRemoveBody')}
+            badge={{ feather: 'trash-2' }}
+            badgeTone="danger"
             isDark={props.isDark}
-            onDismiss={closeConfirm}>
-            <View style={styles.confirmRows}>
-              <SheetRow
-                label={t('Common_No')}
-                icon="close"
-                onPress={closeConfirm}
-                colors={themeColors(props.isDark)}
-              />
-              <SheetRow
-                label={t('Rn_ViewerRemove')}
-                icon="trash-outline"
-                tone="danger"
-                onPress={() => props.onRemove(photo)}
-                colors={themeColors(props.isDark)}
-              />
-            </View>
-          </DialogSheet>
+            onDismiss={closeConfirm}
+            actions={
+              <>
+                <DialogCardAction
+                  label={t('Common_Cancel')}
+                  onPress={closeConfirm}
+                  colors={colors}
+                />
+                <DialogCardAction
+                  label={t('Rn_ViewerRemove')}
+                  onPress={() => props.onRemove(photo)}
+                  colors={colors}
+                  destructive
+                />
+              </>
+            }
+          />
         )}
       </View>
     </Modal>
@@ -479,6 +482,4 @@ const styles = StyleSheet.create({
   thumb: { width: '100%', height: '100%' },
   hint: { fontSize: 12, textAlign: 'center', paddingHorizontal: 16, paddingTop: 8 },
   /** The shared sheet's rows inside the viewer (no Modal, no scrim of our own). */
-  confirmRows: { marginTop: 12 },
 });
-

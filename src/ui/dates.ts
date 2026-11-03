@@ -6,7 +6,12 @@
 //     fall back to today when the text made no sense, which applied a template
 //     to the wrong day. The three answers (blank / wrong shape / impossible day
 //     such as 31 February) let the dialog explain what to correct.
-//  2. "Is this the same request again?" - a screen-to-screen hand-off carries a
+//  2. "Can the field even HOLD a wrong character?" - `dateDraft` masks every
+//     keystroke to digits plus the two separators, so a letter, a slash or a
+//     whole extra block never reaches the field, the error line or the domain
+//     call. The mask inserts the dashes itself, because the numeric keypad has
+//     no dash key.
+//  3. "Is this the same request again?" - a screen-to-screen hand-off carries a
 //     monotonically increasing id, so asking for the SAME date a second time
 //     still fires the receiving effect (a plain `date` parameter would not change
 //     and the Calendar would keep the month the user browsed to in between).
@@ -42,6 +47,31 @@ export function dateInputProblem(value: string): DateInputProblem | null {
     return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? 'impossible' : 'format';
   }
   return null;
+}
+
+/** Length of a complete `yyyy-MM-dd` value - the most the date field can hold. */
+export const DATE_INPUT_LENGTH = 10;
+
+/**
+ * Masks the target-date draft to `yyyy-MM-dd` and nothing else.
+ *
+ * The field accepts DIGITS - a letter, a space, a slash, a second dash or any
+ * extra block can never reach the validator - and inserts both dashes itself
+ * ("20261102" -> "2026-11-02"), because the numeric keypad has no dash key and
+ * the prompt asks for a machine date. A dash the user does type is honoured
+ * where the keyboard has one; a pasted "2026/11/02" or a whole ISO timestamp is
+ * read as the same day, cut at the day. The draft therefore always has a prefix
+ * of the format the validator expects.
+ */
+export function dateDraft(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 4) {
+    return digits;
+  }
+  if (digits.length <= 6) {
+    return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  }
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
 }
 
 /**

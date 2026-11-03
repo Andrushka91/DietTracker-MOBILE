@@ -12,45 +12,27 @@
 // spinner row, and there is deliberately no "skip" control: the records must
 // reach the cloud before this device gives them up.
 //
+// The ONE exception is the sign-out: its question is already the centered
+// account card, so the SAME card stays open and turns into the progress surface
+// (see SettingsScreen) instead of a bottom sheet rising on top of it. The
+// wording and the bar maths are shared through `../accountProgress`, so both
+// surfaces say exactly the same thing.
+//
 // Background synchronization never raises it (spec change: silent sync).
 
 import React from 'react';
 
 import { useApp, type BusyStage } from '../appContext';
-import type { AccountSyncProgress } from '../../cloud/session';
+import {
+  SIGNING_IN,
+  SYNC_HINT,
+  progressDetail,
+  progressRatio,
+  progressTitle,
+  signInSheetCopy,
+} from '../accountProgress';
 import { LoadingDialog } from './dialogs';
 import { t } from '../strings';
-
-/**
- * RN-only wording: the Windows resource table has no "signing in" sentence
- * (desktop hands the flow to the browser), so it lives here like the other
- * mobile-only strings.
- */
-const SIGNING_IN = 'Signing in…';
-
-/**
- * RN-only wording of the account boundary bar (no Windows resource exists).
- *
- * The bar is not an "upload" screen: it is the moment the phone proves that it
- * and the account hold the same records - in BOTH directions. Signing out
- * pushes what is only here, signing in pulls the account's whole dataset, and
- * the user waits behind the same wall until it is done.
- */
-const SYNC_HINT = 'Please keep the app open until it has synced with the cloud.';
-const SYNC_WAITING = 'Waiting for the connection… retrying';
-const SYNC_COUNT = '{0} of {1} change(s) synced with the cloud';
-const LOAD_COUNT = '{0} of {1} document(s) received from the cloud';
-
-/** 0-1 of the bar; `finishing` is the full bar, `preparing` is an empty one. */
-function progressRatio(progress: AccountSyncProgress): number {
-  if (progress.stage === 'finishing') {
-    return 1;
-  }
-  if (progress.total <= 0) {
-    return 0;
-  }
-  return Math.min(1, Math.max(0, progress.settled / progress.total));
-}
 
 /**
  * The app-wide "please wait" surface (spec 6.4): the SAME bottom sheet every
@@ -70,6 +52,25 @@ export function BusyOverlay(): React.JSX.Element | null {
   if (busy === null) {
     return null;
   }
+  // Signing in is the one transfer the user waits through with nothing else to
+  // do, so it gets the big "Syncing your data" sheet - the mockup's headline,
+  // subtitle, thick bar and counted line - from the first frame to the last. The
+  // sheet is up before the first frame exists (the picker and the adoption), so
+  // it starts on an empty track instead of swapping layouts mid-flow.
+  if (busy === 'signingIn' || (busyProgress !== null && busyProgress.mode === 'signIn')) {
+    const copy = signInSheetCopy(busyProgress);
+    return (
+      <LoadingDialog
+        name="busy-dialog"
+        message={copy.title}
+        subtitle={copy.subtitle}
+        detail={copy.count}
+        hint={copy.hint}
+        progress={busyProgress === null ? 0 : progressRatio(busyProgress)}
+        isDark={isDark}
+      />
+    );
+  }
   if (busyProgress !== null) {
     return (
       <LoadingDialog
@@ -83,9 +84,9 @@ export function BusyOverlay(): React.JSX.Element | null {
     );
   }
   // The short steps are purely informational, so the sheet carries the sentence
-  // without the "this can take a few seconds" warning.
-  const shortFlow =
-    busy === 'signingIn' || busy === 'signingOut' || busy === 'savingPhoto';
+  // without the "this can take a few seconds" warning. (Signing in has already
+  // been answered by the sync sheet above.)
+  const shortFlow = busy === 'signingOut' || busy === 'savingPhoto';
   return (
     <LoadingDialog
       name="busy-dialog"
@@ -97,44 +98,9 @@ export function BusyOverlay(): React.JSX.Element | null {
 }
 
 /**
- * The sentence above the bar. Sign-out ends with "Signing out…", sign-in with
- * "Opening your account…", and both spend their middle on the same promise:
- * the phone and the account are about to hold the same records.
+ * The sentence of a stage that has no document to count (the plain spinner
+ * row). The counted stages get theirs from `progressTitle`.
  */
-function progressTitle(progress: AccountSyncProgress): string {
-  switch (progress.stage) {
-    case 'finishing':
-      return progress.mode === 'signOut' ? t('Busy_SigningOut') : t('Busy_OpeningAccount');
-    case 'preparing':
-      return progress.mode === 'signOut' ? t('Busy_SyncingChanges') : SIGNING_IN;
-    case 'uploading':
-      return t('Busy_SyncingChanges');
-    case 'downloading':
-    case 'waiting':
-    default:
-      return t('Busy_SyncingAccount');
-  }
-}
-
-/** "12 of 40 document(s) received from the cloud" under the bar. */
-function progressDetail(progress: AccountSyncProgress): string {
-  if (progress.stage === 'waiting') {
-    return SYNC_WAITING;
-  }
-  if (progress.total <= 0) {
-    // Nothing to count yet (the account is being prepared): the title already
-    // says what is happening, so the line stays empty instead of repeating it.
-    return progress.stage === 'preparing'
-      ? ''
-      : t(progress.mode === 'signIn' ? 'Busy_SyncingAccount' : 'Busy_SyncingChanges');
-  }
-  const template = progress.mode === 'signOut' ? SYNC_COUNT : LOAD_COUNT;
-  return template
-    .replace('{0}', String(progress.settled))
-    .replace('{1}', String(progress.total));
-}
-
-
 function stageText(stage: BusyStage): string {
   switch (stage) {
     case 'sync':

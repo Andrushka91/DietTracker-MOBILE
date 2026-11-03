@@ -14,8 +14,9 @@
 //   tab glyphs                     home (Feather), calendar-month-outline (material),
 //                                  bar-chart (Feather), layers-outline,
 //                                  settings-outline (Ionicons)
-//   actions                        camera-outline, create-outline, trash-outline,
-//                                  close, checkmark
+//   actions                        camera-outline, close, checkmark (Ionicons),
+//                                  the meal card's Edit pencil = Feather `edit`
+//                                  and its Clear bin = Feather `trash-2`
 //   chrome                         chevron-back, chevron-forward, settings-outline
 
 import React from 'react';
@@ -40,9 +41,10 @@ export function Icon(props: {
 }
 
 /**
- * The tab glyphs Ionicons cannot draw, each borrowed from the one font whose
- * shape is the mockup's shape. They are tab-bar exceptions only; every action,
- * pill and chrome glyph stays Ionicons.
+ * The glyphs Ionicons cannot draw, each borrowed from the one font whose shape is
+ * the mockup's shape. The tab bar uses three of them; outside the bar there are
+ * exactly TWO Feather action glyphs - the meal card's Edit pencil and its Clear
+ * bin - while every other action, pill and chrome glyph stays Ionicons.
  *
  *   house     Feather `home` - Ionicons' house has an eaved roof running past
  *             both walls plus a chimney stub; the mockup's is a plain pentagon.
@@ -51,6 +53,13 @@ export function Icon(props: {
  *             calendar is heavier, with a thick header band and larger dots.
  *   stats     Feather `bar-chart` - the mockup draws three plain ascending bars;
  *             Ionicons' bar charts carry a left/bottom axis and hollow bars.
+ *   edit      Feather `edit` - the mockup's pencil: a square open at the
+ *             top-right with a plain pencil through the gap. Ionicons'
+ *             `create-outline` adds a nib and a collar, so it reads as a
+ *             fountain pen (see `IconButton` in components/buttons.tsx).
+ *   clear     Feather `trash-2` - a thin lid line overhanging the body, an arched
+ *             handle, rounded corners and two short bars. Ionicons' bin tapers
+ *             its body and draws three bars; Material's has a filled lid band.
  */
 export function FeatherIcon(props: {
   name: FeatherName;
@@ -60,7 +69,10 @@ export function FeatherIcon(props: {
   return <Feather name={props.name} size={props.size ?? 18} color={props.color} />;
 }
 
-/** See `FeatherIcon` - the same idea, drawn by MaterialCommunityIcons. */
+/**
+ * See `FeatherIcon` - the same idea, drawn by MaterialCommunityIcons. Only the
+ * calendar tab uses it today; no action glyph needs this face.
+ */
 export function MaterialIcon(props: {
   name: MaterialName;
   color: string;

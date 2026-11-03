@@ -1,22 +1,27 @@
 // Meal card (spec 8.3) - identical anatomy in read and edit mode:
 //
-//  header: emoji icon (~36pt), fixed category name, effective planned time
-//          caption, status pill (Pending gray / Done green / Missed red)
+//  header: the category's LINE ICON in a 36 pt tile (see `../mealGlyphs`), the
+//          fixed category name, the effective planned time caption, the status
+//          pill (Pending gray / Done green / Missed red)
 //  read:   title (2 lines), description (3 lines), closable error banner,
 //          photo gallery (right of the text)
-//  bar:    ONE full-width hairline under the meal, then the five tools:
-//          Add photo -> Edit -> Clear (red, disabled when empty) ->
-//          Mark MISSED (disabled future/already) -> Mark DONE (disabled
-//          future/already-done/empty) - all with accessibility labels.
-//          The five glyphs are drawn at the same 20 pt as the reference card,
-//          in 48 pt touch squares 8 pt apart, so the row reads as one quiet
-//          line of tools instead of five crowded dots.
-//  editor: Title / Description / Planned time (HH:MM) / Cancel / Save;
-//          validation failures land on the card error line; Cancel resets
-//          only this card's draft.
+//  bar:    ONE full-width hairline under the meal, then the five tools in two
+//          groups - Add photo / Edit / Clear on the left, Mark MISSED / Mark DONE
+//          on the right, separated by one divider, all on a tinted strip. Clear
+//          wears the mockup's flat-lidded, twin-bar bin in the card's ink (never
+//          the missed red) and is disabled when the card is empty; the state mark
+//          that matches the meal's CURRENT status keeps a ring. The five glyphs
+//          are drawn at 20 pt on visible 40 pt tiles 6 pt apart, each with a 44 pt
+//          touch target.
+//  editor: no heading of its own - three labelled 44 pt fields (Meal name,
+//          Description, then Planned time in the tinted footer beside Cancel /
+//          Save). The Description box starts at ONE row and grows to two when the
+//          text needs it; validation failures land on the card error line and
+//          Cancel resets only this card's draft. The action strip is not drawn
+//          while the editor is open.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
@@ -24,21 +29,105 @@ import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
-import { argb, cardShadow, fonts, metrics, softPillColors, themeColors } from '../theme';
-import { BarButton, IconButton, localizedCode } from './buttons';
-import { Icon, type IconName } from './icons';
+import { argb, cardShadow, fonts, metrics, softPillColors, themeColors, tintAlpha } from '../theme';
+import { BarButton, localizedCode } from './buttons';
+import { FeatherIcon, Icon, MaterialIcon, type IconName } from './icons';
+import { MEAL_GLYPH_SIZE, mealCategoryGlyph } from '../mealGlyphs';
+import { MeasuredInput } from './MeasuredInput';
 import { PhotoGallery } from './PhotoGallery';
 
 /**
- * The meal card's tool row, measured off the reference card: the SAME five
- * glyphs as before (camera, edit, clear, missed, done), drawn at 20 pt inside
- * 48 pt touch squares, 8 pt apart. The touch square never shrinks below 48 -
- * the glyph grew into it, so the row gets the airier rhythm of the reference
- * without losing a single point of tappable area.
+ * The notes box starts SHALLOW - one row - and grows to two only when the text
+ * needs the second line. `MeasuredInput` lays the current text out invisibly,
+ * reports the real row count and refuses the change that would need a third row,
+ * so the box never overflows and never reserves an empty second line: the limit is
+ * the real width of the field, not an estimate.
+ */
+const NOTES_ROWS = 2;
+
+/** The meal name lives on one row for the same reason. */
+const TITLE_ROWS = 1;
+
+/** Must match `styles.field.paddingHorizontal`: the ruler subtracts it. */
+const FIELD_PADDING = 10;
+
+/** Field typography, shared by the input and its invisible measuring copy. */
+const FIELD_TEXT = { fontSize: 14, lineHeight: 18 } as const;
+
+/** Vertical chrome of an editor field, above and below the text. */
+const FIELD_PADDING_V = 8;
+
+/**
+ * Height of a single-line editor field: 44 pt, which is also the app's minimum
+ * touch target - the compact chip the reference draws.
+ */
+export const FIELD_HEIGHT = 44;
+
+/** Two rows of notes: exactly the text (2 x 18 pt) plus that padding (52 pt). */
+export const NOTES_HEIGHT = FIELD_TEXT.lineHeight * NOTES_ROWS + FIELD_PADDING_V * 2;
+
+/** Longest accepted text in the planned-time field: "HH:MM". */
+const TIME_MAX_LENGTH = 5;
+
+/**
+ * Masks the planned-time draft to a time and nothing else.
+ *
+ * The field accepts DIGITS and ONE COLON - letters, spaces, a second colon and a
+ * third digit block can never reach the save validation. Android's number pad
+ * offers no colon key, so the separator is inserted automatically after the
+ * second digit ("1230" → "12:30"). A colon the user typed is honoured where the
+ * keyboard has one (iOS numbers-and-punctuation), which keeps the short form
+ * "9:30" available. Three digits without a colon are read as the only time they
+ * can be - "930" → "9:30", because a two-digit hour above 23 cannot exist -
+ * while "123" stays "12:3" and completes to "12:30".
+ */
+export function timeDraft(raw: string): string {
+  const cleaned = raw.replace(/[^0-9:]/g, '');
+  const colon = cleaned.indexOf(':');
+  if (colon >= 0) {
+    const hours = cleaned.slice(0, colon).replace(/\D/g, '').slice(0, 2);
+    const minutes = cleaned.slice(colon + 1).replace(/\D/g, '').slice(0, 2);
+    return `${hours}:${minutes}`;
+  }
+  const digits = cleaned.slice(0, 4);
+  if (digits.length <= 2) {
+    return digits;
+  }
+  if (digits.length === 3 && Number(digits.slice(0, 2)) > 23) {
+    return `${digits[0]}:${digits.slice(1)}`;
+  }
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+/**
+ * The meal card's ACTION STRIP, measured off the reference card: the same five
+ * tools (camera, edit, clear, missed, done) as 20 pt glyphs on VISIBLE 40 pt tiles
+ * that sit 6 pt apart, each with a 2 pt hit slop - so the tile reads as a compact
+ * button while the thumb still gets a 44 pt target.
+ *
+ * Three of the five are Ionicons. The other two are the mockup's own shapes, both
+ * from Feather - the one font that draws them:
+ *
+ *   edit   `edit`    - a square open at the top-right with a plain pencil through
+ *                      the gap (Ionicons' `create-outline` adds a nib and a
+ *                      collar, so it reads as a fountain pen).
+ *   clear  `trash-2` - a thin lid line overhanging the body, an arched handle,
+ *                      rounded body corners and TWO short bars inside (Ionicons'
+ *                      `trash-outline` tapers its body and draws three bars;
+ *                      Material's can has a thick filled lid band).
+ *
+ * The Ionicons bin stays for the photo viewer and the confirm sheets.
  */
 export const CARD_TOOL_GLYPH = 20;
-export const CARD_TOOL_TOUCH = 48;
-export const CARD_TOOL_GAP = 8;
+/**
+ * One button of the action strip: a 40 pt visible tile with a 2 pt hit slop on
+ * every side, so the TARGET is the 44 pt the guidelines ask for while five tiles
+ * and their divider still fit a narrow card.
+ */
+export const CARD_TOOL_SIZE = 40;
+export const CARD_TOOL_TOUCH = 44;
+export const CARD_TOOL_HIT_SLOP = (CARD_TOOL_TOUCH - CARD_TOOL_SIZE) / 2;
+export const CARD_TOOL_GAP = 6;
 
 export interface MealCardProps {
   meal: MealEntry;
@@ -78,6 +167,11 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   const [draftTitle, setDraftTitle] = useState(meal.title);
   const [draftIngredients, setDraftIngredients] = useState(meal.ingredients);
   const [draftTime, setDraftTime] = useState('');
+  /**
+   * Rows the notes box currently shows: 1 when it opens, 2 as soon as the laid-out
+   * text needs the second line (never more - `NOTES_ROWS` is the limit).
+   */
+  const [notesRows, setNotesRows] = useState(1);
   const [errorLine, setErrorLine] = useState<string | null>(null);
   /** True while this card's save is in flight (the Save button is disabled). */
   const [saving, setSaving] = useState(false);
@@ -119,14 +213,37 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     meal.status === MealStatus.Done ? 'checkmark' : meal.status === MealStatus.Missed ? 'close' : null;
   /** Fill + ink of the pill: the state colour on a wash of itself. */
   const pill = softPillColors(colors, meal.status);
+  /**
+   * The two state marks of the action strip. The button that matches the meal's
+   * CURRENT state is disabled (pressing it again changes nothing) but keeps a
+   * ring and a stronger wash, so the strip always shows which state the meal is in.
+   */
+  const missedSelected = meal.status === MealStatus.Missed;
+  const doneSelected = meal.status === MealStatus.Done;
   const effectiveTime =
     meal.plannedTime ?? (category.defaultTime !== '' ? category.defaultTime : null);
+
+  /**
+   * Chrome of the three editor fields: a soft fill on the card plus a subtle
+   * border, so each field reads as a field even where the wash is close to the
+   * card's own colour.
+   */
+  const fieldChrome = {
+    color: colors.text,
+    backgroundColor: colors.surfaceVariant,
+    borderColor: colors.border,
+  };
+  /** The editor's footer band: a barely-there tint of the accent, not a surface. */
+  const footerTint = tintAlpha(colors.accent, isDark ? '1A' : '0D');
 
   const startEdit = (): void => {
     setDraftTitle(meal.title);
     setDraftIngredients(meal.ingredients);
     setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
     setErrorLine(null);
+    // A fresh editor always opens with the SHALLOW notes box; the measured layout
+    // opens it up again when the stored draft really needs two rows.
+    setNotesRows(1);
     setEditing(true);
     props.onEditingChange?.(meal.id, true);
   };
@@ -139,6 +256,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       setDraftIngredients(meal.ingredients);
       setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
       setErrorLine(null);
+      setNotesRows(1);
       setEditing(true);
       props.onEditingChange?.(meal.id, true);
     }
@@ -150,6 +268,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     setDraftIngredients(meal.ingredients);
     setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
     setErrorLine(null);
+    setNotesRows(1);
     setEditing(false);
     props.onEditingChange?.(meal.id, false);
   };
@@ -258,7 +377,13 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
           pill and the counter dot carry the state */}
       <View style={styles.header}>
         <View style={[styles.iconTile, { backgroundColor: colors.surfaceVariant }]}>
-          <Text style={styles.icon}>{category.icon !== '' ? category.icon : '🍽️'}</Text>
+          {/* The mockup's line icon for this meal, in the theme's ink - never the
+              category's emoji, which every Android skin drew differently. */}
+          <MaterialIcon
+            name={mealCategoryGlyph(category.fixedCategoryKey)}
+            size={MEAL_GLYPH_SIZE}
+            color={colors.textSecondary}
+          />
         </View>
         <View style={styles.headerText}>
           <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
@@ -290,64 +415,96 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
 
       {editing ? (
         <View style={styles.editor}>
-          {/* Persistent labels: a filled field alone gave no clue which value was
-              the meal name, the notes or the planned time. */}
+          {/* Compact editor: no heading of its own (the card's header keeps the
+              category icon, the meal's name, the status pill and the rail), then
+              three labelled fields - the Description starting at ONE row - and one
+              lightly tinted footer holding the time and the two answers. The card's
+              action strip is NOT drawn while the editor is open. */}
           <View style={styles.fieldGroup}>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
               {t('Rn_FieldMealName')}
             </Text>
-            <TextInput
+            <MeasuredInput
               accessibilityLabel={t('Rn_FieldMealName')}
-              style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
               value={draftTitle}
               onChangeText={setDraftTitle}
+              rows={TITLE_ROWS}
+              paddingHorizontal={FIELD_PADDING}
+              textStyle={FIELD_TEXT}
+              inputStyle={[styles.input, styles.field, fieldChrome]}
               placeholder={t('Rn_FieldMealName')}
               placeholderTextColor={colors.textMuted}
-              maxLength={120}
+              // The caret lives at the end of the row, so it keeps its own room.
+              caretRoom={2}
             />
           </View>
           <View style={styles.fieldGroup}>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-              {t('Rn_FieldNotes')}
+              {t('Rn_FieldDescription')}
             </Text>
-            <TextInput
-              accessibilityLabel={t('Rn_FieldNotes')}
-              style={[styles.input, styles.field, styles.textarea, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
+            <MeasuredInput
+              accessibilityLabel={t('Rn_FieldDescription')}
               value={draftIngredients}
               onChangeText={setDraftIngredients}
-              placeholder={t('Rn_FieldNotes')}
+              rows={NOTES_ROWS}
+              // Shallow until the text needs the second line; the LIMIT stays
+              // `rows` (2), so the fit guard is exactly as strict as before.
+              onRows={(rows) => setNotesRows(Math.min(Math.max(1, rows), NOTES_ROWS))}
+              paddingHorizontal={FIELD_PADDING}
+              textStyle={FIELD_TEXT}
+              inputStyle={[
+                styles.input,
+                styles.field,
+                styles.textarea,
+                fieldChrome,
+                { height: notesRows > 1 ? NOTES_HEIGHT : FIELD_HEIGHT },
+              ]}
+              placeholder={t('Rn_FieldDescription')}
               placeholderTextColor={colors.textMuted}
               multiline
-              maxLength={2000}
+              numberOfLines={notesRows}
+              textAlignVertical="top"
             />
           </View>
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-              {t('Rn_FieldPlannedTime')}
-            </Text>
-            <TextInput
-              accessibilityLabel={t('Rn_FieldPlannedTime')}
-              style={[styles.input, styles.field, { color: colors.text, backgroundColor: colors.surfaceVariant }]}
-              value={draftTime}
-              onChangeText={setDraftTime}
-              placeholder="HH:MM"
-              placeholderTextColor={colors.textMuted}
-            />
-          </View>
-          <View style={styles.editorRow}>
-            <BarButton
-              label={t('Common_Cancel')}
-              onPress={cancelEdit}
-              disabled={saving}
-              colors={colors}
-            />
-            <BarButton
-              label={t('Common_Save')}
-              onPress={() => void saveEdit()}
-              disabled={saving}
-              colors={colors}
-              accent
-            />
+          {/* One compact, lightly tinted footer: the planned time on the LEFT,
+              Cancel / Save together on the RIGHT, labels bottom-aligned with the
+              answers. */}
+          <View style={[styles.editorFoot, { backgroundColor: footerTint }]}>
+            <View style={styles.fieldGroup}>
+              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+                {t('Rn_FieldPlannedTime')}
+              </Text>
+              <TextInput
+                accessibilityLabel={t('Rn_FieldPlannedTime')}
+                // Only as wide as "HH:MM" needs, so the field never stretches the
+                // row, and the mask below makes the value a time and nothing else.
+                style={[styles.input, styles.field, styles.timeInput, fieldChrome]}
+                value={draftTime}
+                onChangeText={(text) => setDraftTime(timeDraft(text))}
+                placeholder="HH:MM"
+                placeholderTextColor={colors.textMuted}
+                // iOS can type the colon (numbers-and-punctuation); Android's number
+                // pad cannot, so the mask inserts it automatically.
+                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
+                maxLength={TIME_MAX_LENGTH}
+                autoCorrect={false}
+              />
+            </View>
+            <View style={styles.editorRow}>
+              <BarButton
+                label={t('Common_Cancel')}
+                onPress={cancelEdit}
+                disabled={saving}
+                colors={colors}
+              />
+              <BarButton
+                label={t('Common_Save')}
+                onPress={() => void saveEdit()}
+                disabled={saving}
+                colors={colors}
+                accent
+              />
+            </View>
           </View>
         </View>
       ) : (
@@ -379,19 +536,54 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
               onOpen={props.onOpenPhoto}
             />
           </View>
-          <View style={styles.bottomRow}>
-            {/* One full-width line under the meal, exactly as the reference
-                card draws it: it closes the meal block and hands the space to
-                the tools. `cardDivider` is a deliberate step above the card
-                border, so the line is obvious on white AND on the dark card. */}
-            <View style={[styles.divider, { backgroundColor: colors.cardDivider }]} />
-            <View style={styles.actions}>
-              <View style={styles.actionRow}>
-                <IconButton label={t('Photo_Add')} icon="camera-outline" onPress={() => props.onAddPhoto(meal)} disabled={photos.length >= 3 || props.uploadingPhoto === true} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} colors={colors} />
-                <IconButton label={t('Common_Edit')} icon="create-outline" onPress={startEdit} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} colors={colors} />
-                <IconButton label={t('Meal_Clear')} icon="trash-outline" onPress={() => props.onClear(meal)} disabled={empty} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkMissed')} icon="close" onPress={() => void props.onMissed(meal)} disabled={future || meal.status === MealStatus.Missed || !canConfirm} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.missed} colors={colors} />
-                <IconButton label={t('Meal_MarkDone')} icon="checkmark" onPress={() => void props.onComplete(meal)} disabled={future || meal.status === MealStatus.Done || !canConfirm} size={CARD_TOOL_GLYPH} touch={CARD_TOOL_TOUCH} tint={colors.done} colors={colors} />
+          <View style={styles.stripHost}>
+            {/* The action strip: a full-bleed tinted footer under ONE clearer line,
+                with the edit tools grouped on the left and the two state marks on
+                the right. The line is the strip's own top border, so nothing has
+                to be spaced around it. */}
+            <View
+              style={[
+                styles.toolStrip,
+                { backgroundColor: colors.surfaceVariant, borderTopColor: colors.cardDivider },
+              ]}>
+              <View style={styles.toolGroup}>
+                <CardTool
+                  label={t('Photo_Add')}
+                  onPress={() => props.onAddPhoto(meal)}
+                  disabled={photos.length >= 3 || props.uploadingPhoto === true}
+                  fill={colors.cardFill}>
+                  <Icon name="camera-outline" size={CARD_TOOL_GLYPH} color={colors.text} />
+                </CardTool>
+                <CardTool label={t('Common_Edit')} onPress={startEdit} fill={colors.cardFill}>
+                  <FeatherIcon name="edit" size={CARD_TOOL_GLYPH} color={colors.text} />
+                </CardTool>
+                <CardTool
+                  label={t('Meal_Clear')}
+                  onPress={() => props.onClear(meal)}
+                  disabled={empty}
+                  fill={colors.cardFill}>
+                  <FeatherIcon name="trash-2" size={CARD_TOOL_GLYPH} color={colors.text} />
+                </CardTool>
+              </View>
+              {/* The one divider of the strip: "change the meal" | "decide it". */}
+              <View style={[styles.toolSeparator, { backgroundColor: colors.cardDivider }]} />
+              <View style={styles.markGroup}>
+                <CardTool
+                  label={t('Meal_MarkMissed')}
+                  onPress={() => void props.onMissed(meal)}
+                  disabled={future || missedSelected || !canConfirm}
+                  fill={stateWash(colors.missed, missedSelected, isDark)}
+                  ring={missedSelected ? colors.missed : undefined}>
+                  <Icon name="close" size={CARD_TOOL_GLYPH} color={colors.missed} />
+                </CardTool>
+                <CardTool
+                  label={t('Meal_MarkDone')}
+                  onPress={() => void props.onComplete(meal)}
+                  disabled={future || doneSelected || !canConfirm}
+                  fill={stateWash(colors.done, doneSelected, isDark)}
+                  ring={doneSelected ? colors.done : undefined}>
+                  <Icon name="checkmark" size={CARD_TOOL_GLYPH} color={colors.done} />
+                </CardTool>
               </View>
             </View>
           </View>
@@ -399,6 +591,60 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       )}
       </View>
     </View>
+  );
+}
+
+/**
+ * Fill of a state mark on the action strip: a wash of the state colour, a step
+ * stronger when the meal is IN that state - so the answer is visible even though
+ * the button is then disabled.
+ */
+function stateWash(color: string, selected: boolean, isDark: boolean): string {
+  if (selected) {
+    return tintAlpha(color, isDark ? '4D' : '33');
+  }
+  return tintAlpha(color, isDark ? '2E' : '1A');
+}
+
+/**
+ * One button of the card's action strip: a visible 40 pt tile carrying a 20 pt
+ * glyph, with a hit slop that brings the touch target to 44 pt. The edit tools sit
+ * on the raised card fill (they change the meal); the two state marks sit on a wash
+ * of their own colour (they decide it), and the one that matches the meal's current
+ * state keeps a ring - see `stateWash`.
+ */
+function CardTool(props: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  /** Background of the tile. */
+  fill: string;
+  /** 1 pt ring marking the meal's CURRENT state; undefined draws no ring. */
+  ring?: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const disabled = props.disabled === true;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled, selected: props.ring !== undefined }}
+      disabled={disabled}
+      onPress={props.onPress}
+      hitSlop={CARD_TOOL_HIT_SLOP}
+      style={({ pressed }) => [
+        styles.tool,
+        {
+          backgroundColor: props.fill,
+          borderColor: props.ring ?? 'transparent',
+          // A disabled tool fades - unless it is the meal's own state, which is an
+          // answer rather than a dead control.
+          opacity: disabled && props.ring === undefined ? 0.45 : 1,
+        },
+        pressed && styles.toolPressed,
+      ]}>
+      {props.children}
+    </Pressable>
   );
 }
 
@@ -443,7 +689,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: { fontSize: 21 },
   headerText: { flexShrink: 1 },
   headerTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
   headerTime: { fontSize: 11, lineHeight: 15 },
@@ -473,46 +718,96 @@ const styles = StyleSheet.create({
   /** Text (flexible left) beside the photo strip (right, 12 pt apart). */
   contentRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 12 },
   textColumn: { flex: 1, minWidth: 0 },
-  bottomRow: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    marginTop: 'auto',
-    /**
-     * The gap between the line and the tool row. It is deliberately the same
-     * value as `cardContent.paddingBottom` below the tools, so the icon row sits
-     * exactly halfway between the line and the card's bottom border.
-     */
-    rowGap: 6,
-  },
   /**
-   * The line that closes the meal block. 13 pt of air above it (the reference
-   * card's distance from the description) and a hairline of real ink - see the
-   * `colors.border` note at the call site.
+   * The strip's host: it pushes the tools to the card's bottom edge (so two cards
+   * in one row keep their strips level) and owns the 12 pt of air above the line -
+   * no separate divider element, no gap to tune around it.
    */
-  divider: { height: StyleSheet.hairlineWidth, marginTop: 13 },
+  stripHost: { marginTop: 'auto', paddingTop: 12 },
   /**
-   * The action row ends on the card's text edge: the negative margin pulls the
-   * 48 pt touch squares back by the glyph's own inset, so the last glyph lines
-   * up under the pill.
+   * The action strip itself: full-bleed (the negative margins cancel the card's
+   * content padding), on a tint of the card so it reads as the card's own toolbar,
+   * closed by ONE 1 pt line in `cardDivider` and rounded to the card's corners.
    */
-  actions: {
+  toolStrip: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    flexShrink: 0,
-    marginRight: -(CARD_TOOL_TOUCH - CARD_TOOL_GLYPH) / 2,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
     alignItems: 'center',
-    columnGap: CARD_TOOL_GAP,
+    justifyContent: 'space-between',
+    columnGap: 8,
+    marginLeft: -15,
+    marginRight: -13,
+    marginBottom: -6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderTopWidth: 1,
+    borderBottomLeftRadius: metrics.radius - 1,
+    borderBottomRightRadius: metrics.radius - 1,
   },
-  editor: { marginTop: 8, rowGap: 8 },
+  /** Left group: change the meal (photo, edit, clear). */
+  toolGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
+  /** The single divider between "change the meal" and "decide it". */
+  toolSeparator: { width: 1, alignSelf: 'stretch', marginVertical: 7 },
+  /** Right group: decide the meal (missed, done). */
+  markGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
+  /**
+   * One tool: a compact, VISIBLE tile (40 pt) with its glyph at 20 pt, and a 44 pt
+   * touch target from the hit slop - see `CardTool`.
+   */
+  tool: {
+    width: CARD_TOOL_SIZE,
+    height: CARD_TOOL_SIZE,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolPressed: { opacity: 0.6 },
+  /**
+   * The editor's own bottom padding tops up `cardContent.paddingBottom` (6) to
+   * the card's right padding (13), so the answers sit in the corner with the same
+   * air on the right and below them.
+   */
+  editor: { marginTop: 6, rowGap: 8, paddingBottom: 7 },
+  /** Last editor row: planned time left, Cancel / Save right, on a light band. */
+  editorFoot: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    columnGap: 8,
+    marginTop: 2,
+    padding: 8,
+    borderRadius: 12,
+  },
   /** One labelled editor field: a persistent caption above its input. */
   fieldGroup: { rowGap: 4 },
   fieldLabel: { fontSize: 11, lineHeight: 15, fontFamily: fonts.medium, letterSpacing: 0.2 },
-  field: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
-  textarea: { minHeight: 64, textAlignVertical: 'top' },
+  field: {
+    ...FIELD_TEXT,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: FIELD_PADDING,
+    paddingVertical: FIELD_PADDING_V,
+    // 44 pt: a compact chip that is also the app's minimum touch target.
+    height: FIELD_HEIGHT,
+    // Single-line fields centre their text in the taller box; the description
+    // overrides this with 'top' so a shallow box starts at its first line.
+    textAlignVertical: 'center',
+  },
+  /** Description: one row until the text needs two (the height is set per draft). */
+  textarea: { textAlignVertical: 'top' },
+  /**
+   * Planned time: only as wide as "HH:MM" needs - five characters (≈35 pt at
+   * 14 pt) plus 2 × 10 pt padding. The text is CENTERED, so whatever slack the
+   * proportional digits leave is split evenly: the field reads as a symmetrical
+   * chip instead of a left-aligned value with a gap on the right. `alignSelf`
+   * keeps it at the left edge of the row instead of stretching.
+   */
+  timeInput: {
+    width: 56,
+    paddingHorizontal: 8,
+    alignSelf: 'flex-start',
+    textAlign: 'center',
+  },
   input: { width: '100%' },
   editorRow: { flexDirection: 'row', justifyContent: 'flex-end', columnGap: metrics.controlGap },
 });

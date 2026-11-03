@@ -20,13 +20,16 @@ import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, cardShadow, themeColors } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
-import { dateInputProblem, isCalendarDate } from '../dates';
+import { dateDraft, dateInputProblem, isCalendarDate, DATE_INPUT_LENGTH } from '../dates';
 
 /**
  * Date prompt for "Apply to date" (spec 8.7). The Windows app shows a
  * CalendarDatePicker; the phone asks for the same `yyyy-MM-dd` value in a
  * small text prompt pre-filled with today, so no extra picker dependency is
- * needed. RN-only wording until the Windows resw gains the same key.
+ * needed. RN-only wording until the Windows resw gains the same key. The field
+ * is MASKED (`dateDraft` below in ../dates): only digits can be typed, the two
+ * dashes are inserted for the user, and no other character can reach the
+ * validator - see `_tests_/dateHandoff.test.ts`.
  */
 /**
  * Stored ISO timestamp -> "30 October 2026 · 20:43". A value that does not look
@@ -250,6 +253,14 @@ export function TemplatesScreen(): React.JSX.Element {
             // "Apply template", not a generic OK: the action writes five meals.
             confirmText: t('Rn_TemplateApplyConfirm'),
             today: { label: t('Calendar_Today'), value: formatDate(new Date()) },
+            // The target date is digits only: `dateDraft` drops every other
+            // character on the way in and inserts the two dashes itself, so
+            // Android's number pad (which has no dash key) can still type the
+            // whole date, and a letter, a slash or a second date can never be
+            // typed, pasted or reach the validator.
+            keyboardType: 'number-pad',
+            sanitize: dateDraft,
+            maxLength: DATE_INPUT_LENGTH,
             validate: dateError,
             onCancel: () => setApplying(null),
             onConfirm: (value) => {

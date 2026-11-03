@@ -3,12 +3,13 @@
 // The viewer used to open a "…" options sheet holding "Photo details" and
 // "Remove photo", so deleting a picture took three taps and the header carried
 // an element that is not an action. The design now puts a single delete glyph in
-// the header (the same place "…" had) and keeps exactly one guard: the
-// confirmation panel, which is the only thing that actually deletes.
+// the header (the same place "…" had) and keeps exactly one guard: the centered
+// confirmation card, which is the only thing that actually deletes.
 //
 // Pinned here: no "…" glyph, a `trash-outline` in the header, a press opens the
-// question WITHOUT deleting, "No" dismisses, and only the confirm button calls
-// `onRemove` with the photograph the viewer is showing.
+// question WITHOUT deleting, the card is the app's centered surface (not the old
+// bottom sheet with "No" / "Yes" rows) with the red bin badge and two pills, and
+// only "Delete photo" calls `onRemove` - with the photograph the viewer shows.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -18,6 +19,7 @@ import { SyncStatus } from '../src/domain/enums';
 import { MealPhoto } from '../src/domain/models';
 import { PhotoViewer } from '../src/ui/components/PhotoViewer';
 import { t } from '../src/ui/strings';
+import { lightColors, tintAlpha } from '../src/ui/theme';
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -98,7 +100,7 @@ describe('the photo viewer header', () => {
     expect(trash).toHaveLength(1);
   });
 
-  test('asks before deleting, and "No" changes nothing', () => {
+  test('asks before deleting, and Cancel changes nothing', () => {
     const removed: MealPhoto[] = [];
     const renderer = render((item) => removed.push(item));
 
@@ -108,40 +110,74 @@ describe('the photo viewer header', () => {
     // Nothing has been deleted yet: the question is on screen.
     expect(removed).toHaveLength(0);
     const question = renderer.root.findAll(
-      (node) => node.props?.children === t('Photo_RemoveTitle'),
+      (node) => node.props?.children === t('Rn_PhotoRemoveTitle'),
     );
     expect(question.length).toBeGreaterThan(0);
 
     act(() => {
-      buttons(renderer, t('Common_No'))[0].props.onPress();
+      buttons(renderer, t('Common_Cancel'))[0].props.onPress();
     });
     expect(removed).toHaveLength(0);
-    // The panel closed again, so only the header's trash is left.
+    // The card closed again, so only the header's trash is left.
     expect(buttons(renderer, t('Rn_ViewerRemove'))).toHaveLength(1);
   });
 
-  test('the confirm row deletes the photograph on screen, in the app sheet', () => {
+  test('the card is the centered one: red bin badge, body, two pills', () => {
+    const renderer = render(() => undefined);
+    act(() => {
+      buttons(renderer, t('Rn_ViewerRemove'))[0].props.onPress();
+    });
+
+    // The centered card, rounded on ALL corners - not the bottom sheet, whose
+    // top corners alone are rounded.
+    const card = renderer.root
+      .findAll((node) => node.props?.testID === 'viewer-confirm-card')
+      .pop();
+    expect(card).toBeDefined();
+    const cardStyle = StyleSheet.flatten(card?.props.style) as Record<string, unknown>;
+    expect(cardStyle.borderRadius).toBe(24);
+    expect(cardStyle.borderTopLeftRadius).toBeUndefined();
+
+    // Badge: the same bin the meal card's Clear tool draws, in a wash of the red.
+    const badge = renderer.root
+      .findAll(
+        (node) =>
+          StyleSheet.flatten(node.props?.style) !== undefined &&
+          (StyleSheet.flatten(node.props.style) as Record<string, unknown>).width === 56 &&
+          (StyleSheet.flatten(node.props.style) as Record<string, unknown>).borderRadius === 16,
+      )
+      .pop();
+    expect(badge).toBeDefined();
+    expect((StyleSheet.flatten(badge?.props.style) as Record<string, unknown>).backgroundColor).toBe(
+      tintAlpha(lightColors.missed, '1F'),
+    );
+    const bin = renderer.root.findAll(
+      (node) => node.props?.accessibilityLabel === 'feather:trash-2',
+    );
+    expect(bin.length).toBeGreaterThan(0);
+
+    // The body says what the answer does; there is no red "can't be undone" line.
+    expect(
+      renderer.root.findAll((node) => node.props?.children === t('Rn_PhotoRemoveBody')).length,
+    ).toBeGreaterThan(0);
+  });
+
+  test('"Delete photo" deletes the photograph on screen', () => {
     const removed: MealPhoto[] = [];
     const renderer = render((item) => removed.push(item));
 
     act(() => {
       buttons(renderer, t('Rn_ViewerRemove'))[0].props.onPress();
     });
-    // The question is the app's shared sheet, not a bespoke panel.
-    const card = renderer.root
-      .findAll((node) => node.props?.testID === 'viewer-confirm-card')
-      .pop();
-    expect(card).toBeDefined();
-    expect((StyleSheet.flatten(card?.props.style) as Record<string, unknown>).borderTopLeftRadius).toBe(20);
-
-    // Two "delete" targets now: the header glyph and the sheet's red row.
+    // Two "delete" targets now: the header glyph and the card's red pill.
     const candidates = buttons(renderer, t('Rn_ViewerRemove'));
     expect(candidates).toHaveLength(2);
-    const row = candidates[candidates.length - 1];
-    expect(styleOf(row).minHeight).toBe(52);
+    const pill = candidates[candidates.length - 1];
+    expect(styleOf(pill).backgroundColor).toBe(lightColors.error);
+    expect(styleOf(pill).flex).toBe(1);
 
     act(() => {
-      row.props.onPress();
+      pill.props.onPress();
     });
     expect(removed).toHaveLength(1);
     // `initialIndex` 1 - the second photograph, not the first or the last.

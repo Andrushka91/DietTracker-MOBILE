@@ -245,9 +245,9 @@ export interface SignInResult {
   /** Localized failure code (Auth_* / Account_*) when ok = false. */
   error?: string;
   /**
-   * True when the first synchronization could not finish inside the bar (the
-   * deadline or the connection ran out): the account is connected, the records
-   * keep arriving in the background and the regular triggers retry.
+   * True when the first synchronization was cut by the bar's deadline: the
+   * account is connected and the records keep arriving in the background. It is
+   * NOT set for a conflict (both versions are kept - nothing is missing).
    */
   pendingData?: boolean;
   downloaded?: number;
@@ -453,7 +453,14 @@ export async function signInWithGoogle(options: SignInOptions): Promise<SignInRe
   });
   return {
     ok: true,
-    pendingData: cycle.failed > 0 || cycle.conflicts > 0,
+    // No `pendingData` here: the dataset WAS applied, and the one thing that
+    // could still be missing is a document that could not be applied - the caller
+    // reads `failed` for that and words it as "N item(s) could not be loaded yet".
+    // A CONFLICT is not missing data at all (the local version is kept and the
+    // cloud version is preserved in the conflict log), so it never reports
+    // anything: a meal slot that existed on both sides - e.g. guest meals recorded
+    // before signing in - used to announce "the data could not be loaded" although
+    // everything had synced. `conflicts` is still returned for diagnostics.
     adopted,
     downloaded: cycle.downloaded,
     failed: cycle.failed,

@@ -14,13 +14,39 @@ import {
 } from 'react-native';
 
 import { fonts, metrics, type ThemeColors } from '../theme';
-import { Icon, type IconName } from './icons';
+import { FeatherIcon, Icon, MaterialIcon, type FeatherName, type IconName, type MaterialName } from './icons';
 import { t } from '../strings';
+
+/**
+ * The one glyph an icon button draws.
+ *
+ * Ionicons owns the actions; the two shapes it does not draw come from Feather -
+ * the one font that owns the mockup's shape - the same deliberate exception the
+ * tab bar makes for its calendar (see components/icons.tsx):
+ *
+ *   * the meal card's Edit tool is Feather `edit`: a square open at the TOP-RIGHT
+ *     with a plain pencil through the gap (Ionicons' `create-outline` adds a nib
+ *     and a collar, so it reads as a fountain pen, not a pencil),
+ *   * its Clear bin is Feather `trash-2`: a thin lid line overhanging the body, an
+ *     arched handle, rounded corners and TWO short bars (Ionicons' `trash-outline`
+ *     tapers its body and carries three; Material's can has a thick filled lid).
+ */
+export type IconButtonGlyph =
+  | {
+      /** Ionicons name - the app draws one icon family, never emoji. */
+      icon: IconName;
+    }
+  | {
+      /** MaterialCommunityIcons name - only for a shape Ionicons lacks. */
+      material: MaterialName;
+    }
+  | {
+      /** Feather name - only for a shape neither other family draws. */
+      feather: FeatherName;
+    };
 
 export function IconButton(props: {
   label: string;
-  /** Ionicons name - the app draws one icon family, never emoji. */
-  icon: IconName;
   onPress: () => void;
   disabled?: boolean;
   danger?: boolean;
@@ -31,7 +57,7 @@ export function IconButton(props: {
   /** Square size in points (default metrics.minTouch). Never below 44. */
   touch?: number;
   colors: ThemeColors;
-}): React.JSX.Element {
+} & IconButtonGlyph): React.JSX.Element {
   const tint = props.disabled === true
     ? props.colors.disabledText
     : props.tint ?? (props.danger === true ? props.colors.missed : props.colors.textSecondary);
@@ -58,7 +84,13 @@ export function IconButton(props: {
           opacity: props.disabled === true ? 0.45 : 1,
         },
       ]}>
-      <Icon name={props.icon} size={props.size ?? 20} color={tint} />
+      {'icon' in props ? (
+        <Icon name={props.icon} size={props.size ?? 20} color={tint} />
+      ) : 'material' in props ? (
+        <MaterialIcon name={props.material} size={props.size ?? 20} color={tint} />
+      ) : (
+        <FeatherIcon name={props.feather} size={props.size ?? 20} color={tint} />
+      )}
     </Pressable>
   );
 }

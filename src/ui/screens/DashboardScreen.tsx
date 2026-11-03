@@ -23,6 +23,7 @@ import { formatDate, addDays, forDay } from '../../domain/analytics';
 import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText } from '../../domain/rules/mealContentRules';
 import { MAX_PHOTOS_PER_MEAL } from '../../domain/rules/photoRules';
+import { MAX_TEMPLATE_NAME_LENGTH } from '../../domain/validation';
 import { ensureCategories } from '../../services/mealTracking';
 import { getPhotoCounts, getPhotosForMeal } from '../../data/repositories';
 import { addPhotoToMeal, removePhoto } from '../../data/photoStore';
@@ -41,16 +42,20 @@ import {
 import { useApp } from '../appContext';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { journalDelete } from '../../cloud/journal';
-import { ChoiceDialog, ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
+import { ChoiceDialog, ConfirmDialog, PromptDialog, type ConfirmRequest } from '../components/dialogs';
 import { MealCard } from '../components/MealCard';
 import { BarButton, IconButton, localizedCode } from '../components/buttons';
+import { DayProgress } from '../components/DayProgress';
+import { SaveAllRow } from '../components/SaveAllRow';
 import { PhotoViewer } from '../components/PhotoViewer';
 /** Short alias used throughout the JSX below. */
 const Bar = BarButton;
 
 import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../strings';
+import { clearMealRequest } from '../clearMealPrompt';
 import { dateHandoff, readDateHandoff } from '../dates';
-import { fonts, metrics, themeColors, type ThemeColors } from '../theme';
+import { TEMPLATE_NAME_START, templateNameProblem } from '../templateName';
+import { cardShadow, fonts, metrics, themeColors } from '../theme';
 import { Icon } from '../components/icons';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 
@@ -70,6 +75,12 @@ export function DashboardScreen({
   const [status, setStatus] = useState<string | null>(null);
   const [dialog, setDialog] = useState<ConfirmRequest | null>(null);
   /**
+   * Day whose "Save as template" name is being typed (the prompt keeps its own
+   * value). Kept apart from `dialog` because a name prompt can REFUSE an empty
+   * answer and stay open - `ConfirmRequest` always closes on confirm.
+   */
+  const [namePrompt, setNamePrompt] = useState<string | null>(null);
+  /**
    * Meal whose photograph source is being chosen. Kept apart from `dialog`
    * because the source question has three real answers and no confirmation
    * semantics: dismissing it must never start a picker.
@@ -83,6 +94,10 @@ export function DashboardScreen({
   const [editRequestId, setEditRequestId] = useState<string | null>(null);
   const [saveAllTick, setSaveAllTick] = useState(0);
   const [openEditors, setOpenEditors] = useState<string[]>([]);
+  /** True while the batch save runs (the row says "Saving…" and locks its button). */
+  const [saving, setSaving] = useState(false);
+  /** A batch that left cards open ("2 of 3 saved"); cleared by the next edit. */
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   /** Meal whose photograph is being prepared/saved right now (spinner tile). */
   const [uploadingMealId, setUploadingMealId] = useState<string | null>(null);
   const batchRef = useRef({ remaining: 0, saved: 0, total: 0 });
@@ -209,28 +224,31 @@ export function DashboardScreen({
   };
 
   const handleClear = (entry: MealEntry): void => {
-    setDialog({
-      title: t('Meal_ClearTitle'),
-      message: t('Meal_ClearMessage'),
-      cancelText: t('Common_No'),
-      confirmText: t('Common_Yes'),
-      destructive: true,
-      onCancel: () => setDialog(null),
-      onConfirm: async () => {
-        setDialog(null);
-        // The card's state can be older than the store, so the photographs are read again: every
-        // one of them is removed and its deletion is journaled. Without that a cleaned meal keeps
-        // an orphan picture behind - locally and in the cloud - that no screen can ever show again.
-        const attached = await getPhotosForMeal(entry.id);
-        for (const photo of attached) {
-          await removePhoto(photo);
-          await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
-        }
-        await clearMeal(entry, accountId, now);
-        app.notifyChanged();
-        await reload();
-      },
-    });
+    setDialog(
+      clearMealRequest({
+        entry,
+        // The card prints the category by its FIXED key, so the question names the
+        // meal exactly as the card does ("Lunch · 13:30").
+        categoryName:
+          categories.find((c) => c.fixedCategoryKey === entry.mealCategoryKey)?.name ?? null,
+        use12HourClock: app.use12HourClock,
+        onCancel: () => setDialog(null),
+        onConfirm: async () => {
+          setDialog(null);
+          // The card's state can be older than the store, so the photographs are read again: every
+          // one of them is removed and its deletion is journaled. Without that a cleaned meal keeps
+          // an orphan picture behind - locally and in the cloud - that no screen can ever show again.
+          const attached = await getPhotosForMeal(entry.id);
+          for (const photo of attached) {
+            await removePhoto(photo);
+            await journalDelete(accountId, EntityType.MealPhoto, photo.id, new Date().toISOString());
+          }
+          await clearMeal(entry, accountId, now);
+          app.notifyChanged();
+          await reload();
+        },
+      }),
+    );
   };
 
   /**
@@ -408,31 +426,37 @@ export function DashboardScreen({
     await reload();
   };
 
+  /**
+   * "Save as template" asks for a NAME and suggests nothing: the prompt opens
+   * EMPTY (it used to hold the day's date, which was also its placeholder) and
+   * an empty answer is refused there, so a template is never named after the day
+   * behind the user's back. Only a trimmed, non-empty name is saved.
+   */
   const handleSaveDayTemplate = (): void => {
-    setDialog({
-      title: t('Dashboard_SaveDayTemplate'),
-      message: t('Common_EnterName'),
-      cancelText: t('Common_Cancel'),
-      confirmText: t('Common_Save'),
-      // Default name is the day itself (spec 6.5 / yyyy-MM-dd).
-      inputDefaultValue: date,
-      onCancel: () => setDialog(null),
-      onConfirm: async (typedName) => {
-        setDialog(null);
-        if (app.profile === null) {
-          return;
-        }
-        const name = (typedName ?? '').trim() === '' ? date : (typedName ?? '').trim();
-        const result = await saveDayAsTemplate(app.profile.id, date, name, accountId);
-        setStatus(result.ok ? t('Template_Saved') : (result.validation?.failures[0]?.message ?? ''));
-        app.notifyChanged();
-      },
-    });
+    setNamePrompt(date);
   };
 
-  // "Save all" (spec 8.2): each open inline editor saves itself, then the
-  // caption reports saved/total. Cards failing validation keep their editor.
+  const templateNameError = (value: string): string | null =>
+    templateNameProblem(value) === 'blank' ? t('Rn_TemplateNameRequired') : null;
+
+  const saveDayTemplate = async (dayDate: string, typedName: string): Promise<void> => {
+    setNamePrompt(null);
+    if (app.profile === null) {
+      return;
+    }
+    const result = await saveDayAsTemplate(app.profile.id, dayDate, typedName.trim(), accountId);
+    setStatus(result.ok ? t('Template_Saved') : (result.validation?.failures[0]?.message ?? ''));
+    app.notifyChanged();
+  };
+
+  // "Save all" (spec 8.2): each open inline editor saves itself. The row under
+  // the day actions reports the state and owns the button; cards failing
+  // validation keep their editor.
   const handleEditingChange = useCallback((mealId: string, editing: boolean) => {
+    if (editing) {
+      // A new edit makes an old "2 of 3 saved" note stale.
+      setSaveNotice(null);
+    }
     setOpenEditors((current) => {
       if (editing) {
         return current.includes(mealId) ? current : [...current, mealId];
@@ -442,9 +466,11 @@ export function DashboardScreen({
   }, []);
 
   const handleSaveAll = (): void => {
-    if (openEditors.length === 0) {
+    if (openEditors.length === 0 || saving) {
       return;
     }
+    setSaving(true);
+    setSaveNotice(null);
     batchRef.current = { remaining: openEditors.length, saved: 0, total: openEditors.length };
     setSaveAllTick((tick) => tick + 1);
   };
@@ -459,10 +485,11 @@ export function DashboardScreen({
       batch.saved += 1;
     }
     if (batch.remaining === 0) {
-      setStatus(
-        batch.saved === batch.total
-          ? t('Dashboard_SaveAllDone')
-          : tFmt('Dashboard_SaveAllPartial', batch.saved, batch.total),
+      setSaving(false);
+      // A full success needs no sentence: the row's own state becomes "All
+      // changes saved". Only a partial one has to be named.
+      setSaveNotice(
+        batch.saved === batch.total ? null : tFmt('Rn_SaveAllPartialRow', batch.saved, batch.total),
       );
     }
   }, []);
@@ -497,6 +524,9 @@ export function DashboardScreen({
       // pressed twice on Android. 'handled' forwards every tap a child handles
       // and still dismisses the keyboard on a tap over empty space.
       keyboardShouldPersistTaps="handled"
+      // Dragging the list out from under the keyboard closes it, so the editor's
+      // fields and its Cancel / Save are never stuck behind the keyboard.
+      keyboardDismissMode="on-drag"
       contentContainerStyle={[
         styles.content,
         // The bar is docked BELOW the page (it is not an overlay any more), so
@@ -504,10 +534,11 @@ export function DashboardScreen({
         // keeps the page out of the bar's own height.
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
-      {/* header - part of the page, not a card: long date title,
-          Previous / Today / Next, progress line, three state counters, day
-          actions and the status caption (spec 8.2). */}
-      <View style={styles.header}>
+      {/* The day header: a CARD (the mockup) holding the date navigation, the
+          progress ring with its three counts, and the two day-wide actions. It
+          used to be part of the page with a linear bar; the ring says how much of
+          the day is done, missed and still open in one shape (spec 8.2). */}
+      <View style={[styles.header, cardShadow, { backgroundColor: colors.cardFill }]}>
         {/* Compact day navigation: previous day, the date centred between the
             arrows, next day. Tapping the date opens the Calendar tab to choose
             a day - there is deliberately no ellipsis and no extra chevron next
@@ -518,7 +549,6 @@ export function DashboardScreen({
             icon="chevron-back"
             onPress={() => setDate(addDays(date, -1))}
             size={22}
-            touch={48}
             colors={colors}
           />
           <Pressable
@@ -541,82 +571,42 @@ export function DashboardScreen({
               </Text>
             )}
           </Pressable>
-          {/* The only shortcut that leaves the day: on today it would do nothing,
-              so it appears beside the date only while another day is open. It
-              lives in the date row instead of a separate row of its own, which
-              keeps the header short without hiding the action. */}
-          {date !== todayDate && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('Rn_GoToToday')}
-              onPress={() => setDate(todayDate)}
-              hitSlop={8}
-              style={({ pressed }) => [styles.todayChip, { opacity: pressed ? 0.6 : 1 }]}>
-              <Text style={[styles.todayChipText, { color: colors.accent }]}>
-                {t('Calendar_Today')}
-              </Text>
-            </Pressable>
-          )}
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
             onPress={() => setDate(addDays(date, 1))}
             size={22}
-            touch={48}
             colors={colors}
           />
         </View>
-        {progress !== null && (
-          <>
-            {/* Progress: one slim bar and ONE completion summary ("3 of 5
-                completed"), so the number of planned slots is never left to the
-                bar's width. */}
-            <View style={styles.progressRow}>
-              <View style={[styles.track, { backgroundColor: colors.surfaceVariant }]}>
-                <View
-                  style={[
-                    styles.fill,
-                    { width: `${progress.percentage}%`, backgroundColor: colors.accent },
-                  ]}
-                />
-              </View>
-              <Text style={[styles.progressValue, { color: colors.textMuted }]}>
-                {tFmt('Rn_DayProgress', progress.completed, progress.totalSlots)}
-              </Text>
-            </View>
-            {/* Three equal columns: the counts line up under each other no
-                matter how wide the numbers get. */}
-            <View style={styles.counters}>
-              <Count
-                icon="checkmark"
-                label={t('Dashboard_CountDone')}
-                value={progress.completed}
-                color={colors.done}
-                colors={colors}
-              />
-              <Count
-                icon="close"
-                label={t('Dashboard_CountMissed')}
-                value={progress.missed}
-                color={colors.missed}
-                colors={colors}
-                glyphSize={MISSED_COUNTER_GLYPH_SIZE}
-              />
-              <Count
-                icon="time-outline"
-                label={t('Dashboard_CountPending')}
-                value={progress.pending}
-                color={colors.pending}
-                colors={colors}
-              />
-            </View>
-          </>
+        {/* The only shortcut that leaves the day. It rides UNDER the date, centred,
+            so the two arrows stay symmetric around the date the way the mockup
+            draws them; on today it would do nothing, so it is not drawn at all. */}
+        {date !== todayDate && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Rn_GoToToday')}
+            onPress={() => setDate(todayDate)}
+            hitSlop={8}
+            style={({ pressed }) => [styles.todayChip, { opacity: pressed ? 0.6 : 1 }]}>
+            <Text style={[styles.todayChipText, { color: colors.accent }]}>
+              {t('Calendar_Today')}
+            </Text>
+          </Pressable>
         )}
-        {/* Day-wide actions: two equal-width buttons, the same distance from the
-            counts above them whatever their labels say. */}
+        {progress !== null && (
+          <DayProgress
+            completed={progress.completed}
+            missed={progress.missed}
+            pending={progress.pending}
+            totalSlots={progress.totalSlots}
+            colors={colors}
+          />
+        )}
+        {/* Day-wide actions: two equal-width pills under the ring, each wearing
+            the state glyph in its state colour - the mockup's quiet answers. */}
         <View style={styles.dayActions}>
           <Bar
-            compact
             icon="close"
             iconColor={colors.missed}
             label={t('Rn_MarkAllMissed')}
@@ -626,7 +616,6 @@ export function DashboardScreen({
             style={styles.bulkButton}
           />
           <Bar
-            compact
             icon="checkmark"
             iconColor={colors.done}
             label={t('Rn_MarkAllDone')}
@@ -636,21 +625,17 @@ export function DashboardScreen({
             style={styles.bulkButton}
           />
         </View>
-        {/* Contextual batch save (spec 8.2): only an open inline editor can be
-            saved, so the button exists only while one is open - and it sits below
-            the two day-wide actions instead of pushing them around. */}
-        {openEditors.length > 0 && (
-          <View style={styles.actionsRow}>
-            <Bar
-              compact
-              label={t('Dashboard_SaveAll')}
-              onPress={handleSaveAll}
-              colors={colors}
-              accent
-              style={styles.saveAllButton}
-            />
-          </View>
-        )}
+        {/* The save row (spec 8.2): only rendered while an editor is open - the
+            component returns null on an idle day, so the row AND its hairline
+            disappear with the last editor closed. */}
+        <SaveAllRow
+          unsaved={openEditors.length}
+          saving={saving}
+          notice={saveNotice}
+          onSaveAll={handleSaveAll}
+          colors={colors}
+          isDark={app.isDark}
+        />
         {status !== null && <Text style={[styles.caption, { color: colors.textMuted }]}>{status}</Text>}
       </View>
 
@@ -758,6 +743,27 @@ export function DashboardScreen({
         />
       )}
       {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
+      {namePrompt !== null && (
+        <PromptDialog
+          isDark={app.isDark}
+          request={{
+            title: t('Dashboard_SaveDayTemplate'),
+            message: t('Common_EnterName'),
+            // EMPTY, not the day's date: the name is the user's own, and the
+            // prompt must not hint at a date either (the placeholder follows
+            // this value, so nothing is suggested in grey).
+            initialValue: TEMPLATE_NAME_START,
+            cancelText: t('Common_Cancel'),
+            confirmText: t('Common_Save'),
+            maxLength: MAX_TEMPLATE_NAME_LENGTH,
+            // Mandatory: an empty answer keeps the prompt open with the reason
+            // instead of saving the template under the day's date.
+            validate: templateNameError,
+            onCancel: () => setNamePrompt(null),
+            onConfirm: (typedName) => void saveDayTemplate(namePrompt, typedName),
+          }}
+        />
+      )}
       {viewer !== null && (
         <PhotoViewer
           photos={viewer.photos}
@@ -774,43 +780,6 @@ export function DashboardScreen({
   );
 }
 
-/**
- * Glyph size of a counter (Done / Missed / Pending). The mockup draws these
- * glyphs at the size of the action glyphs, not below them: 17 pt is the same
- * ink as the meal-card tools and one step above the 14 pt count, so "✓ 3 Done"
- * reads at a glance instead of the glyph hiding behind the number.
- */
-const COUNTER_GLYPH_SIZE = 17;
-
-/**
- * Ionicons' `close` fills less of its em box than `checkmark` does, so at the
- * same 17 pt the missed ✕ reads a size smaller than the ✓ beside it. Two extra
- * points make the three counters optically equal without changing the row.
- */
-const MISSED_COUNTER_GLYPH_SIZE = 19;
-
-function Count(props: {
-  label: string;
-  value: number;
-  icon: React.ComponentProps<typeof Icon>['name'];
-  color: string;
-  colors: ThemeColors;
-  /** Overrides `COUNTER_GLYPH_SIZE` for a glyph whose shape reads smaller. */
-  glyphSize?: number;
-}): React.JSX.Element {
-  return (
-    <View style={styles.counter}>
-      <Icon
-        name={props.icon}
-        size={props.glyphSize ?? COUNTER_GLYPH_SIZE}
-        color={props.color}
-      />
-      <Text style={[styles.counterValue, { color: props.colors.text }]}>{props.value}</Text>
-      <Text style={[styles.counterLabel, { color: props.colors.textMuted }]}>{props.label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   /**
@@ -821,60 +790,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: metrics.pagePadding,
     paddingTop: 6,
   },
-  header: { paddingBottom: 2 },
+  /**
+   * The day header is a CARD (the mockup): the same fill and lift as a meal card,
+   * so the day reads as one panel above the list instead of loose page chrome.
+   */
+  header: {
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 12,
+  },
   /**
    * The date is a two-line control, not the page title: a 18 pt weekday line and
-   * an 11 pt year caption. Both fit between two 48 pt arrows on a 360 pt phone
+   * an 11 pt year caption. Both fit between two 44 pt arrows on a 360 pt phone
    * and neither can wrap.
    */
   datePrimary: { fontSize: 18, fontFamily: fonts.medium, letterSpacing: -0.3, lineHeight: 24 },
   dateYear: { fontSize: 11, lineHeight: 15 },
   /** Previous / date / next on one row; the date fills the centre. */
   navRow: { flexDirection: 'row', alignItems: 'center', columnGap: metrics.controlGap },
-  dateButton: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  dateButton: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   /**
-   * "Today" rides in the date row while another day is open: a quiet accent
-   * label with a full 44 pt touch target, instead of a separate row of its own.
+   * "Today" rides UNDER the date while another day is open: a quiet accent label
+   * with a full 44 pt touch target, centred so the arrows stay symmetric.
    */
   todayChip: {
-    minHeight: 44,
+    alignSelf: 'center',
+    minHeight: 36,
     minWidth: 44,
-    paddingHorizontal: 4,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
   todayChipText: { fontSize: 12, fontFamily: fonts.medium },
-  /** Bar plus its completion summary, so the day can be read without the bar. */
-  progressRow: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 10 },
-  track: { flex: 1, height: 5, borderRadius: 20, overflow: 'hidden' },
-  fill: { height: 5, borderRadius: 20 },
-  progressValue: {
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-    flexShrink: 0,
-  },
-  /** Three equal columns: Done / Missed / Pending always line up. */
-  counters: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  counter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    columnGap: 5,
-  },
-  /** Tabular figures keep the three counts aligned as the numbers change. */
-  counterValue: { fontFamily: fonts.medium, fontSize: 14, fontVariant: ['tabular-nums'] },
-  counterLabel: { fontSize: 11 },
-  /** Room for the contextual Save all row under the two day-wide actions. */
-  actionsRow: { flexDirection: 'row', marginTop: 8 },
-  saveAllButton: { flex: 1, justifyContent: 'center' },
-  /** The two bulk actions share one equal-width row. */
+  /** The two bulk actions share one equal-width row of quiet pills. */
   dayActions: {
     flexDirection: 'row',
     columnGap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
-  bulkButton: { flex: 1, justifyContent: 'center', minHeight: 48 },
+  bulkButton: { flex: 1, justifyContent: 'center', minHeight: 44 },
   /** Day-level template action under the list: centred accent text, no chrome. */
   templateRow: { alignItems: 'center', marginTop: 12 },
   templateButton: {

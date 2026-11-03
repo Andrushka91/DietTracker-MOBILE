@@ -92,7 +92,7 @@ jest.mock('../src/cloud/driveProvider', () => ({
   getQuota: jest.fn(async () => ({ totalBytes: null, remainingBytes: null, usageBytes: null })),
 }));
 
-import { ProviderType, SyncStatus } from '../src/domain/enums';
+import { MealCategoryKey, ProviderType, SyncStatus } from '../src/domain/enums';
 import { closeDb, getDb } from '../src/data/database';
 import {
   getActiveAccount,
@@ -101,7 +101,7 @@ import {
   upsertProfile,
 } from '../src/data/repositories';
 import { defaultPreferences } from '../src/services/bootstrap';
-import { ensureCategories } from '../src/services/mealTracking';
+import { ensureCategories, loadDay, saveMeal } from '../src/services/mealTracking';
 import { signInWithGoogle, type AccountSyncProgress } from '../src/cloud/session';
 import * as drive from '../src/cloud/driveProvider';
 
@@ -259,3 +259,62 @@ describe('sign-in waits for the account data (spec 1.2 / 6.4)', () => {
   });
 });
 
+
+
+/**
+ * The FALSE "the data could not be loaded yet" report. The sign-in status was
+ * driven by `failed || conflicts`, and a conflict is not missing data: the pull
+ * keeps the local row and preserves the cloud version in the conflict log. A meal
+ * slot that exists on BOTH sides - the everyday case of guest meals recorded
+ * before signing in - produced the error although everything had synced.
+ */
+describe('a conflict is not missing data', () => {
+  test('a slot held on both sides is kept and reported as synced', async () => {
+    // The guest recorded this lunch before signing in; the account holds its own
+    // lunch for the same day and slot.
+    const day = await loadDay(PROFILE, DAY);
+    const lunch = day.meals.find((meal) => meal.mealCategoryKey === MealCategoryKey.Lunch);
+    expect(lunch).toBeDefined();
+    const saved = await saveMeal(
+      {
+        ...(lunch as NonNullable<typeof lunch>),
+        title: 'Ciorbă de legume',
+        ingredients: 'legume, smântână',
+      },
+      null,
+      true,
+    );
+    expect(saved.ok).toBe(true);
+
+    const result = await signInWithGoogle({ consentGranted: true });
+
+    expect(result.ok).toBe(true);
+    // The cloud copy could not take the occupied slot: both versions are kept.
+    expect(result.conflicts).toBe(1);
+    expect(result.downloaded).toBe(0);
+    // ...and that is NOT "the data could not be loaded": nothing is missing.
+    expect(result.pendingData).toBeUndefined();
+
+    // The device still shows the record the user actually has.
+    const meals = await getMealsForDate(PROFILE, DAY);
+    const local = meals.find((meal) => meal.mealCategoryKey === MealCategoryKey.Lunch);
+    expect(local?.title).toBe('Ciorbă de legume');
+  });
+
+  test('a document that really failed is the only "not loaded yet" case', async () => {
+    // The listed document is gone by the time it is fetched (deleted between the
+    // listing and the download): it stays behind the cursor and is retried, which
+    // is a genuine "not everything arrived" - but the account's other records are
+    // untouched and the session is complete.
+    downloadObject.mockImplementation(async () => null);
+
+    const result = await signInWithGoogle({ consentGranted: true });
+
+    expect(result.ok).toBe(true);
+    expect(result.failed).toBeGreaterThan(0);
+    expect(result.conflicts).toBe(0);
+    // No deadline: the bar finished, so `pendingData` stays unset and the screen
+    // reports the failed documents themselves (Rn_SignInPartial).
+    expect(result.pendingData).toBeUndefined();
+  });
+});

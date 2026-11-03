@@ -5,11 +5,13 @@
 //  5 Privacy and backup card         6 About card
 //  7 Floating status line (StatusCaption, rendered by the shell)
 //
-// Signing in and out runs behind the GLOBAL busy sheet (shell.tsx), not a button
+// Signing in runs behind the GLOBAL busy sheet (shell.tsx), not a button
 // spinner: the account change touches the whole database, so no other control of
-// the app may be pressed while it runs. A sign-out first uploads every pending
-// change behind a 0-100 % bar ("busyProgress") and cannot be skipped - the local
-// cache is the only copy of those records until then.
+// the app may be pressed while it runs. A SIGN-OUT is the one flow that keeps its
+// own popup: the centered account card stays open and turns into the progress
+// surface (spinner, stage sentence, 0-100 % bar from "busyProgress") - it first
+// uploads every pending change and cannot be skipped, because the local cache is
+// the only copy of those records until then.
 //
 // "Synchronize now" raises the SAME bottom sheet with a plain spinner and the
 // "Synchronizing your data…" sentence, so every wait in the app looks alike and
@@ -31,19 +33,13 @@ import { getDeviceId } from '../../services/deviceId';
 import { showSyncResultNotification } from '../../services/reminders';
 import { getQuota } from '../../cloud/driveProvider';
 import { useApp } from '../appContext';
+import { signOutCardCopy } from '../accountProgress';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { Icon } from '../components/icons';
 import { fonts, metrics, pageTitleStyle, themeColors, type ThemeColors } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
-
-/**
- * RN-only wording: the sign-out can no longer be forced past a failed sync, so
- * the refusal says what happens instead of offering a discard path.
- */
-const SIGN_OUT_UPLOAD_FAILED =
-  'Sign-out was cancelled so nothing is lost: those changes are only on this device. Check the connection and try again in a moment.';
 
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
@@ -61,6 +57,12 @@ export function SettingsScreen(): React.JSX.Element {
   const [integrityText, setIntegrityText] = useState<string | null>(null);
   /** True while the explicit "Synchronize now" cycle runs (shared busy sheet). */
   const [syncing, setSyncing] = useState(false);
+  /**
+   * True while the sign-out runs. The centered account card stays open and
+   * becomes the progress surface (its own spinner, sentence and 0-100 % bar)
+   * instead of a bottom busy sheet rising on top of it.
+   */
+  const [signingOut, setSigningOut] = useState(false);
 
   const refreshFacts = useCallback(async () => {
     setDbPath(await databasePath());
@@ -263,58 +265,83 @@ export function SettingsScreen(): React.JSX.Element {
     });
   };
 
+  /**
+   * The answer of the sign-out card - and the "Try again" answer of the failure
+   * card that replaces it when the upload cannot finish.
+   *
+   * The card does NOT close when the answer is pressed: it stays up and turns
+   * into its own progress surface (`busy`, fed by the frames of
+   * `app.busyProgress`), so the question and the wait are one popup. Nothing can
+   * be dismissed while it runs, and there is deliberately no "skip" route,
+   * because the local cache is the only copy of those changes until they reach
+   * the account.
+   */
+  const runSignOut = async (): Promise<void> => {
+    setSigningOut(true);
+    let result: Awaited<ReturnType<typeof app.signOut>>;
+    try {
+      result = await app.signOut(false);
+    } catch (error) {
+      // Never leave the user without feedback: the card goes back to its answers.
+      console.warn('[settings] sign-out failed', error);
+      setDialog(null);
+      app.showStatus(t('Auth_Unknown'));
+      return;
+    } finally {
+      setSigningOut(false);
+    }
+    if (!result.ok) {
+      // The upload could not be finished, so the sign-out was REFUSED and
+      // nothing was deleted. The card that promised the upload turns into the
+      // one that says it did not happen; "Try again" runs this same function
+      // again, and the neutral answer keeps the session (with the caption that
+      // says so). Deleting the cache instead would delete the only copy of the
+      // records, which is why no such answer exists.
+      console.warn('[settings] sign-out refused', result.error, result.pending);
+      setDialog({
+        layout: 'card',
+        title: t('Rn_SignOutFailedTitle'),
+        message: t('Rn_SignOutFailedMessage'),
+        note: {
+          icon: 'cloud-offline-outline',
+          title: t('Rn_SignOutFailedNoteTitle'),
+          message: t('Rn_SignOutFailedNoteMessage'),
+        },
+        cancelText: t('Common_Cancel'),
+        confirmText: t('Rn_SignOutRetry'),
+        destructive: true,
+        confirmIcon: 'log-out-outline',
+        onCancel: () => {
+          setDialog(null);
+          app.showStatus(t('Account_SignOutPendingKept'));
+        },
+        onConfirm: () => void runSignOut(),
+      });
+      // The sync row should now say "changes waiting to sync" rather than the
+      // stale "up to date" it was showing before the attempt. The card is
+      // already up, so a slow connection check cannot delay it.
+      await app.refreshSyncState().catch(() => undefined);
+      return;
+    }
+    // Signed out: the card can finally go.
+    setDialog(null);
+    app.showStatus(t('Account_SignedOut'));
+  };
+
   const confirmSignOut = (): void => {
     setDialog({
+      // The centered account card: the badge wears the log-out glyph (signing out
+      // ends the session, it deletes nothing), the caption promises the upload
+      // that happens FIRST, and the two answers sit side by side.
+      layout: 'card',
       title: t('Account_SignOutTitle'),
-      message: t('Account_SignOutMessage'),
-      cancelText: t('Common_No'),
-      confirmText: t('Common_Yes'),
+      message: t('Rn_SignOutMessage'),
+      cancelText: t('Common_Cancel'),
+      confirmText: t('Rn_SignOutConfirm'),
       destructive: true,
+      confirmIcon: 'log-out-outline',
       onCancel: () => setDialog(null),
-      onConfirm: async () => {
-        setDialog(null);
-        // The global overlay blocks the whole screen (every other button, the
-        // tab bar and the back key) until the account change is done. Sign-out
-        // first uploads every pending change behind a 0-100 % bar - there is no
-        // "skip" route, because the local cache is the only copy until then.
-        app.setBusy('signingOut');
-        let result: Awaited<ReturnType<typeof app.signOut>>;
-        try {
-          result = await app.signOut(false);
-        } catch (error) {
-          // Never leave the user without feedback (the overlay is already gone).
-          console.warn('[settings] sign-out failed', error);
-          app.showStatus(t('Auth_Unknown'));
-          return;
-        } finally {
-          app.setBusy(null);
-        }
-        if (!result.ok) {
-          // The upload could not be finished, so the sign-out was REFUSED and
-          // nothing was deleted: one acknowledgement, no force/discard option
-          // (deleting the cache would delete the only copy of those changes).
-          const detail =
-            result.error !== undefined && result.error.startsWith('Auth_')
-              ? t(result.error)
-              : tFmt('Account_SignOutPendingDetail', String(result.pending ?? 0)).replace(
-                  ' Sign out anyway?',
-                  '.',
-                );
-          setDialog({
-            title: t('Account_SignOutPendingTitle'),
-            message: `${detail}\n\n${SIGN_OUT_UPLOAD_FAILED}`,
-            confirmText: t('Common_Ok'),
-            singleAction: true,
-            onCancel: () => setDialog(null),
-            onConfirm: () => {
-              setDialog(null);
-              app.showStatus(t('Account_SignOutPendingKept'));
-            },
-          });
-          return;
-        }
-        app.showStatus(t('Account_SignedOut'));
-      },
+      onConfirm: () => void runSignOut(),
     });
   };
 
@@ -342,7 +369,17 @@ export function SettingsScreen(): React.JSX.Element {
         // the cloud (offline / provider down). The regular triggers retry it.
         app.showStatus(t(result.error));
       } else if (result.pendingData === true) {
-        app.showStatus(t('Account_CloudDataPending'));
+        // The bar's deadline fired while the dataset was still arriving: the
+        // account IS connected and the background cycle is finishing the job, so
+        // this is a status, not an error. ("Could not be loaded yet, use
+        // Synchronize now" asked the user to do what the app was already doing.)
+        app.showStatus(t('Rn_SignInStillArriving'));
+      } else if ((result.failed ?? 0) > 0) {
+        // A few documents could not be applied in the first pass (they stay
+        // queued and are retried): say which, instead of claiming the whole
+        // dataset is missing. A conflict never lands here - both versions are
+        // kept locally, so nothing is missing.
+        app.showStatus(tFmt('Rn_SignInPartial', result.failed ?? 0));
       } else if ((result.downloaded ?? 0) > 0) {
         app.showStatus(tFmt('Account_CloudDataLoaded', result.downloaded ?? 0));
       } else {
@@ -679,15 +716,31 @@ export function SettingsScreen(): React.JSX.Element {
         />
       </View>
 
-      {dialog !== null && <ConfirmDialog request={dialog} isDark={app.isDark} />}
+      {dialog !== null && (
+        <ConfirmDialog
+          request={
+            // While the upload runs the SAME card reports it: the title and the
+            // caption say what the wait is for and the answers give way to the
+            // bar, the counted line and "Please keep the app open.".
+            signingOut
+              ? {
+                  ...dialog,
+                  title: t('Rn_SignOutSyncingTitle'),
+                  message: t('Rn_SignOutSyncingMessage'),
+                  busy: signOutCardCopy(app.busyProgress),
+                }
+              : dialog
+          }
+          isDark={app.isDark}
+        />
+      )}
     </ScrollView>
   );
 }
 
-
-
 /**
- * One title + one detail for the cloud-sync row, derived from the engine state.
+ * One cloud-sync line (title + detail) for the Settings row, derived from the
+ * engine state.
  * The detail never claims more than the engine knows: an offline device says the
  * data is saved locally, a failed sync says it failed, and a guest is told to sign
  * in instead of being shown an empty "never synchronized" line.

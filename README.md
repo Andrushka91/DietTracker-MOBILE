@@ -175,6 +175,12 @@ Nothing requires a global install — `expo`, `eas-cli`, `react-native`,
 > uses ships inside Expo Go (see the next section). `npm run dev` /
 > `npm run ios` are **local** builds; Android needs the Android SDK (this
 > machine has it, see *Local Android emulator* below), iOS needs Xcode.
+>
+> **`react-native-svg` (the progress ring).** The day header's ring is drawn with
+> real vector arcs, so the app now depends on `react-native-svg@15.16.0` (the
+> Expo-pinned version). Expo Go already contains it, but a **dev client / APK
+> built before this change must be rebuilt** (`npm run dev` or
+> `npm run emulator:apk`) or the ring will fail to load its native view.
 
 ## Design system (tokens, icons, screenshots)
 
@@ -184,14 +190,15 @@ visual change never touches logic, navigation or data:
 | What | Where |
 |---|---|
 | Colours (light + dark), state colours, radii, spacing, text scale, elevation | `src/ui/theme.ts` (`themeColors`, `metrics`, `typeScale`, `pageTitleStyle`, `cardShadow`, `raisedShadow`) |
-| Icons — one family for tabs, actions, pills and chrome | `src/ui/components/icons.tsx` (`Ionicons` from the Expo-pinned `@expo/vector-icons`) |
+| Icons — one family for tabs, actions, pills and chrome | `src/ui/components/icons.tsx` (`Ionicons` from the Expo-pinned `@expo/vector-icons`, plus the documented `Feather` / `MaterialCommunityIcons` exceptions: three tab glyphs and the meal card's pencil and bin) |
 | Dialogs — one bottom-sheet surface (grabber, title + X, icon rows) | `src/ui/components/dialogs.tsx` (`DialogSheet`, `SheetRow`) |
 
 Rules that keep it coherent: cards are always lighter than the page and lifted by
 `cardShadow`; the accent (indigo) is the only interactive colour; the three state
 colours mean the same everywhere and are always repeated in words, never colour
-alone. Meal-category emoji come from `MealCategory.Icon` in SQLite and are **data**,
-not design.
+alone. `MealCategory.Icon` in SQLite stays **data** (stored, synced, and what the
+Windows app draws), but the phone no longer paints it: each of the five fixed
+meals wears a line icon from `src/ui/mealGlyphs.ts` instead of an emoji.
 
 The visual refresh is documented (and reversible) on the
 `redesign/visual-refresh-20261101` branch (first pass) and the
@@ -201,13 +208,14 @@ targets, large-text fixes). The rollback point is the
 `backup/pre-redesign-20261101-2126` tag and its GitHub release.
 
 Round 3 (`redesign/ui-r3-20261102`) builds on that: a compact two-line day header
-with one completion summary and evenly aligned counts, photos as one horizontal
-row of 48 pt thumbnails beside the meal text, a full-screen viewer with paging,
-pinch/double-tap zoom and a confirmed remove action, a month board with five
-meal-state marks per recorded day, a statistics page with ONE primary measure
-(Done / all planned slots) plus an interactive breakdown, and a grouped Settings
-page. Its rollback point is the `backup/pre-redesign-r3-20261102-1244` tag and its
-GitHub release.
+card with a three-colour progress ring and the three counts beside it, photos as
+one horizontal row of 48 pt thumbnails beside the meal text, a full-screen viewer
+with paging, pinch/double-tap zoom and a confirmed remove action, a compact month
+board (filled selection, a thin "today" outline, five meal-state dots per recorded
+day and a "5 dots = 5 meals" key) with a grouped agenda under it, a statistics page
+with ONE primary measure (Done / all planned slots) plus an interactive breakdown,
+and a grouped Settings page. Its rollback point is the
+`backup/pre-redesign-r3-20261102-1244` tag and its GitHub release.
 
 The design rounds' screenshot archives were removed from the repository to keep
 it lean; the code, the token table above and the tests are the record of the
@@ -663,6 +671,21 @@ way in and the sign-out sentences on the way out. A 90 s budget bounds the wait:
 when the connection dies the bar closes, the account stays connected and the
 regular triggers keep pulling (`__tests__/signInBarrier.test.ts`).
 
+**The sign-in status only claims what is actually missing.** `SignInResult.pendingData`
+used to be `failed > 0 || conflicts > 0`, so a sign-in that recorded a *conflict* -
+which is not missing data at all: the pull keeps the local row and preserves the
+cloud version in the conflict log - announced *"Signed in, but the data could not be
+loaded yet. Use Synchronize now once you are online."* although everything had
+synced. The everyday trigger is a meal slot that exists on BOTH sides (a guest meal
+recorded before signing in, or the Windows app editing the same lunch). The screen
+now says *"Signed in. The rest of your data is still arriving and will appear in a
+moment."* when the 90 s budget cut the bar, *"Signed in. {0} item(s) could not be
+loaded yet; the app will keep trying."* when documents genuinely failed and stayed
+queued, and the "N record(s) synchronized" / "Signed in." lines otherwise.
+`pendingData` now means only "the bar's deadline fired"; documents that really could
+not be applied are reported from `failed`, and the conflict case is pinned by
+`__tests__/signInBarrier.test.ts`.
+
 **The bulk DONE / MISSED actions respect the same rule as the cards.** The skip
 test was `hasUserContent`, which counts a state, a photograph or a planned time -
 so an untouched card that a previous "Mark all MISSED" had turned red (or one
@@ -831,6 +854,27 @@ npm start
     today instead of a native date picker (no extra picker dependency), and the
     bottom-tab icons are the equivalent emoji because Android has no Segoe
     Fluent glyph font — both keep the Windows interaction and labelling.
+    The prompt's field is **masked** by `dateDraft` (`src/ui/dates.ts`): only
+    digits can be typed (`keyboardType: 'number-pad'`) and the two dashes are
+    inserted for the user as the digits arrive, so `20261102` becomes
+    `2026-11-02`; a letter, a space, a slash or a second date pasted in is
+    dropped before the value is stored, and the text can never exceed the ten
+    characters of one day. Nothing invalid can therefore reach the validator or
+    the template applier (`__tests__/dateHandoff.test.ts`,
+    `__tests__/dialogs.test.tsx`).
+  * “Save day as template” asks for a **name** and suggests nothing: the field
+    opens EMPTY - it used to open with the day's `yyyy-MM-dd`, and that same text
+    was its placeholder - and an empty answer is refused in place with
+    *“Enter a name for the template.”*, so a day's date can no longer become a
+    template name behind the user's back (the old fallback silently saved the
+    day's date as the name when the field was left empty). A date TYPED on
+    purpose is still accepted: it is the user's choice.
+    The rule and the empty default live in `src/ui/templateName.ts`
+    (`TEMPLATE_NAME_START`, `templateNameProblem`), the prompt is `PromptDialog`
+    - the only dialog that can refuse a value and stay open - and `ConfirmDialog`
+    no longer carries a text field at all. Pinned by
+    `__tests__/templateNamePrompt.test.tsx`, including the dashboard's wiring
+    (no `inputDefaultValue`, no date fallback, max 100 characters).
   * The card state bar sits on the **top** edge of the card: the Windows card draws the
     same 4 px bar along its bottom border (`BorderThickness="1,1,1,4"`). On the phone the
     state colour is the card's **top border** (`borderTopWidth: metrics.stateBar` in
@@ -845,11 +889,21 @@ npm start
     are borderless and float on a soft shadow (`cardShadow` in `src/ui/theme.ts`), the
     typography follows the iOS text styles (`typeScale`: largeTitle 34 → caption2 11),
     buttons are capsules, the dialogs are iOS alerts (hairline action strip) and the
-    calendar paints soft state washes over **square** day badges - today outlines its
-    badge in the accent blue and the selected day fills it, so the silhouette never
-    turns into a circle and never contradicts the square cells around it. The five
-    state marks under the grid spread across the full width instead of clustering in
-    the centre. All logic, data flow and wording stay identical.
+    calendar paints soft state washes over **round** day badges - **today** is the
+    **hollow accent ring** (the ordinary day ink inside) and the **selected** day is the
+    **accent fill**, so the badge stays a circle on every selection while the cells keep
+    their square grid, and the "Today" key under the grid repeats that same ring. The
+    today marker follows the clock: the date is re-read whenever the tab comes to the
+    front, so a calendar left open overnight cannot keep the ring on yesterday.
+    BOTH marks are child Views that only exist in that state, never a
+    background/border on the badge itself: Android drops a View's corner radius when
+    a background or border is added to a view that is already on screen, and browsing
+    months re-uses the cell views, so the filled day turned into a square (and the
+    outlined one into a square ring) as soon as the month changed. The key block is
+    separated from the grid by the meal card's own line (`cardDivider`, one step above
+    the hairline), and the five state
+    marks under the grid spread across the full width instead of clustering in the
+    centre. All logic, data flow and wording stay identical.
   * Cards and counters use the exact iOS state colours of the palette in `src/ui/theme.ts`
     (done `#34C759`, missed `#FF3B30`, pending `#8E8E93`; calendar cells `#E5E5EA`), and
     `MealCategory.Color` is not painted as a card fill — the card keeps its neutral
@@ -869,12 +923,18 @@ npm start
     text and every button label (no bold top buttons), the semibold cut only the
     headings, card titles, counters and status pills; sizes and weights follow the
     iOS text styles from `typeScale`.
-  * The calendar's day cells show the day number, the photo marker and the **n/5**
-    count instead of the miniature meal cards: a phone cell is about 44 pt wide, so
+  * The calendar's day cells show the day number and their **five meal-slot marks**
+    (done green, missed red, pending gray - the exact three inks of the key under the
+    grid) instead of the miniature meal cards: a phone cell is about 44 pt wide, so
     the five meals of the selected day are listed as full rows under the grid (title,
-    category, time, photo count, status pill) - same information, legible size. Those
-    rows keep the dashboard card's 9 pt inset inside their 2 pt state border, so the
-    slot emoji has air around it instead of sitting on the stroke.
+    category, time, photo count, status pill) - same information, legible size. The
+    first and last week of every month belong to the neighbouring months; they keep
+    their real day numbers (in the quieter ink) **and** their five marks, because one
+    helper (`monthGrid` in `src/ui/calendarGrid.ts`) decides both the query range and
+    the cells - the page used to query the month only while it drew whole weeks, so
+    the boundary days were the one part of the diary with no marks and a faded
+    number. Those rows keep the dashboard card's 9 pt inset inside their 2 pt state
+    border, so the slot emoji has air around it instead of sitting on the stroke.
   * The calendar header is one symmetrical block: the ‹ / › month arrows are pinned to
     the panel's two edges (so the left arrow sits exactly above the left edge of the
     grid and the right one above the right edge of the action row) with the month label
@@ -894,24 +954,95 @@ npm start
     *Camera* / *Gallery*
     (`expo-image-picker.launchCameraAsync`, permission asked on first use), so a
     photograph can be taken while the meal is on the table.
+  * **The inline editor is compact and bounded.** It has NO heading of its own -
+    the card's header keeps the category icon, the meal's name, the status pill and
+    the coloured rail, so "Edit meal" would only repeat it - and every field is the
+    reference's **44 pt chip** (which is also the app's minimum touch target), with
+    a soft fill and a **subtle 1 pt border**: the **Meal name** on a single line,
+    the **Description** starting at ONE row, and the **Planned time** as a 56 pt
+    chip. The visible Description label is the entry's `ingredients` column, mapped
+    exactly as before. The box grows to its second row only when the laid-out text
+    needs it (52 pt = 2 × 18 pt lines + 2 × 8 pt padding), so an empty card is two
+    rows shorter than before. Their limits are **measured from the real layout, not
+    counted**: `MeasuredInput` (`src/ui/components/MeasuredInput.tsx`) lays the
+    current text out in an invisible copy of the field - same width, same
+    typography - reads the real line count from `onTextLayout`, reports it
+    (`onRows`) so the box can open up, and rolls back a change that would need one
+    row too many. The box can therefore never overflow and always uses the full
+    width (no conservative character estimate, and "iiii" and "WWWW" are treated
+    for what they are); a deletion is never rolled back, so a value saved by an
+    older, wider editor opens untouched and can be edited down but never grows past
+    two rows.
+    The **planned time** accepts digits and one colon only: `keyboardType` is
+    `numbers-and-punctuation` on iOS (where the colon key exists) and `number-pad`
+    on Android, where `timeDraft` inserts the separator itself (`1230` → `12:30`,
+    `930` → `9:30`, `123` → `12:3`), all of it capped at five characters. **The
+    time and Cancel / Save share ONE compact footer** - a lightly tinted, rounded
+    band (8 pt padding) with the labels bottom-aligned with the answers - and the
+    editor's own bottom padding tops the card's 6 pt up to its 13 pt right padding.
+    The field groups sit 8 pt apart and the card's own padding (12/15/13) is the
+    only other air, so the whole editor is tight. While it is open the card's
+    **action strip is not drawn at all** (the editor replaces it, it does not stack
+    above it), and the dashboard's list handles the keyboard
+    (`keyboardShouldPersistTaps="handled"` so a tap on Save is not swallowed by the
+    dismiss, `keyboardDismissMode="on-drag"` to get it out of the way)
+    (`__tests__/mealCardEditor.test.tsx`).
   * **Every wait is the same bottom sheet.** The app raises ONE "please wait"
     surface - `LoadingSheet`/`LoadingDialog` in `src/ui/components/dialogs.tsx`, the
     same grabber, rounded top edge and surface fill as every question the app asks,
     driven by `busy`/`busyProgress` in `src/ui/appContext.tsx` and rendered by
     `BusyOverlay` in `src/ui/components/shell.tsx`. "Synchronize now" and saving a
-    photograph use its plain spinner row; a stage that can count documents fills a
-    determinate bar from 0 % to 100 % instead. There is no dismiss control and the
-    back key is ignored, so the page behind stays untouched until the work settles.
-  * **Signing out cannot skip the upload.** The account card opens the iOS-style
-    confirmation, then that same bottom sheet shows a determinate bar from 0 % to
-    100 % (`busyProgress`): every settled outbox document moves it, the
+    photograph use its plain spinner row; **signing in** uses the account *sync
+    sheet* (`subtitle`): the mockup's left-aligned headline **"Syncing your data"**,
+    the current step underneath ("Downloading your saved meals and photos"),
+    a **10 pt determinate bar**, the counted line in the primary ink ("66 of 73 items
+    received", or "... sent" while the guest records are adopted) and the hint
+    "Keep the app open until syncing finishes." - built by `signInSheetCopy` in
+    `src/ui/accountProgress.ts`, so the copy matches the frames the engine reports.
+    There is no dismiss control and the back key is ignored, so the page behind stays
+    untouched until the work settles.
+  * **Signing out cannot skip the upload.** The account card opens the centered
+    *account card* (`ConfirmRequest.layout: 'card'`) - the one dialog that does not
+    rise from the bottom edge: a raised card in the middle of the window with a
+    quiet badge holding the log-out glyph (signing out ends the session, it deletes
+    nothing), a centered **"Sign out?"** title, the promise *"We'll sync your latest
+    changes before signing you out."*, and **Cancel** / **Sync & sign out** side by
+    side, the decision in the red fill. There is no close X: the neutral answer and
+    the scrim are the two ways out. Then **that same card stays open and becomes the
+    progress surface** (the round-3 mockup): the title and caption change to
+    **"Syncing before sign-out"** / *"You'll be signed out when syncing finishes."*,
+    the two answers give way to the 10 pt determinate bar, the counted line in the
+    primary ink (**"1 of 3 changes synced"**, singular when one change is queued) and
+    *"Please keep the app open."* - no spinner, because the bar is the report
+    (`signOutCardCopy` in `src/ui/accountProgress.ts` builds it from the
+    `busyProgress` frames). Neither the scrim nor Android Back can dismiss the card
+    while it runs. Every settled
+    outbox document moves the bar, the
     failed-operation backoff window is ignored (`ignoreBackoff` in
     `src/cloud/syncEngine.ts`) and up to four deadline-bounded attempts ride out a
-    short network drop. There is no "sign out anyway"/discard button any more - if
-    the outbox still cannot be emptied, the sign-out is **refused** with one
-    acknowledgement dialog and the cache stays untouched, because those changes are
-    only on this device. (The `discardChanges` flag of `signOutGoogle` survives for
-    the unit test only.)
+    short network drop. There is no "sign out anyway"/discard answer any more - if
+    the outbox still cannot be emptied, the sign-out is **refused** and the same
+    card turns into **"Couldn't sync"** ("Your latest changes haven't synced yet.")
+    with a warning note - the cloud-offline glyph, a bold *Sync failed* caption and
+    *"Check your connection and try again. You're still signed in."* - and the
+    answers **Cancel** / **Try again**, where Try again re-runs the whole sign-out.
+    The cache stays untouched, because those changes are only on this device. (The
+    `discardChanges` flag of `signOutGoogle` survives for the unit test only.)
+  * **Clearing a meal asks in the compact card, not a sheet.** The Clear tool on a
+    meal card opens the same centered surface (`layout: 'card'`) with the mockup's
+    anatomy: a red-washed badge holding the SAME bin as the tool (Feather
+    `trash-2`), a bold centered **"Clear this meal?"**, the meal it is about
+    (**"Lunch · 13:30"** - the category as the card prints it, then the planned
+    time in the user's 12/24-hour preference, and just the category when the meal
+    has no time), the paragraph *"This clears the meal's details and status, and
+    deletes all attached photos."*, ONE bold red line *"This can't be undone."*,
+    and **Cancel** / **Clear meal** side by side with the decision in the red
+    fill. The scrim and Cancel are the two ways out; the old "No" / "Yes" rows and
+    the single long paragraph are gone. `ConfirmRequest` gained three card-only
+    fields for it - `body`, `warning` and `badge` (Ionicons, or Feather for the
+    shapes only it draws) - and the request is built ONCE in
+    `src/ui/clearMealPrompt.ts`, which also owns the "category · time" caption
+    (`__tests__/clearMealCard.test.tsx`).
   * The **launcher icon is the Windows app icon** (the blue tile with the white disc
     and the green fork/knife): `scripts/make-icons.py` derives every Android asset
     from `WINDOWS_APPS/src/DietTracker.App/Assets/DietTracker.ico` - legacy
@@ -922,7 +1053,7 @@ npm start
     in a tinted chip and its caption is bold, while all five glyphs stay the same
     quiet outline - `layers-outline` and `settings-outline` from Ionicons, the
     house and the stats bars from Feather, the calendar from
-    MaterialCommunityIcons. Those three are the UI's only non-Ionicons glyphs,
+    MaterialCommunityIcons. Those three are the bar's only non-Ionicons glyphs,
     each picked because Ionicons has no twin of the mockup's shape: its house
     carries an eaved roof and a chimney stub, its calendars are heavier with a
     thick header band and larger dots, and its bar charts carry a left/bottom
@@ -939,6 +1070,102 @@ npm start
     height/inset/clearance in `src/ui/tabBar.ts` are unchanged.
     `__tests__/tabBarAppearance.test.tsx` pins the chip geometry and fill, the
     bold active caption, the five outline glyphs and the five captions.
+  * Each meal card's **header icon** is the mockup's line drawing, one per fixed
+    meal, from `src/ui/mealGlyphs.ts` (all MaterialCommunityIcons): breakfast a
+    bowl with a spoon (`bowl-mix-outline`), morning snack an apple
+    (`food-apple-outline`), lunch a fork and a knife (`silverware-fork-knife`),
+    afternoon snack a bitten cookie (`cookie-outline`) and dinner a serving cloche
+    (`room-service-outline`). It is drawn at 22 pt in the card's existing 36 pt
+    tile, in the theme's secondary ink, so it follows light/dark like every other
+    glyph. The emoji in `MealCategory.Icon` is **data** - still stored, still
+    synced, still what the Windows app shows - but the phone no longer draws it:
+    an emoji renders differently on every Android skin, ignores the theme ink and
+    cannot be aligned with a number. Each glyph NAME is checked against the
+    bundled font's own table by `__tests__/mealGlyphs.test.tsx`, because a mistyped
+    glyph is simply invisible.
+  * The meal card's **Clear** and **Edit** tools are the two action glyphs outside
+    Ionicons, both taken from Feather - the font that owns the mockup's stroke for
+    stroke. Clear is `trash-2`: a thin lid line overhanging the body, an arched
+    handle, rounded body corners and TWO short bars inside (Ionicons'
+    `trash-outline` tapers its body and draws three bars, and Material's can has a
+    thick filled lid band - both are a different icon). Edit is `edit`: a square
+    open at the TOP-RIGHT with a plain pencil through the gap (Ionicons'
+    `create-outline` adds a nib and a collar, so it reads as a fountain pen rather
+    than a pencil). The Clear bin is also drawn in the card's own ink -
+    `colors.text`, near-black on the light card and near-white on the dark one -
+    instead of the missed red, like Edit and X beside it, so it no longer shouts
+    louder than the meal it belongs to. The strips' glyphs come from `FeatherIcon`
+    (the pencil and the bin) and Ionicons (the camera, the ✕ and the ✓); the
+    `IconButton` control still takes exactly one of `icon` / `material` /
+    `feather` wherever it is used, and `__tests__/mealCardTools.test.tsx` pins both
+    unpacked glyph names and the bin's ink in both themes. The photo viewer's
+    HEADER tool and the record-level confirm sheets
+    keep the Ionicons can (they are destructive marks, not card tools), while the
+    viewer's delete CARD wears the same Feather bin as the Clear tool.
+  * **Deleting a photograph asks in the same compact card.** The viewer's header
+    trash opens the centered surface (`DialogCard` - the card WITHOUT its own
+    Modal, because the viewer already is a modal and Android does not stack two),
+    never the bottom sheet it used to be: the red-washed badge with the Feather
+    `trash-2` bin, **"Delete this photo?"**, the sentence *"Removed from this
+    device now and from your cloud account at the next sync."*, and **Cancel** /
+    **Delete photo** side by side, the decision in the red fill. The scrim and
+    Cancel dismiss and delete nothing; only the red pill calls `onRemove` with the
+    photograph on screen. The card and its pills are the same components the
+    clear-meal question uses (`DialogCard` / `DialogCardAction` in
+    `src/ui/components/dialogs.tsx`), so the two destructive questions cannot
+    drift apart (`__tests__/photoViewerRemove.test.tsx`).
+  * The **day header** is a card, drawn as the mockup draws it
+    (`src/ui/components/DayProgress.tsx`): the two-line date between two chevrons
+    (with "Today" centred UNDER the date while another day is open, so the arrows
+    stay symmetric), a **three-colour progress ring** with the day's fraction and
+    the word *Done* inside it, the three counts beside the ring as **glyph + bold
+    number + label** (Done / Missed / Pending, each state in its own colour), the
+    two quiet pills **✕ All missed** / **✓ All done**, and the **save row** below
+    them. The ring is REAL vector geometry
+    (`src/ui/components/ProgressRing.tsx`): one dashed SVG `Circle` per state with
+    `strokeLinecap="round"`, so every arc has a uniform thickness, a true curve and
+    a rounded end. `ringArcs` owns the dash arithmetic - each state's exact share of
+    the circumference (1/1/3 of a day is 20 % / 20 % / 60 %), an equal break between
+    neighbours (0.6 x stroke width of visible air, plus the two round caps), a closed
+    circle when only one state exists, and nothing at all for a day with no slots.
+    The linear bar and its "3 of 5 completed" caption are gone: one number in one
+    shape could not say how much of the day was done, missed and still open
+    (`__tests__/dayProgress.test.tsx`).
+  * The **save row** under those pills (`src/ui/components/SaveAllRow.tsx`) is the
+    mockup's single line, and it exists ONLY while an editor is open: state on the
+    left, one compact **Save all** on the right. With every editor closed the
+    component returns `null`, so the row and its hairline are not rendered at all -
+    an idle dashboard has no save control to explain and no "saved" claim to read.
+    **open editors** - *"1 editor open"* / *"2 editors open"* with the button in the
+    accent fill, enabled; **saving** - *"Saving…"* with the button locked in a wash
+    of the same accent; a **partial** batch names *"2 of 3 saved"* while the editor
+    that failed stays open, so the button stays live. The wording is local on
+    purpose: an open editor means edits waiting in this card, and a save writes
+    them to this device's database - nothing in this row claims the cloud has them,
+    because the upload follows on its own schedule.
+  * The meal card's **action strip** (`src/ui/components/MealCard.tsx`) is a
+    full-bleed footer on `surfaceVariant` closed by ONE 1 pt line in
+    `cardDivider` - the strip's own top border, with a single 12 pt value above it,
+    so there is no divider element to space around. It groups the tools the way the
+    mockup does: **camera / edit / clear** on the left on raised card-fill tiles,
+    one hairline divider, then **✕ missed** / **✓ done** on the right on washes of
+    their own state colour - and the mark that matches the meal's CURRENT state
+    keeps a ring in that colour (and is not faded when disabled, because it is the
+    answer, not a dead control). Every tile is a visible 40 pt square with a 20 pt
+    glyph and a 2 pt hit slop, so the TARGET is the 44 pt the guidelines ask for
+    while the strip still fits five buttons and its divider on a narrow card
+    (`__tests__/mealCardTools.test.tsx`).
+  * The statistics page's **slot counts** are drawn the way the mockup draws them
+    (`src/ui/components/SlotCounts.tsx`): three equal columns, each with the
+    state's glyph and its number on ONE line - the number at 22 pt bold in the
+    theme's ink with tabular figures - and the state's name UNDER the glyph at
+    14 pt, so the three labels read as columns instead of drifting with the width
+    of their numbers. Each mark keeps the app's state colour (`colors.done` /
+    `colors.missed` / `colors.pending`), and the closing sentence ("All 35 planned
+    slots in this week.") stays muted while the period total is set apart in bold
+    ink. The old block printed "✓ 19 Done ✕ 7 Missed ◷ 9 Pending" on one line in
+    14 pt semibold, which made the numbers the smallest text in the block they
+    exist for. Pinned by `__tests__/statisticsSlotCounts.test.tsx`.
   * Every scrolling page leaves room for the **floating tab bar** below its last
     card, and that room is now *measured* instead of guessed: `src/ui/tabBar.ts` is
     the single source of truth for the bar's geometry (`TAB_BAR_HEIGHT` 66,
