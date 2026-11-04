@@ -744,10 +744,10 @@ const styles = StyleSheet.create({
   /**
    * The rule between two rows: a full 1 dp line in the card's separator token
    * (cardDivider is one deliberate step stronger than `border`, so it stays
-   * visible on white and on the dark card). 15 dp margin + the 1 dp card frame
-   * = an identical 16 dp inset on both sides, so it never doubles the frame.
+   * visible on white and on the dark card). Full-bleed: no horizontal margin,
+   * so it spans the card from frame to frame without doubling the frame.
    */
-  agendaDivider: { height: 1, marginHorizontal: 15 },
+  agendaDivider: { height: 1 },
   agendaRow: {
     flexDirection: 'row',
     alignItems: 'center',
