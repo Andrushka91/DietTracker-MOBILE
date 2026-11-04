@@ -18,8 +18,8 @@ import { formatDate } from '../src/domain/analytics';
 import { monthGrid } from '../src/ui/calendarGrid';
 import { CalendarScreen } from '../src/ui/screens/CalendarScreen';
 import {
+  formatCompactDayMonth,
   formatLongDate,
-  formatMediumDate,
   formatMonthLabel,
   t,
   tFmt,
@@ -265,8 +265,8 @@ describe('the selected day row', () => {
   test('shows a concise date, the counts and photographs, and opens THAT day', async () => {
     const { renderer, onOpenDay } = await renderScreen(OTHER);
     const printed = texts(renderer);
-    // A short date, not the long weekday form.
-    expect(printed).toContain(formatMediumDate(OTHER));
+    // A compact date (weekday, day, abbreviated month), not the long form.
+    expect(printed).toContain(formatCompactDayMonth(OTHER));
     expect(printed).not.toContain(formatLongDate(OTHER));
     // The summary follows the data: 1 done, 1 missed, 3 pending (+ 2 photos).
     expect(

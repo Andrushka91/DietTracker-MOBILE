@@ -385,6 +385,20 @@ export function formatWeekdayDay(date: string): string {
 }
 
 /**
+ * "Tue, 3 Nov" - the compact weekday + day + abbreviated month the calendar's
+ * selected-day heading uses. The year is omitted because the month label above
+ * already carries it.
+ */
+export function formatCompactDayMonth(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  if (!year || !month || !day || month < 1 || month > 12) {
+    return date;
+  }
+  const weekday = WEEKDAY_SHORT[new Date(year, month - 1, day).getDay()] ?? '';
+  return `${weekday}, ${day} ${MONTH_NAMES[month - 1].slice(0, 3)}`;
+}
+
+/**
  * The same date without the weekday: "30 October 2026". Used where the weekday
  * is noise (a template's updated-at line, a template named after its day) and
  * where the full form would be truncated by a narrow row.

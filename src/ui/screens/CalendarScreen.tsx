@@ -46,8 +46,8 @@ import { mealCategoryGlyph } from '../mealGlyphs';
 import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
+  formatCompactDayMonth,
   formatLongDate,
-  formatMediumDate,
   formatMonthLabel,
   formatTime,
   mealNameKey,
@@ -378,7 +378,7 @@ export function CalendarScreen(props: {
         </View>
 
         {/* A single compact key row: done / missed / pending with their dots,
-            followed by "5 dots = 5 meals". */}
+            a separator, then "5 dots = 5 meals". */}
         <View style={styles.keyRow}>
           <KeyItem icon="checkmark" color={colors.done} label={t('Status_Done')} colors={colors} />
           <KeyItem icon="close" color={colors.missed} label={t('Status_Missed')} colors={colors} />
@@ -388,7 +388,8 @@ export function CalendarScreen(props: {
             label={t('Status_Pending')}
             colors={colors}
           />
-          <Text style={[styles.footText, { color: colors.textMuted }]}>
+          <View style={[styles.keySeparator, { backgroundColor: colors.cardDivider }]} />
+          <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
             {t('Rn_CalendarDots')}
           </Text>
         </View>
@@ -399,7 +400,7 @@ export function CalendarScreen(props: {
       <View style={styles.selectedRow}>
         <View style={styles.copy}>
           <Text style={[styles.selectedTitle, { color: colors.text }]} numberOfLines={1}>
-            {formatMediumDate(selected)}
+            {formatCompactDayMonth(selected)}
           </Text>
           <Text style={[styles.selectedDetail, { color: colors.textMuted }]} numberOfLines={1}>
             {selectedSummary}
@@ -458,15 +459,28 @@ export function CalendarScreen(props: {
                   color={colors.textSecondary}
                 />
               </View>
-              {/* Text: title over category (or category alone). */}
+              {/* Text: title over category + photo count (or category alone). */}
               <View style={styles.copy}>
                 <Text style={[styles.agendaTitle, { color: colors.text }]} numberOfLines={1}>
                   {primary}
                 </Text>
                 {secondary !== '' && (
-                  <Text style={[styles.agendaDetail, { color: colors.textMuted }]} numberOfLines={1}>
-                    {secondary}
-                  </Text>
+                  <View style={styles.agendaDetailRow}>
+                    <Text
+                      style={[styles.agendaDetail, { color: colors.textMuted }]}
+                      numberOfLines={1}
+                    >
+                      {secondary}
+                    </Text>
+                    {slot.photoCount > 0 && (
+                      <View style={styles.agendaPhotos}>
+                        <Icon name="camera-outline" size={11} color={colors.textMuted} />
+                        <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
+                          {slot.photoCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 )}
               </View>
               {/* Status badge: a soft pill on the right. */}
@@ -524,12 +538,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: metrics.radiusPill,
-    backgroundColor: colors.accent,
+    backgroundColor: themeColors.accentFill,
   },
   todayButtonText: {
     fontSize: 13,
     fontFamily: fonts.medium,
-    color: colors.accentFillText,
+    color: themeColors.accentFillText,
   },
   /** Month navigation + weekday grid + key form one compact surface. */
   board: {
@@ -616,7 +630,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.cardDivider,
+    borderTopColor: themeColors.cardDivider,
     marginTop: 8,
     paddingTop: 8,
     paddingHorizontal: 4,
@@ -630,6 +644,8 @@ const styles = StyleSheet.create({
     columnGap: 4,
   },
   keyText: { fontSize: 11 },
+  /** Thin vertical separator between the key items and the dots caption. */
+  keySeparator: { width: 1, height: 12, marginHorizontal: 6, flexShrink: 0 },
   /** "5 dots = 5 meals" caption on the right. */
   footText: { fontSize: 11 },
   /** Selected date + its counts, with the explicit Open day action. */
@@ -641,8 +657,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   copy: { flex: 1, minWidth: 0 },
-  selectedTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
-  selectedDetail: { fontSize: 11, lineHeight: 16, marginTop: 2 },
+  selectedTitle: { fontSize: 16, fontFamily: fonts.bold, lineHeight: 21 },
+  selectedDetail: { fontSize: 12, lineHeight: 16, marginTop: 2 },
   /** Grouped agenda: time | icon | text | status badge. */
   agenda: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   agendaRow: {
@@ -663,7 +679,11 @@ const styles = StyleSheet.create({
   },
   agendaTime: { fontSize: 12, width: 40, fontVariant: ['tabular-nums'] },
   agendaTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
+  /** Detail line: category text + optional photo count, on one row. */
+  agendaDetailRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
   agendaDetail: { fontSize: 11, flexShrink: 1 },
+  /** Camera glyph plus the photograph count, inline with the category. */
+  agendaPhotos: { flexDirection: 'row', alignItems: 'center', columnGap: 3, flexShrink: 0 },
   /** Status badge: a soft pill on the right. */
   agendaPill: {
     borderRadius: metrics.radiusPill,
