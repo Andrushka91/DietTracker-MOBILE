@@ -944,6 +944,21 @@ npm start
     counters that used to sit under those buttons are gone - the day cells and the
     status pills already carry that state, and the date line was what pushed the grid
     down.
+  * The selected-day row and the legend were measured against the emulator and
+    tightened: **Open day** is a 36 pt capsule instead of a 44 pt block
+    (`openDay.minHeight`), because at the minimum touch height the chip read as a
+    thick slab beside the two-line date - the Pressable's 4 pt hit slop keeps the
+    target at the 44 pt the guidelines ask for, the same trade the "Today" chip
+    makes. That chip (`todayButton`) now wears the same `metrics.radiusSmall` (10 pt)
+    corners as **Open day** instead of the capsule radius: the two accent actions of
+    the page share one silhouette, and the pill it used to be was the only
+    capsule-shaped control left on the page. The Done / Missed / Pending key is
+    inset by 10 pt
+    (`keyRow.paddingLeft`), so its first dot starts under the left edge of the first
+    column's 32 pt day chip (the board's 8 pt padding + the chip's ~10 pt centring
+    in a ~52 pt cell) instead of hanging 6 dp to the left of every date above it,
+    and the 1 pt rule before "5 dots = 5 meals" is 16 pt tall (`keySeparator`) so it
+    spans the caption's line box instead of reading as a stray tick.
   * **Photographs on a card**: the strip has its own row above the action buttons
     and draws up to three 48 pt tiles, so all three pictures of a meal fit side by
     side on the narrowest phone instead of wrapping. Each tile is ONE touch target

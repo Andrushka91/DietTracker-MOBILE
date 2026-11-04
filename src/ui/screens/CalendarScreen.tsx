@@ -580,7 +580,12 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
   pageHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   pageTitle: { ...pageTitleStyle },
-  /** "Today" is a pale-indigo button with a calendar icon. */
+  /**
+   * "Today" is a pale-indigo button with a calendar icon. Its corners are the
+   * SAME `radiusSmall` (10 pt) as the "Open day" chip below the grid, so the two
+   * accent actions on this page share one silhouette - the capsule it wore before
+   * was the only pill-shaped control on the page.
+   */
   todayButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -590,7 +595,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     // 36 + 4 pt hitSlop on every side = a 44 pt target without a taller chip.
     minHeight: 36,
-    borderRadius: metrics.radiusPill,
+    borderRadius: metrics.radiusSmall,
   },
   todayButtonText: {
     fontSize: 13,
@@ -632,13 +637,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /**
+   * The chip is a 36 pt capsule, not a 44 pt block: at the old `minTouch` height
+   * it read as a thick slab next to the two-line date. The touch target is kept
+   * by the 4 pt `hitSlop` on the Pressable (36 + 4 + 4 = 44), the same trade the
+   * "Today" chip above makes, so the button only LOOKS lighter than it feels.
+   */
   openDay: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: metrics.radiusSmall,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: metrics.minTouch,
+    minHeight: 36,
   },
   openDayText: {
     fontFamily: fonts.medium,
@@ -709,7 +720,16 @@ const styles = StyleSheet.create({
     // 12 dp of air under the rule; the key still sits close to the card floor.
     paddingTop: 12,
     paddingBottom: 8,
-    paddingHorizontal: 4,
+    /**
+     * The legend starts where the first DATE COLUMN starts, not at the card's
+     * padding: the board carries 8 dp of padding and a 7-column grid, so the
+     * 32 pt day chip of the first column is centred ~10 dp into its cell
+     * ((51.7 - 32) / 2 on a 411 dp phone). 8 + 10 = 18 dp puts the first dot's
+     * left edge exactly under that chip - without the inset the key hung 6 dp
+     * to the left of every date above it (measured on the r6 screenshot).
+     */
+    paddingLeft: 10,
+    paddingRight: 4,
     flexWrap: 'wrap',
   },
   keyItem: {
@@ -725,7 +745,17 @@ const styles = StyleSheet.create({
   keyText: { fontSize: 13 },
   /** Separator + caption travel together, so a wrapped key never strands the rule. */
   keyCaption: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' },
-  keySeparator: { width: 1, height: 12, marginRight: 6, flexShrink: 0 },
+  keySeparator: {
+    width: 1,
+    /**
+     * 16 pt instead of 12: at 12 the rule was shorter than the capital height of
+     * the "5 dots = 5 meals" caption beside it, so it read as a stray tick. At 16
+     * it spans the caption's line box and separates the two halves of the row.
+     */
+    height: 16,
+    marginRight: 6,
+    flexShrink: 0,
+  },
   /** "5 dots = 5 meals" caption, pinned to the card's right edge like the mockup. */
   footText: { fontSize: 12 },
   /** Selected date + its counts, with the explicit Open day action. */
