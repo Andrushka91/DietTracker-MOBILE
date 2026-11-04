@@ -40,7 +40,6 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { monthGrid } from '../calendarGrid';
 import { isCalendarDate } from '../dates';
-import { BarButton, IconButton } from '../components/buttons';
 import { Icon, MaterialIcon } from '../components/icons';
 import { mealCategoryGlyph } from '../mealGlyphs';
 import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
@@ -230,10 +229,15 @@ export function CalendarScreen(props: {
           accessibilityLabel={t('Calendar_Today')}
           onPress={goToToday}
           hitSlop={10}
-          style={styles.todayButton}
-        >
-          <MaterialIcon name="calendar-month-outline" size={16} color={colors.accentFillText} />
-          <Text style={styles.todayButtonText}>{t('Calendar_Today')}</Text>
+          style={({ pressed }) => [
+            styles.todayButton,
+            { backgroundColor: app.isDark ? '#1E2240' : '#E8EBFB' },
+            pressed && { opacity: 0.85 },
+          ]}>
+          <MaterialIcon name="calendar-month-outline" size={16} color={app.isDark ? '#8B95F6' : '#4655D6'} />
+          <Text style={[styles.todayButtonText, { color: app.isDark ? '#8B95F6' : '#4655D6' }]}>
+            {t('Calendar_Today')}
+          </Text>
         </Pressable>
       </View>
 
@@ -247,20 +251,28 @@ export function CalendarScreen(props: {
             {formatMonthLabel(month)}
           </Text>
           <View style={styles.monthNav}>
-            <IconButton
-              label={t('Calendar_PreviousMonth')}
-              icon="chevron-back"
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Calendar_PreviousMonth')}
               onPress={() => shiftMonth(-1)}
-              size={20}
-              colors={colors}
-            />
-            <IconButton
-              label={t('Calendar_NextMonth')}
-              icon="chevron-forward"
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.monthArrow,
+                { backgroundColor: pressed ? colors.surfaceVariant : colors.surfaceVariant },
+              ]}>
+              <Icon name="chevron-back" size={20} color={colors.textSecondary} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Calendar_NextMonth')}
               onPress={() => shiftMonth(1)}
-              size={20}
-              colors={colors}
-            />
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.monthArrow,
+                { backgroundColor: pressed ? colors.surfaceVariant : colors.surfaceVariant },
+              ]}>
+              <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
+            </Pressable>
           </View>
         </View>
 
@@ -380,15 +392,25 @@ export function CalendarScreen(props: {
         {/* A single compact key row: done / missed / pending with their dots,
             a separator, then "5 dots = 5 meals". */}
         <View style={styles.keyRow}>
-          <KeyItem icon="checkmark" color={colors.done} label={t('Status_Done')} colors={colors} />
-          <KeyItem icon="close" color={colors.missed} label={t('Status_Missed')} colors={colors} />
-          <KeyItem
-            icon="time-outline"
-            color={colors.pending}
-            label={t('Status_Pending')}
-            colors={colors}
-          />
-          <View style={[styles.keySeparator, { backgroundColor: colors.cardDivider }]} />
+          <View style={styles.keyItem}>
+            <View style={[styles.keyDot, { backgroundColor: colors.done }]} />
+            <Text style={[styles.keyText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {t('Status_Done')}
+            </Text>
+          </View>
+          <View style={styles.keyItem}>
+            <View style={[styles.keyDot, { backgroundColor: colors.missed }]} />
+            <Text style={[styles.keyText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {t('Status_Missed')}
+            </Text>
+          </View>
+          <View style={styles.keyItem}>
+            <View style={[styles.keyDot, { backgroundColor: colors.pending }]} />
+            <Text style={[styles.keyText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {t('Status_Pending')}
+            </Text>
+          </View>
+          <View style={[styles.keySeparator, { backgroundColor: colors.hairline }]} />
           <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
             {t('Rn_CalendarDots')}
           </Text>
@@ -406,12 +428,20 @@ export function CalendarScreen(props: {
             {selectedSummary}
           </Text>
         </View>
-        <BarButton
-          compact
-          label={t('Calendar_OpenDay')}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('Calendar_OpenDay')}
           onPress={() => props.onOpenDay(selected)}
-          colors={colors}
-        />
+          hitSlop={4}
+          style={({ pressed }) => [
+            styles.openDay,
+            { backgroundColor: colors.accent },
+            pressed && { opacity: 0.85 },
+          ]}>
+          <Text style={[styles.openDayText, { color: colors.accentText }]} numberOfLines={1}>
+            {t('Calendar_OpenDay')}
+          </Text>
+        </Pressable>
       </View>
 
       {/* Grouped agenda of the selected date: category icon, aligned time, the
@@ -497,21 +527,6 @@ export function CalendarScreen(props: {
   );
 }
 
-/** One entry of the mark key: a coloured dot plus its word. */
-function KeyItem(props: {
-  icon: React.ComponentProps<typeof Icon>['name'];
-  color: string;
-  label: string;
-  colors: ReturnType<typeof themeColors>;
-}): React.JSX.Element {
-  return (
-    <View style={styles.keyItem}>
-      <Icon name={props.icon} size={13} color={props.color} />
-      <Text style={[styles.keyText, { color: props.colors.textSecondary }]}>{props.label}</Text>
-    </View>
-  );
-}
-
 /** Localized status label used by the agenda pill (spec 8.3). */
 function statusLabel(status: MealStatus): string {
   if (status === MealStatus.Done) {
@@ -538,12 +553,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: metrics.radiusPill,
-    backgroundColor: themeColors.accentFill,
   },
   todayButtonText: {
     fontSize: 13,
     fontFamily: fonts.medium,
-    color: themeColors.accentFillText,
   },
   /** Month navigation + weekday grid + key form one compact surface. */
   board: {
@@ -572,6 +585,25 @@ const styles = StyleSheet.create({
   monthNav: {
     flexDirection: 'row',
     gap: 6,
+  },
+  monthArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: metrics.radiusSmall,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  openDay: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: metrics.radiusSmall,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: metrics.minTouch,
+  },
+  openDayText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
   },
   weekHeader: { flexDirection: 'row' },
   weekday: { flex: 1, textAlign: 'center', fontSize: 11, paddingVertical: 4 },
@@ -628,22 +660,22 @@ const styles = StyleSheet.create({
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: themeColors.cardDivider,
-    marginTop: 8,
-    paddingTop: 8,
+    gap: 10,
+    paddingVertical: 8,
     paddingHorizontal: 4,
+    flexWrap: 'wrap',
   },
-  /** One key entry: an equal third of the row, centred, so the three spread. */
   keyItem: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    columnGap: 4,
+    gap: 5,
   },
-  keyText: { fontSize: 11 },
+  keyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  keyText: { fontSize: 12 },
   /** Thin vertical separator between the key items and the dots caption. */
   keySeparator: { width: 1, height: 12, marginHorizontal: 6, flexShrink: 0 },
   /** "5 dots = 5 meals" caption on the right. */
