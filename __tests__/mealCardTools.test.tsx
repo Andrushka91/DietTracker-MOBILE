@@ -19,6 +19,7 @@ import { StyleSheet, View } from 'react-native';
 import { MealCategoryKey, MealStatus, SyncStatus } from '../src/domain/enums';
 import { MealCategory, MealEntry } from '../src/domain/models';
 import {
+  CARD_STRIP_PADDING,
   CARD_TOOL_GAP,
   CARD_TOOL_GLYPH,
   CARD_TOOL_SIZE,
@@ -218,6 +219,9 @@ describe('the meal card tools', () => {
       (style) => style.width === 1 && style.alignSelf === 'stretch',
     );
     expect(dividers).toHaveLength(1);
+    // ...and it hugs the marks: the auto margin takes every free pixel, so the
+    // line ends one strip padding before the ✕ (see the strip test below).
+    expect(styleOf(dividers[0]).marginLeft).toBe('auto');
     expect(CARD_TOOL_SIZE * 5 + CARD_TOOL_GAP * 4 + 24).toBeLessThan(360 - 32 - 15 - 13);
   });
 
@@ -254,6 +258,11 @@ describe('the meal card tools', () => {
       expect(strip.borderBottomLeftRadius).toBe(metrics.radius - 1);
       expect(strip.marginLeft).toBe(-15);
       expect(strip.marginRight).toBe(-13);
+      // The divider and the card's right edge carry the SAME air: the strip's
+      // side padding is its column gap, so the line sits one padding from the ✕.
+      expect(strip.paddingHorizontal).toBe(CARD_STRIP_PADDING);
+      expect(strip.columnGap).toBe(CARD_STRIP_PADDING);
+      expect(CARD_STRIP_PADDING).toBe(10);
 
       // It is the LAST block of the card: below every glyph of the meal.
       const viewsInOrder = renderer.root.findAllByType(View);

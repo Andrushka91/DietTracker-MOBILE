@@ -7,7 +7,8 @@
 //          photo gallery (right of the text)
 //  bar:    ONE full-width hairline under the meal, then the five tools in two
 //          groups - Add photo / Edit / Clear on the left, Mark MISSED / Mark DONE
-//          on the right, separated by one divider, all on a tinted strip. Clear
+//          on the right, separated by one divider that sits one strip padding
+//          (10 pt) from the ✕, all on a tinted strip. Clear
 //          wears the mockup's flat-lidded, twin-bar bin in the card's ink (never
 //          the missed red) and is disabled when the card is empty; the state mark
 //          that matches the meal's CURRENT status keeps a ring. The five glyphs
@@ -128,6 +129,12 @@ export const CARD_TOOL_SIZE = 40;
 export const CARD_TOOL_TOUCH = 44;
 export const CARD_TOOL_HIT_SLOP = (CARD_TOOL_TOUCH - CARD_TOOL_SIZE) / 2;
 export const CARD_TOOL_GAP = 6;
+/**
+ * The action strip's own side padding. The single divider keeps exactly this much
+ * air on its right - the same air the strip keeps on its right edge - so the line
+ * belongs to the "decide it" group instead of floating in the middle of the strip.
+ */
+export const CARD_STRIP_PADDING = 10;
 
 export interface MealCardProps {
   meal: MealEntry;
@@ -565,7 +572,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                   <FeatherIcon name="trash-2" size={CARD_TOOL_GLYPH} color={colors.text} />
                 </CardTool>
               </View>
-              {/* The one divider of the strip: "change the meal" | "decide it". */}
+              {/* The one divider of the strip: "change the meal" | "decide it" -
+                  pushed against the marks, one strip padding away from the ✕. */}
               <View style={[styles.toolSeparator, { backgroundColor: colors.cardDivider }]} />
               <View style={styles.markGroup}>
                 <CardTool
@@ -728,25 +736,30 @@ const styles = StyleSheet.create({
    * The action strip itself: full-bleed (the negative margins cancel the card's
    * content padding), on a tint of the card so it reads as the card's own toolbar,
    * closed by ONE 1 pt line in `cardDivider` and rounded to the card's corners.
+   * Its side padding is also the divider's gap, so the line and the card's right
+   * edge carry the same air.
    */
   toolStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: 8,
+    columnGap: CARD_STRIP_PADDING,
     marginLeft: -15,
     marginRight: -13,
     marginBottom: -6,
     paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: CARD_STRIP_PADDING,
     borderTopWidth: 1,
     borderBottomLeftRadius: metrics.radius - 1,
     borderBottomRightRadius: metrics.radius - 1,
   },
   /** Left group: change the meal (photo, edit, clear). */
   toolGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
-  /** The single divider between "change the meal" and "decide it". */
-  toolSeparator: { width: 1, alignSelf: 'stretch', marginVertical: 7 },
+  /**
+   * The single divider between "change the meal" and "decide it". The auto left
+   * margin takes all the free space, so the line sits one `CARD_STRIP_PADDING`
+   * from the ✕ - right next to the marks it separates them from.
+   */
+  toolSeparator: { width: 1, alignSelf: 'stretch', marginVertical: 7, marginLeft: 'auto' },
   /** Right group: decide the meal (missed, done). */
   markGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
   /**

@@ -18,7 +18,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SyncState } from '../src/domain/enums';
 import { SettingsScreen } from '../src/ui/screens/SettingsScreen';
 import { Icon } from '../src/ui/components/icons';
-import { lightColors } from '../src/ui/theme';
+import { lightColors, tintAlpha } from '../src/ui/theme';
 import { t, tFmt } from '../src/ui/strings';
 
 /** ONE stable app object, mutated per test (the account, the sync state). */
@@ -145,15 +145,24 @@ beforeEach(() => {
 });
 
 describe('the grouped layout', () => {
-  test('draws one 1 pt divider between rows, inset to the 16 dp gutter', async () => {
+  test('draws one 1 pt divider between rows, edge to edge inside the card', async () => {
     const renderer = await renderScreen();
     const dividers = renderer.root
       .findAllByType(View)
       .map((node) => styleOf(node))
-      .filter((style) => style.height === 1 && style.marginHorizontal === 16);
+      .filter((style) => style.height === 1);
     // Account 1, cloud 2, data 3, more 2 - never above a group's first row and
     // never below its last (the card's own frame is the edge there).
     expect(dividers).toHaveLength(8);
+    // The rule is `cardDivider` at ~85 %: the step above `border`, softened just
+    // enough to stay quiet - a `hairline` line would vanish on the white card.
+    const rule = tintAlpha(lightColors.cardDivider, 'D9');
+    expect(rule).not.toBe(lightColors.cardDivider);
+    dividers.forEach((style) => {
+      expect(style.backgroundColor).toBe(rule);
+      // Full width: the line meets the card's frame instead of stopping short.
+      expect(style.marginHorizontal).toBeUndefined();
+    });
     // No row draws its own top border: that is what doubled every line before.
     const bordered = renderer.root
       .findAllByType(View)
@@ -162,14 +171,15 @@ describe('the grouped layout', () => {
     expect(bordered).toHaveLength(0);
   });
 
-  test('keeps the 52 / 64 pt row rhythm and the real stored facts', async () => {
+  test('keeps the compact 44 / 54 pt row rhythm and the real stored facts', async () => {
     const renderer = await renderScreen();
     const heights = renderer.root
       .findAll((node) => node.props?.accessibilityRole === 'button')
       .map((node) => styleOf(node).minHeight)
       .filter((value): value is number => typeof value === 'number');
-    expect(heights).toContain(52);
-    expect(heights).toContain(64);
+    // 44 pt is still a full touch target; a row with a detail line gets 54 pt.
+    expect(heights).toContain(44);
+    expect(heights).toContain(54);
     // Photo storage: the real size under the label, the real count on the right.
     const printed = texts(renderer);
     expect(printed).toContain(tFmt('Rn_PhotoStorageSize', '0.00 MB'));
@@ -226,13 +236,16 @@ describe('the sync row', () => {
     expect(glyph(renderer, 'alert-circle-outline').props.color).toBe(lightColors.error);
   });
 
-  test('green only for a genuine success, with a 44 pt pale pill', async () => {
+  test('green only for a genuine success, with a compact 32 pt pale pill', async () => {
     const renderer = await renderScreen();
     expect(texts(renderer)).toContain(t('Rn_SyncOk'));
     expect(glyph(renderer, 'cloud-done-outline').props.color).toBe(lightColors.success);
     const pill = control(renderer, t('Rn_SyncNow'));
-    expect(styleOf(pill).minHeight).toBe(44);
+    // Small chrome, the same 12 pt radius, and a hitSlop that still gives the
+    // finger the 44 pt target.
+    expect(styleOf(pill).minHeight).toBe(32);
     expect(styleOf(pill).borderRadius).toBe(12);
+    expect(pill.props.hitSlop).toBe(6);
     expect(pill.props.disabled).toBe(false);
     // The pill is a wash of the accent, not the accent itself.
     expect(styleOf(pill).backgroundColor).not.toBe(lightColors.accentFill);

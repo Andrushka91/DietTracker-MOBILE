@@ -7,10 +7,15 @@
 //  6 Floating status line (StatusCaption, rendered by the shell)
 //
 // Every group is a white card on the page wash: a 1 pt frame, 16 pt corners, one
-// 1 pt divider INSET to the 16 pt gutter and only BETWEEN two rows - no row
-// draws its own border, so no line is ever doubled. Rows are 52 pt (64 pt when
+// 1 pt divider spanning the card EDGE TO EDGE and only BETWEEN two rows - no row
+// draws its own border, so no line is ever doubled. Rows are 44 pt (54 pt when
 // they carry a detail line) and grow with the system text size; the icon of
 // every row sits in one 24 pt column so the labels line up down the page.
+//
+// The divider is `cardDivider` at 85 % (not `hairline`): the quietest step is
+// invisible on a white card, and this page is a list of separations, so the line
+// has to be seen without turning into a second frame. Running it the full width
+// lets it meet the card's own frame instead of stopping short of it.
 //
 // The account card ends with a QUIET action row - red glyph + red label to sign
 // out, accent to sign in - instead of the solid red button it used to draw: the
@@ -70,29 +75,42 @@ import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
  */
 const LAYOUT = {
   /** Air above the page title. */
-  pageTop: 12,
+  pageTop: 10,
   /** Space between a section caption and the group above it. */
-  sectionGap: 22,
+  sectionGap: 18,
   /** Space between a section caption and its group. */
-  headingGap: 8,
-  /** Row gutter on both sides - the divider's inset is the same number. */
+  headingGap: 6,
+  /** Row gutter on both sides. */
   rowInset: 16,
   /** Icon column: every glyph is centred in it, so the labels line up. */
   iconColumn: 24,
   iconSize: 22,
-  rowMinHeight: 52,
-  detailRowMinHeight: 64,
-  dividerInset: 16,
-  avatarSize: 44,
+  /** 44 pt keeps the row a full touch target while sitting tighter than before. */
+  rowMinHeight: 44,
+  detailRowMinHeight: 54,
+  avatarSize: 40,
+  /** Vertical padding of the account identity row (a little airier than a row). */
+  accountPaddingVertical: 12,
 } as const;
 
 /**
- * The one rule between two rows of a group: 1 pt, inset to the row gutter, never
- * drawn above a group's first row or below its last (the card's frame is the
- * edge there), so no line is ever doubled.
+ * Alpha byte of the row divider: `cardDivider` at ~85 %. A hair more transparent
+ * than the solid tone keeps the line quiet on the white card while still being
+ * visible, and the full-width rule makes it read as the card's own seam.
+ */
+const DIVIDER_ALPHA = 'D9';
+
+/**
+ * The one rule between two rows of a group: 1 pt, spanning the card edge to edge,
+ * never drawn above a group's first row or below its last (the card's frame is
+ * the edge there), so no line is ever doubled. It uses `cardDivider` at 85 % -
+ * the one deliberate step above `border`, softened just enough not to become a
+ * second frame.
  */
 function Divider({ colors }: { colors: ThemeColors }): React.JSX.Element {
-  return <View style={[styles.divider, { backgroundColor: colors.hairline }]} />;
+  return (
+    <View style={[styles.divider, { backgroundColor: tintAlpha(colors.cardDivider, DIVIDER_ALPHA) }]} />
+  );
 }
 
 export function SettingsScreen(): React.JSX.Element {
@@ -600,7 +618,7 @@ export function SettingsScreen(): React.JSX.Element {
               accessibilityState={{ disabled: !app.signedIn || syncing, busy: syncing }}
               disabled={!app.signedIn || syncing}
               onPress={() => void synchronizeNow()}
-              hitSlop={4}
+              hitSlop={6}
               style={({ pressed }) => [
                 styles.syncButton,
                 {
@@ -610,7 +628,7 @@ export function SettingsScreen(): React.JSX.Element {
                   opacity: app.signedIn ? 1 : 0.55,
                 },
               ]}>
-              <Icon name="sync-outline" size={18} color={colors.accent} />
+              <Icon name="sync-outline" size={16} color={colors.accent} />
               <Text style={[styles.syncLabel, { color: colors.accent }]} numberOfLines={1}>
                 {syncing ? t('Sync_Syncing') : t('Rn_SyncNow')}
               </Text>
@@ -887,7 +905,7 @@ function syncTone(state: SyncState, signedIn: boolean, colors: ThemeColors): str
 /**
  * One row of a grouped card, in the r3 reference's anatomy: a 22 pt leading
  * glyph centred in a 24 pt column, a 16 pt label over a 12 pt detail line, and a
- * trailing value / control / chevron. 52 pt tall (64 pt with a detail line) and
+ * trailing value / control / chevron. 44 pt tall (54 pt with a detail line) and
  * free to grow with the system text size. A row with `onPress` is a button; the
  * others are plain information rows. `tint` paints the glyph AND the label for an
  * action row (red to sign out, accent to sign in), while `iconColor` paints only
@@ -984,7 +1002,7 @@ function SettingsRow(props: {
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: LAYOUT.pageTop },
-  pageTitle: { ...pageTitleStyle, marginBottom: 16 },
+  pageTitle: { ...pageTitleStyle, marginBottom: 12 },
   /** Grouped card: a hairline frame on the page surface, no heavy shadow. */
   group: {
     borderRadius: metrics.radius,
@@ -994,7 +1012,7 @@ const styles = StyleSheet.create({
   /** iOS-style grouped section caption, 11 pt caps with wide tracking. */
   sectionHeader: {
     fontSize: typeScale.caption2,
-    lineHeight: 18,
+    lineHeight: 16,
     fontFamily: fonts.medium,
     textTransform: 'uppercase',
     letterSpacing: 1.1,
@@ -1002,14 +1020,15 @@ const styles = StyleSheet.create({
     marginTop: LAYOUT.sectionGap,
     marginBottom: LAYOUT.headingGap,
   },
-  /** 1 pt rule, inset to the row gutter - only ever BETWEEN two rows. */
-  divider: { height: 1, marginHorizontal: LAYOUT.dividerInset },
+  /** 1 pt rule, edge to edge inside the card - only ever BETWEEN two rows. */
+  divider: { height: 1 },
   accountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 12,
-    padding: LAYOUT.rowInset,
-    minHeight: 80,
+    paddingHorizontal: LAYOUT.rowInset,
+    paddingVertical: LAYOUT.accountPaddingVertical,
+    minHeight: 68,
   },
   avatar: {
     width: LAYOUT.avatarSize,
@@ -1029,14 +1048,14 @@ const styles = StyleSheet.create({
     columnGap: 12,
     minHeight: LAYOUT.rowMinHeight,
     paddingHorizontal: LAYOUT.rowInset,
-    paddingVertical: 10,
+    paddingVertical: 7,
   },
   detailRow: { minHeight: LAYOUT.detailRowMinHeight },
   /** A disabled row keeps its text readable - it is dimmed, not recoloured. */
   rowDisabled: { opacity: 0.55 },
   leading: { width: LAYOUT.iconColumn, alignItems: 'center' },
   label: { fontSize: typeScale.body, lineHeight: 21, fontFamily: fonts.regular },
-  detail: { fontSize: typeScale.caption, lineHeight: 17, marginTop: 2 },
+  detail: { fontSize: typeScale.caption, lineHeight: 17, marginTop: 1 },
   trailing: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1045,15 +1064,19 @@ const styles = StyleSheet.create({
     maxWidth: '38%',
   },
   trailingText: { fontSize: typeScale.caption, textAlign: 'right', flexShrink: 1 },
-  /** "Sync now": a pale indigo pill on the accent, 44 pt tall, 12 pt corners. */
+  /**
+   * "Sync now": a pale indigo pill on the accent - 32 pt tall, 12 pt corners
+   * (the pill keeps its radius; only the chrome shrank) and a 6 pt hitSlop, so
+   * the finger still gets the 44 pt target without a taller pill.
+   */
   syncButton: {
-    minHeight: metrics.minTouch,
+    minHeight: 32,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    columnGap: 6,
+    columnGap: 5,
     borderRadius: 12,
     flexShrink: 1,
   },
@@ -1061,14 +1084,14 @@ const styles = StyleSheet.create({
   /** Revealed detail inside a group (schedule picker, privacy, diagnostics). */
   expanded: {
     paddingHorizontal: LAYOUT.rowInset,
-    paddingBottom: LAYOUT.rowInset,
-    rowGap: 10,
+    paddingBottom: 12,
+    rowGap: 8,
   },
   hint: { fontSize: typeScale.caption, lineHeight: 17 },
   note: {
     fontSize: typeScale.caption,
     lineHeight: 17,
-    marginTop: 8,
+    marginTop: 6,
     paddingHorizontal: 2,
   },
   mono: { fontSize: 11, lineHeight: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
