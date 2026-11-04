@@ -1,15 +1,19 @@
 // Statistics (spec 8.6) - one primary measure per period, then progressive
-// detail, following the round-3 review design:
+// detail, drawn as OUTLINE cards on the page wash:
 //
-//   period      Day / Week / Month / Year with the exact range printed
-//   primary     Done / ALL planned slots (percentage + "19 of 35")
-//   composition one status bar, then the three counts (glyph + bold number over
-//               the label, each in its own third of the row) and the closing
-//               sentence with the period total set apart - see
-//               components/SlotCounts.tsx for the mockup's layout
-//   breakdown   interactive rows (meals, days, partial weeks or months)
+//   period      a compact outlined Day / Week / Month / Year selector (the
+//               active period is an accent label plus a short underline, not a
+//               heavy tray), then two white 44 dp arrows around the exact range
+//   primary     one outlined card: "Meal-slot completion" with its info action,
+//               the big percentage beside its fraction/caption, ONE 8 dp
+//               composition bar and the three real slot counts (glyph + bold
+//               number over the label, each in its own third of the row) -
+//               see components/SlotCounts.tsx for that block's layout
+//   breakdown   ONE outlined card of grouped compact rows (meals, days, partial
+//               weeks or months) with inset separators and a selection cue
 //   selection   counts of the chosen row and an explicit day/calendar action
-//   disclosures "By meal type" and "How the numbers work"
+//   disclosures two quiet outlined rows: "By meal type" and "How the numbers
+//               work" (the summary's info action opens the same explanation)
 //
 // Two rates are deliberately BOTH shown, and each is labelled:
 //   * completion = Done / all planned slots (upcoming meals included),
@@ -18,7 +22,17 @@
 // Reporting only one of them is what made the old page easy to misread.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { PeriodProgress, addDays, forRange, formatDate } from '../../domain/analytics';
@@ -28,14 +42,15 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { dateHandoff } from '../dates';
 import { createLatestRequestRunner } from '../latestRequest';
-import { IconButton, Segmented } from '../components/buttons';
-import { Icon } from '../components/icons';
+import { Icon, type IconName } from '../components/icons';
 import { SlotCounts } from '../components/SlotCounts';
+import { mealNameKey, t, tFmt } from '../strings';
 import {
   fonts,
   metrics,
   pageTitleStyle,
   themeColors,
+  type ThemeColors,
 } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
@@ -46,11 +61,34 @@ import {
   periodRange,
   periodWord,
   type BreakdownRow,
+  type Counts,
   type Mode,
 } from '../statisticsBreakdown';
 
 /** Order of the segmented control (index == selection). */
 const MODES: Mode[] = ['daily', 'weekly', 'monthly', 'yearly'];
+
+/**
+ * Sizes of this page in dp/sp - the palette comes from the theme, so light and
+ * dark mode stay in step. One card rhythm: 16 dp corners, 14 dp padding, 1 dp
+ * outline, 44 dp controls and 44 dp minimum rows.
+ */
+const STAT = {
+  cardRadius: 16,
+  cardPadding: 14,
+  borderWidth: 1,
+  controlHeight: 44,
+  controlRadius: 10,
+  segmentRadius: 12,
+  barHeight: 8,
+  rowMinHeight: 44,
+  rowPadding: 12,
+  rowGap: 8,
+  rowLabelWidth: 64,
+  rowValueWidth: 58,
+  rowBarHeight: 7,
+  dividerWidth: 1,
+} as const;
 
 /**
  * One settled period: key, totals and rows travel together, so the heading can
@@ -65,12 +103,13 @@ interface PeriodSnapshot {
 /** Stable empty list while a period loads (keeps the selection effect quiet). */
 const NO_ROWS: BreakdownRow[] = [];
 
-import { mealNameKey, t, tFmt } from '../strings';
-
 export function StatisticsScreen(): React.JSX.Element {
   const app = useApp();
   const navigation = useNavigation();
   const colors = themeColors(app.isDark);
+  const { width, fontScale } = useWindowDimensions();
+  /** Large text or a narrow window: dense rows stack instead of squeezing. */
+  const stacked = fontScale > 1.3 || width < 350;
   const today = formatDate(new Date());
   const [mode, setMode] = useState<Mode>('weekly');
   const [anchor, setAnchor] = useState(today);
@@ -180,6 +219,15 @@ export function StatisticsScreen(): React.JSX.Element {
         : mode === 'monthly'
           ? t('Rn_StatWeeklyBreakdown')
           : t('Rn_StatMonthlyBreakdown');
+  /** The exact period names of the selector, in MODES order. */
+  const modeLabels = [
+    t('Rn_PeriodDay'),
+    t('Rn_PeriodWeek'),
+    t('Rn_PeriodMonth'),
+    t('Rn_PeriodYear'),
+  ];
+  /** The value column keeps its width while the system text grows. */
+  const valueWidth = STAT.rowValueWidth * Math.max(1, fontScale);
 
   /** The tab navigator is untyped here, so the two destinations are named once. */
   const openRow = (row: BreakdownRow): void => {
@@ -203,41 +251,33 @@ export function StatisticsScreen(): React.JSX.Element {
         // Same air above the docked bar as the other pages.
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
-      <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Statistics')}</Text>
+      <Text accessibilityRole="header" style={[styles.pageTitle, { color: colors.text }]}>
+        {t('Nav_Statistics')}
+      </Text>
       <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('Rn_StatSubtitle')}</Text>
 
-      <View style={styles.segmentWrap}>
-        <Segmented
-          options={[
-            t('Rn_PeriodDay'),
-            t('Rn_PeriodWeek'),
-            t('Rn_PeriodMonth'),
-            t('Rn_PeriodYear'),
-          ]}
-          index={MODES.indexOf(mode)}
-          onChange={(index) => setMode(MODES[index])}
-          colors={colors}
-        />
-      </View>
+      {/* Period: the four modes, then the exact range between two 44 dp arrows. */}
+      <PeriodSelector
+        labels={modeLabels}
+        index={MODES.indexOf(mode)}
+        onChange={(index) => setMode(MODES[index])}
+        colors={colors}
+      />
 
       <View style={styles.periodRow}>
-        <IconButton
+        <PeriodArrow
+          direction="back"
           label={t('Dashboard_PreviousDay')}
-          icon="chevron-back"
           onPress={() => shift(-1)}
-          size={20}
-          touch={44}
           colors={colors}
         />
-        <Text style={[styles.periodLabel, { color: colors.text }]} numberOfLines={1}>
+        <Text style={[styles.periodLabel, { color: colors.text }]}>
           {periodLabel(mode, range.from, range.to)}
         </Text>
-        <IconButton
+        <PeriodArrow
+          direction="forward"
           label={t('Dashboard_NextDay')}
-          icon="chevron-forward"
           onPress={() => shift(1)}
-          size={20}
-          touch={44}
           colors={colors}
         />
       </View>
@@ -257,27 +297,30 @@ export function StatisticsScreen(): React.JSX.Element {
         </View>
       ) : (
         <>
-      {/* Primary panel: one measure, its fraction, the composition and the counts. */}
-      <View style={[styles.panel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={styles.panelHeading}>
-          <Text style={[styles.panelLabel, { color: colors.textSecondary }]}>
+      {/* Primary card: one measure, its fraction, the composition and the counts. */}
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={styles.summaryHeading}>
+          <Text style={[styles.summaryTitle, { color: colors.text }]}>
             {t('Rn_StatCompletion')}
           </Text>
+          {/* The same explanation the "How the numbers work" row opens. */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('Rn_StatHowItWorks')}
             accessibilityState={{ expanded: openCalc }}
             onPress={() => setOpenCalc((open) => !open)}
-            hitSlop={8}
+            hitSlop={6}
             style={styles.infoButton}>
             <Icon name="information-circle-outline" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
-        <View style={styles.heroRow}>
+
+        <View style={[styles.hero, stacked && styles.heroStacked]}>
           <Text style={[styles.heroPercent, { color: colors.text }]}>
             {counts.done > 0 && completion === 0 ? '<1%' : `${completion}%`}
           </Text>
-          <View style={styles.heroText}>
+          {!stacked && <View style={[styles.heroDivider, { backgroundColor: colors.border }]} />}
+          <View style={[styles.heroCopy, stacked && styles.heroCopyStacked]}>
             <Text style={[styles.heroFraction, { color: colors.text }]}>
               {tFmt('Rn_StatDoneOfTotal', counts.done, counts.total)}
             </Text>
@@ -287,28 +330,16 @@ export function StatisticsScreen(): React.JSX.Element {
           </View>
         </View>
 
-        {/* Composition: one bar, the three states in their state colours. */}
-        <View style={[styles.composition, { backgroundColor: colors.surfaceVariant }]}>
-          {(
-            [
-              ['done', counts.done, colors.done],
-              ['missed', counts.missed, colors.missed],
-              // Pending is the quiet neutral segment: exact counts live in the
-              // three numbers under the bar, so it must not shout.
-              ['pending', counts.pending, colors.barPending],
-            ] as const
-          ).map(([key, value, color]) =>
-            value === 0 ? null : <View key={key} style={{ flex: value, backgroundColor: color }} />,
-          )}
-        </View>
+        <CompositionBar counts={counts} colors={colors} style={styles.composition} />
 
         <SlotCounts counts={counts} period={periodWord(mode)} colors={colors} />
       </View>
 
-
-      {/* Breakdown: the rows are the interaction, the selection is the answer. */}
-      <View style={styles.breakdownHeading}>
-        <Text style={[styles.breakdownTitle, { color: colors.text }]}>{breakdownTitle}</Text>
+      {/* Breakdown: one card of grouped rows; the selection is the answer. */}
+      <View style={[styles.breakdownHeading, stacked && styles.breakdownHeadingStacked]}>
+        <Text accessibilityRole="header" style={[styles.breakdownTitle, { color: colors.text }]}>
+          {breakdownTitle}
+        </Text>
         <Text style={[styles.breakdownCaption, { color: colors.textMuted }]}>
           {t('Rn_StatDoneOfPlanned')}
         </Text>
@@ -321,52 +352,87 @@ export function StatisticsScreen(): React.JSX.Element {
           <Text style={[styles.emptyBody, { color: colors.textMuted }]}>{t('Rn_StatEmptyBody')}</Text>
         </View>
       ) : (
-        <View style={styles.rows}>
-          {rows.map((row) => {
+        <View
+          style={[styles.breakdown, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {rows.map((row, index) => {
             const isSelected = row.key === selectedKey;
             const allLater = row.counts.upcoming === row.counts.total;
+            const valueLabel = allLater
+              ? t('Rn_StatLater')
+              : tFmt('Rn_StatDoneOfTotal', row.counts.done, row.counts.total);
             return (
-              <Pressable
-                key={row.key}
-                accessibilityRole="button"
-                accessibilityLabel={`${row.context}: ${tFmt(
-                  'Rn_StatDoneSuffix',
-                  row.counts.done,
-                  row.counts.total,
-                )}`}
-                accessibilityState={{ selected: isSelected }}
-                onPress={() => setSelectedKey(isSelected ? null : row.key)}
-                style={({ pressed }) => [
-                  styles.row,
-                  isSelected && { backgroundColor: colors.surfaceVariant },
-                  pressed && !isSelected && { backgroundColor: colors.hairline },
-                ]}>
-                {/* Month rows print a full compact range ("26 Oct – 1 Nov"); at
-                    larger text sizes it wraps instead of being cut off. */}
-                <Text
-                  style={[styles.rowLabel, { color: isSelected ? colors.accent : colors.text }]}
-                  numberOfLines={2}>
-                  {row.label}
-                </Text>
-                <View style={[styles.rowBar, { backgroundColor: colors.surfaceVariant }]}>
-                  {(
-                    [
-                      ['done', row.counts.done, colors.done],
-                      ['missed', row.counts.missed, colors.missed],
-                      ['pending', row.counts.pending, colors.barPending],
-                    ] as const
-                  ).map(([key, value, color]) =>
-                    value === 0 ? null : (
-                      <View key={key} style={{ flex: value, backgroundColor: color }} />
-                    ),
+              <React.Fragment key={row.key}>
+                {/* Inset 1 dp line: the rows read as one group, not nine cards. */}
+                {index > 0 && (
+                  <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${row.context}: ${tFmt(
+                    'Rn_StatDoneSuffix',
+                    row.counts.done,
+                    row.counts.total,
+                  )}`}
+                  accessibilityState={{ selected: isSelected }}
+                  onPress={() => setSelectedKey(isSelected ? null : row.key)}
+                  style={({ pressed }) => [
+                    styles.row,
+                    stacked && styles.rowStacked,
+                    pressed && { backgroundColor: colors.surfaceVariant },
+                  ]}>
+                  {isSelected && (
+                    <View
+                      accessible={false}
+                      style={[styles.selectionRail, { backgroundColor: colors.accent }]}
+                    />
                   )}
-                </View>
-                <Text style={[styles.rowValue, { color: colors.textMuted }]} numberOfLines={1}>
-                  {allLater
-                    ? t('Rn_StatLater')
-                    : tFmt('Rn_StatDoneOfTotal', row.counts.done, row.counts.total)}
-                </Text>
-              </Pressable>
+                  {stacked ? (
+                    <>
+                      <View style={styles.stackedRowHead}>
+                        <Text
+                          style={[
+                            styles.rowLabelStacked,
+                            { color: isSelected ? colors.accent : colors.text },
+                          ]}
+                          numberOfLines={2}>
+                          {row.label}
+                        </Text>
+                        <Text
+                          style={[styles.rowValue, { color: colors.textMuted, width: valueWidth }]}
+                          numberOfLines={1}>
+                          {valueLabel}
+                        </Text>
+                      </View>
+                      <CompositionBar
+                        counts={row.counts}
+                        colors={colors}
+                        row
+                        allLater={allLater}
+                        style={styles.rowBarStacked}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      {/* Month rows print a full compact range ("26 Oct – 1 Nov"),
+                          which wraps rather than being cut off. */}
+                      <Text
+                        style={[
+                          styles.rowLabel,
+                          { color: isSelected ? colors.accent : colors.text },
+                        ]}
+                        numberOfLines={2}>
+                        {row.label}
+                      </Text>
+                      <CompositionBar counts={row.counts} colors={colors} row allLater={allLater} />
+                      <Text
+                        style={[styles.rowValue, { color: colors.textMuted, width: valueWidth }]}
+                        numberOfLines={1}>
+                        {valueLabel}
+                      </Text>
+                    </>
+                  )}
+                </Pressable>
+              </React.Fragment>
             );
           })}
         </View>
@@ -375,7 +441,7 @@ export function StatisticsScreen(): React.JSX.Element {
       {selectedRow !== null && (
         <View
           style={[styles.selection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.selectionCopy}>
+          <View style={styles.copyColumn}>
             <Text style={[styles.selectionTitle, { color: colors.text }]} numberOfLines={2}>
               {selectedRow.context}
             </Text>
@@ -403,96 +469,237 @@ export function StatisticsScreen(): React.JSX.Element {
         </View>
       )}
 
-
       {/* Disclosures: the meal-type table (meaningless for a single day) and the
           calculation notes, including the separately labelled recorded-outcome
           rate. */}
       {mode !== 'daily' && recorded > 0 && (
-        <View style={styles.disclosure}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('Rn_StatByMealType')}
-            accessibilityState={{ expanded: openByMeal }}
-            onPress={() => setOpenByMeal((open) => !open)}
-            style={styles.disclosureSummary}>
-            <Text style={[styles.disclosureTitle, { color: colors.text }]}>
-              {t('Rn_StatByMealType')}
-            </Text>
-            <Icon
-              name={openByMeal ? 'chevron-up' : 'chevron-down'}
-              size={16}
-              color={colors.textMuted}
-            />
-          </Pressable>
-          {openByMeal &&
-            (view.period.days[0]?.slots ?? []).map((slot) => {
-              const mealCounts = countSlots(view.period.days, today, slot.mealCategoryKey);
-              return (
-                <View
-                  key={slot.mealCategoryKey}
-                  style={[styles.mealTypeRow, { borderTopColor: colors.hairline }]}>
-                  <Text style={[styles.mealTypeLabel, { color: colors.textSecondary }]}>
-                    {t(mealNameKey(slot.mealCategoryKey))}
-                  </Text>
-                  <Text style={[styles.mealTypeValue, { color: colors.textMuted }]}>
-                    {tFmt('Rn_StatDoneSuffix', mealCounts.done, mealCounts.total)}
-                  </Text>
-                </View>
-              );
-            })}
-        </View>
-      )}
-
-      <View style={styles.disclosure}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('Rn_StatHowItWorks')}
-          accessibilityState={{ expanded: openCalc }}
-          onPress={() => setOpenCalc((open) => !open)}
-          style={styles.disclosureSummary}>
-          <Text style={[styles.disclosureTitle, { color: colors.text }]}>
-            {t('Rn_StatHowItWorks')}
-          </Text>
-          <Icon
-            name={openCalc ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={colors.textMuted}
-          />
-        </Pressable>
-        {openCalc && (
-          <View style={styles.disclosureBody}>
-            <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
-              {t('Rn_StatHowItWorksBody')}
-            </Text>
-            <View style={styles.outcomeRow}>
-              <View style={styles.selectionCopy}>
-                <Text style={[styles.outcomeLabel, { color: colors.text }]}>
-                  {t('Rn_StatAmongRecorded')}
+        <Disclosure
+          label={t('Rn_StatByMealType')}
+          icon="restaurant-outline"
+          open={openByMeal}
+          onToggle={() => setOpenByMeal((open) => !open)}
+          colors={colors}>
+          {(view.period.days[0]?.slots ?? []).map((slot, index) => {
+            const mealCounts = countSlots(view.period.days, today, slot.mealCategoryKey);
+            return (
+              <View
+                key={slot.mealCategoryKey}
+                style={[
+                  styles.mealTypeRow,
+                  index > 0 && {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: colors.hairline,
+                  },
+                ]}>
+                <Text style={[styles.mealTypeLabel, { color: colors.text }]}>
+                  {t(mealNameKey(slot.mealCategoryKey))}
                 </Text>
-                <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
-                  {recorded === 0
-                    ? t('Rn_StatNoRecorded')
-                    : `${t('Dashboard_CountDone')} ${counts.done} · ${t(
-                        'Dashboard_CountMissed',
-                      )} ${counts.missed}`}
+                <Text style={[styles.mealTypeValue, { color: colors.textMuted }]}>
+                  {tFmt('Rn_StatDoneSuffix', mealCounts.done, mealCounts.total)}
                 </Text>
               </View>
-              <Text style={[styles.outcomeValue, { color: colors.text }]}>
-                {recordedRate === null ? '—' : `${recordedRate}%`}
-              </Text>
-            </View>
-            <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
-              {t('Rn_StatAmongRecordedBody')}
+            );
+          })}
+        </Disclosure>
+      )}
+
+      <Disclosure
+        label={t('Rn_StatHowItWorks')}
+        icon="information-circle-outline"
+        open={openCalc}
+        onToggle={() => setOpenCalc((open) => !open)}
+        colors={colors}>
+        <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
+          {t('Rn_StatHowItWorksBody')}
+        </Text>
+        <View style={styles.outcomeRow}>
+          <View style={styles.copyColumn}>
+            <Text style={[styles.outcomeLabel, { color: colors.text }]}>
+              {t('Rn_StatAmongRecorded')}
             </Text>
             <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
-              {t('Statistics_Disclaimer')}
+              {recorded === 0
+                ? t('Rn_StatNoRecorded')
+                : `${t('Dashboard_CountDone')} ${counts.done} · ${t(
+                    'Dashboard_CountMissed',
+                  )} ${counts.missed}`}
             </Text>
           </View>
-        )}
-      </View>
+          <Text style={[styles.outcomeValue, { color: colors.text }]}>
+            {recordedRate === null ? '—' : `${recordedRate}%`}
+          </Text>
+        </View>
+        <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
+          {t('Rn_StatAmongRecordedBody')}
+        </Text>
+        <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
+          {t('Statistics_Disclaimer')}
+        </Text>
+      </Disclosure>
         </>
       )}
     </ScrollView>
+  );
+}
+
+/**
+ * One row of the composition bar: sized by the ACTUAL done / missed / pending
+ * counts, so the bar and the numbers it sits above can never disagree. The
+ * row variant is 7 dp tall; an all-upcoming row is drawn quieter, never
+ * recoloured or re-labelled.
+ */
+function CompositionBar(props: {
+  counts: Counts;
+  colors: ThemeColors;
+  /** The breakdown rows use the thinner bar of the mockup. */
+  row?: boolean;
+  /** A row made only of future slots reads quieter - its counts are unchanged. */
+  allLater?: boolean;
+  style?: StyleProp<ViewStyle>;
+}): React.JSX.Element {
+  const { counts, colors } = props;
+  const segments = [
+    ['done', counts.done, colors.done],
+    ['missed', counts.missed, colors.missed],
+    // Pending is the quiet neutral segment: the exact counts live in the three
+    // numbers of the summary, so it must not shout.
+    ['pending', counts.pending, colors.barPending],
+  ] as const;
+  return (
+    <View
+      accessible={false}
+      style={[
+        props.row === true ? styles.rowBar : styles.composition,
+        { backgroundColor: colors.surfaceVariant },
+        props.allLater === true && styles.barQuiet,
+        props.style,
+      ]}>
+      {segments.map(([key, value, color]) =>
+        value <= 0 ? null : <View key={key} style={{ flex: value, backgroundColor: color }} />,
+      )}
+    </View>
+  );
+}
+
+/**
+ * The period selector of THIS page: one white outline, four equal parts, the
+ * active period in accent ink above a short underline. The shared `Segmented`
+ * control keeps its own tray and raised chip (settings still draws that one).
+ */
+function PeriodSelector(props: {
+  labels: string[];
+  index: number;
+  onChange: (index: number) => void;
+  colors: ThemeColors;
+}): React.JSX.Element {
+  const { colors } = props;
+  return (
+    <View
+      accessibilityRole="tablist"
+      style={[styles.segments, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      {props.labels.map((label, index) => {
+        const selected = index === props.index;
+        return (
+          <Pressable
+            key={label}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityState={{ selected }}
+            onPress={() => props.onChange(index)}
+            hitSlop={2}
+            style={({ pressed }) => [
+              styles.segment,
+              index > 0 && { borderLeftWidth: STAT.borderWidth, borderLeftColor: colors.border },
+              pressed && { backgroundColor: colors.surfaceVariant },
+            ]}>
+            <Text
+              style={[
+                styles.segmentText,
+                { color: selected ? colors.accent : colors.textSecondary },
+                selected && styles.segmentTextSelected,
+              ]}>
+              {label}
+            </Text>
+            {selected && (
+              <View
+                accessible={false}
+                style={[styles.segmentUnderline, { backgroundColor: colors.accent }]}
+              />
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** One white outlined 44 dp arrow - the page's only two period controls. */
+function PeriodArrow(props: {
+  direction: 'back' | 'forward';
+  label: string;
+  onPress: () => void;
+  colors: ThemeColors;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      onPress={props.onPress}
+      style={({ pressed }) => [
+        styles.periodArrow,
+        {
+          backgroundColor: pressed ? props.colors.surfaceVariant : props.colors.surface,
+          borderColor: props.colors.border,
+        },
+      ]}>
+      <Icon
+        name={props.direction === 'back' ? 'chevron-back' : 'chevron-forward'}
+        size={21}
+        color={props.colors.textSecondary}
+      />
+    </Pressable>
+  );
+}
+
+/**
+ * A quiet outlined disclosure row: leading outline glyph, label, caret, and its
+ * content opened in place (the caller keeps owning the open state).
+ */
+function Disclosure(props: {
+  label: string;
+  icon: IconName;
+  open: boolean;
+  onToggle: () => void;
+  colors: ThemeColors;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const { colors } = props;
+  return (
+    <View
+      style={[styles.disclosure, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={props.label}
+        accessibilityState={{ expanded: props.open }}
+        onPress={props.onToggle}
+        style={({ pressed }) => [
+          styles.disclosureButton,
+          pressed && { backgroundColor: colors.surfaceVariant },
+        ]}>
+        <Icon name={props.icon} size={18} color={colors.textMuted} />
+        <Text style={[styles.disclosureLabel, { color: colors.text }]}>{props.label}</Text>
+        <Icon
+          name={props.open ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={colors.textMuted}
+        />
+      </Pressable>
+      {props.open && (
+        <View style={[styles.disclosureContent, { borderTopColor: colors.border }]}>
+          {props.children}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -500,139 +707,225 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
   pageTitle: { ...pageTitleStyle },
   subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2, fontFamily: fonts.regular },
-  segmentWrap: { marginTop: 12 },
+
+  /** Period selector: a white outline, four equal parts, one accent underline. */
+  segments: {
+    marginTop: 14,
+    flexDirection: 'row',
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.segmentRadius,
+    overflow: 'hidden',
+  },
+  segment: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: STAT.controlHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  segmentText: { fontFamily: fonts.regular, fontSize: 14, textAlign: 'center' },
+  segmentTextSelected: { fontFamily: fonts.medium },
+  /** The active period is marked by a short line, not by a heavy grey tray. */
+  segmentUnderline: {
+    position: 'absolute',
+    bottom: 6,
+    alignSelf: 'center',
+    width: 24,
+    height: 2,
+    borderRadius: 1,
+  },
+
+  /** The exact range, between the page's two arrows. */
   periodRow: {
+    marginTop: 10,
+    marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-    columnGap: 8,
+    columnGap: 10,
   },
-  periodLabel: { fontSize: 14, fontFamily: fonts.medium, textAlign: 'center', flexShrink: 1 },
-  /** Placeholder while a period settles; same card frame as the primary panel. */
+  periodArrow: {
+    width: STAT.controlHeight,
+    height: STAT.controlHeight,
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.controlRadius,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  periodLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 14,
+    fontFamily: fonts.medium,
+    textAlign: 'center',
+  },
+
+  /** Placeholder while a period settles; the summary's own card frame. */
   loadingPanel: {
-    marginTop: 10,
     minHeight: 180,
-    borderRadius: 15,
-    borderWidth: 1,
+    borderRadius: STAT.cardRadius,
+    borderWidth: STAT.borderWidth,
     alignItems: 'center',
     justifyContent: 'center',
     rowGap: 10,
   },
   loadingText: { fontSize: 12, fontFamily: fonts.regular },
-  /** Primary panel: the one measure the page is about. */
-  panel: {
-    marginTop: 10,
-    borderRadius: 15,
-    borderWidth: 1,
-    padding: 14,
+
+  /** The summary card: the one measure the page is about. */
+  card: {
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.cardRadius,
+    padding: STAT.cardPadding,
   },
-  panelHeading: {
+  summaryHeading: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    columnGap: 8,
   },
-  panelLabel: { fontSize: 12, fontFamily: fonts.medium },
-  infoButton: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
-  heroRow: { flexDirection: 'row', alignItems: 'center', columnGap: 14, marginTop: 4 },
+  summaryTitle: { flex: 1, fontSize: 14, fontFamily: fonts.medium },
+  infoButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  hero: { flexDirection: 'row', alignItems: 'center', columnGap: 12, marginTop: 4 },
+  heroStacked: { flexDirection: 'column', alignItems: 'flex-start', rowGap: 6 },
   /** The percentage is the loudest number on the page. */
-  heroPercent: { fontSize: 38, lineHeight: 44, fontFamily: fonts.bold, letterSpacing: -1.2 },
-  heroText: { flex: 1, minWidth: 0 },
-  heroFraction: { fontSize: 15, fontFamily: fonts.medium },
-  /** Caption of the fraction: a label, so it takes the semibold cut too. */
-  heroCaption: { fontSize: 11, marginTop: 1, fontFamily: fonts.medium },
-  /** Composition bar: three flex segments, never a fixed width. */
+  heroPercent: {
+    fontSize: 38,
+    lineHeight: 44,
+    fontFamily: fonts.bold,
+    letterSpacing: -1.2,
+    fontVariant: ['tabular-nums'],
+  },
+  heroDivider: { width: 1, height: 36 },
+  heroCopy: { flex: 1, minWidth: 0 },
+  heroCopyStacked: { flex: 0, width: '100%' },
+  heroFraction: { fontSize: 16, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
+  heroCaption: { fontSize: 12, marginTop: 1, fontFamily: fonts.regular },
+  /** Composition: three flex segments, never a fixed width. */
   composition: {
     flexDirection: 'row',
-    height: 8,
-    borderRadius: 4,
+    height: STAT.barHeight,
+    borderRadius: STAT.barHeight / 2,
     overflow: 'hidden',
     marginTop: 12,
   },
+  /** A row made only of future slots: de-emphasised, never recoloured. */
+  barQuiet: { opacity: 0.55 },
+
   breakdownHeading: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
     marginTop: 18,
-    marginBottom: 6,
-  },
-  breakdownTitle: { fontSize: 15, fontFamily: fonts.medium },
-  /** The column caption of the fraction column (`Done / planned`). */
-  breakdownCaption: { fontSize: 11, fontFamily: fonts.medium },
-  rows: { marginTop: 2 },
-  /** One breakdown row: label, stacked bar, "done / planned". */
-  row: {
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     columnGap: 10,
-    minHeight: 44,
-    paddingHorizontal: 8,
-    borderRadius: 8,
   },
-  rowLabel: { width: 106, fontSize: 13, fontFamily: fonts.medium, lineHeight: 17 },
-  rowBar: {
-    flex: 1,
-    flexDirection: 'row',
-    height: 8,
-    borderRadius: 4,
+  breakdownHeadingStacked: { flexDirection: 'column', alignItems: 'flex-start', rowGap: 4 },
+  breakdownTitle: { flexShrink: 1, fontSize: 16, fontFamily: fonts.medium },
+  breakdownCaption: { fontSize: 12, fontFamily: fonts.regular },
+  /** ONE card holds every row; its separators are inset lines, not gaps. */
+  breakdown: {
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.cardRadius,
     overflow: 'hidden',
   },
-  /**
-   * The fraction grows with its own text instead of sitting in a fixed 52 pt
-   * box: a yearly total ("0 / 1825") and larger system text both stay complete.
-   * Semibold, because it is the number the row exists for.
-   */
+  row: {
+    minHeight: STAT.rowMinHeight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: STAT.rowGap,
+    paddingHorizontal: STAT.rowPadding,
+    paddingVertical: 10,
+  },
+  rowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  /** The selection cue: a 3 dp accent rail on the row's leading edge. */
+  selectionRail: { position: 'absolute', left: 0, top: 6, bottom: 6, width: 3, borderRadius: 2 },
+  rowLabel: {
+    width: STAT.rowLabelWidth,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fonts.regular,
+  },
+  rowLabelStacked: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fonts.regular,
+  },
+  rowBar: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    height: STAT.rowBarHeight,
+    borderRadius: STAT.rowBarHeight / 2,
+    overflow: 'hidden',
+  },
+  rowBarStacked: { flex: 0, width: '100%' },
   rowValue: {
-    minWidth: 54,
     flexShrink: 0,
     textAlign: 'right',
     fontSize: 12,
-    fontFamily: fonts.medium,
+    fontFamily: fonts.regular,
     fontVariant: ['tabular-nums'],
   },
+  stackedRowHead: { flexDirection: 'row', alignItems: 'center', columnGap: STAT.rowGap },
+  rowDivider: { height: STAT.dividerWidth, marginHorizontal: STAT.rowPadding },
+
   empty: {
-    borderRadius: 15,
-    borderWidth: 1,
+    borderRadius: STAT.cardRadius,
+    borderWidth: STAT.borderWidth,
     padding: 20,
     alignItems: 'center',
     rowGap: 6,
   },
   emptyTitle: { fontSize: 14, fontFamily: fonts.medium, marginTop: 4 },
   emptyBody: { fontSize: 12, textAlign: 'center', lineHeight: 17, fontFamily: fonts.regular },
+
   /** Selection: what the chosen row holds and where to go with it. */
   selection: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 12,
-    borderRadius: 15,
-    borderWidth: 1,
-    padding: 14,
-    marginTop: 10,
+    borderRadius: STAT.cardRadius,
+    borderWidth: STAT.borderWidth,
+    padding: STAT.cardPadding,
+    marginTop: 12,
   },
-  selectionCopy: { flex: 1, minWidth: 0 },
+  copyColumn: { flex: 1, minWidth: 0 },
   selectionTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
   selectionDetail: { fontSize: 11, marginTop: 2, fontFamily: fonts.regular },
-  selectionAction: { minHeight: 40, justifyContent: 'center', paddingHorizontal: 4 },
+  selectionAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   selectionActionText: { fontSize: 12, fontFamily: fonts.medium },
-  disclosure: { marginTop: 14 },
-  disclosureSummary: {
+
+  /** Disclosures: quiet outlined rows that open in place. */
+  disclosure: {
+    marginTop: 12,
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.cardRadius,
+    overflow: 'hidden',
+  },
+  disclosureButton: {
+    minHeight: STAT.controlHeight,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 44,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'transparent',
+    columnGap: 10,
+    paddingHorizontal: STAT.cardPadding,
+    paddingVertical: 10,
   },
-  disclosureTitle: { fontSize: 13, fontFamily: fonts.medium },
-  disclosureBody: { paddingBottom: 8, rowGap: 8 },
+  disclosureLabel: { flex: 1, minWidth: 0, fontSize: 14, fontFamily: fonts.medium },
+  disclosureContent: {
+    borderTopWidth: STAT.borderWidth,
+    padding: STAT.cardPadding,
+    rowGap: 8,
+  },
   disclosureBodyText: { fontSize: 12, lineHeight: 17, fontFamily: fonts.regular },
   /** "By meal type" rows: label left, done / total right, hairline between. */
   mealTypeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 40,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    minHeight: STAT.controlHeight,
     columnGap: 10,
   },
   mealTypeLabel: { fontSize: 12, flexShrink: 1, fontFamily: fonts.medium },
@@ -642,4 +935,3 @@ const styles = StyleSheet.create({
   outcomeLabel: { fontSize: 13, fontFamily: fonts.medium },
   outcomeValue: { fontSize: 22, fontFamily: fonts.bold, letterSpacing: -0.4 },
 });
-
