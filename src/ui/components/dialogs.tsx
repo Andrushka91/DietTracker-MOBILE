@@ -69,14 +69,14 @@ export function DialogSheet(props: {
   onDismiss: () => void;
   /**
    * Opt-in chrome. `default` is the shared question sheet every caller draws.
-   * `template-date` is the compact Apply-template form: a narrower sheet with
-   * 24 pt corners, the reference's header (a pale-indigo calendar tile, the bold
-   * title with the real template summary stacked under it) and a scrollable,
+   * `template-date` is the compact Apply-template form: a 16 pt-cornered sheet
+   * whose header starts at its top edge - the REAL template context above the
+   * task title, no badge and no grabber - over a short, scrollable,
    * keyboard-avoiding body. It changes the PRESENTATION only - the form state,
    * the mask, the validation and the answers are the caller's existing ones.
    */
   variant?: 'default' | 'template-date';
-  /** Leading badge of the header (the template-date form's calendar tile). */
+  /** Leading badge of the shared header (the date form draws none). */
   badge?: CardBadge;
   children: React.ReactNode;
 }): React.JSX.Element {
@@ -89,37 +89,35 @@ export function DialogSheet(props: {
       style={[
         styles.sheet,
         dateForm && styles.sheetDate,
-        { backgroundColor: colors.surface, paddingBottom: insets.bottom + 12 },
+        // The date form keeps only the device's own safe area plus 8 dp.
+        { backgroundColor: colors.surface, paddingBottom: insets.bottom + (dateForm ? 8 : 12) },
       ]}
       onStartShouldSetResponder={() => true}>
-      <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+      {/* The date form carries no decorative drag handle and no badge: it is a
+          short task, so the header starts at the sheet's own top edge. */}
+      {!dateForm && <View style={[styles.grabber, { backgroundColor: colors.border }]} />}
       <View style={[styles.header, dateForm && styles.headerDate]}>
         {props.badge !== undefined && (
           <View
             accessible={false}
             style={[
               styles.headerBadge,
-              dateForm && styles.headerBadgeDate,
               { backgroundColor: tintAlpha(colors.accent, props.isDark ? '2E' : '1A') },
             ]}>
-            <DialogBadgeGlyph badge={props.badge} size={dateForm ? 23 : 22} color={colors.accent} />
+            <DialogBadgeGlyph badge={props.badge} size={22} color={colors.accent} />
           </View>
         )}
         {dateForm ? (
-          /* The reference stacks the real template summary UNDER the title and
-             aligned with it - not as a caption spanning the whole sheet - so the
-             badge and the two lines read as ONE header block. */
+          /* Context ABOVE the task title: the REAL template (name · count) sits
+             over "Apply template" at 12 / 20 pt. Both lines wrap instead of being
+             cut, so a long custom name stays readable. */
           <View style={styles.headerTextDate}>
-            <Text style={[styles.titleDate, { color: colors.text }]} numberOfLines={2}>
-              {props.title}
-            </Text>
             {props.caption !== undefined && props.caption !== '' && (
-              <Text
-                style={[styles.sheetCaptionDate, { color: colors.textMuted }]}
-                numberOfLines={1}>
+              <Text style={[styles.sheetCaptionDate, { color: colors.textMuted }]}>
                 {props.caption}
               </Text>
             )}
+            <Text style={[styles.titleDate, { color: colors.text }]}>{props.title}</Text>
           </View>
         ) : (
           <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
@@ -128,7 +126,9 @@ export function DialogSheet(props: {
           accessibilityRole="button"
           accessibilityLabel={t('Common_Close')}
           onPress={props.onDismiss}
-          hitSlop={6}
+          // The date form's target is already 48/44 dp; the shared sheets keep
+          // their small X and its slop.
+          hitSlop={dateForm ? 0 : 6}
           style={({ pressed }) => [
             styles.close,
             dateForm && styles.closeDate,
@@ -907,18 +907,20 @@ export interface PromptDialogRequest {
   /**
    * Opt-in presentation of THIS form. `default` is the shared question sheet
    * (the template NAME prompt and every other caller keep it untouched).
-   * `template-date` is the compact Apply-template sheet: the reference's header
-   * (a pale-indigo calendar tile, the bold "Apply template" title with the real
-   * template summary stacked under it), a labelled date field with a Today
-   * shortcut, a format hint and side-by-side answers. It is the SAME value/error
-   * state, mask, validation and callbacks - only the chrome differs.
+   * `template-date` is the compact Apply-template sheet: the REAL template
+   * (name · meal count) above a 20 pt "Apply template" title, one small labelled
+   * date field, then two outlined answers (Cancel, Apply). It is the SAME
+   * value/error state, mask, validation and callbacks - only the chrome differs.
    */
   layout?: 'default' | 'template-date';
-  /** `template-date`: the real template name and meal count under the title. */
+  /** `template-date`: the real template name and meal count above the title. */
   contextLabel?: string;
   /** `template-date`: the visible label above the date field. */
   fieldLabel?: string;
-  /** `template-date`: the format hint under the field while the value is valid. */
+  /**
+   * `template-date`: the ISO format. It is not printed as a second line - the
+   * field's placeholder and its accessibility hint carry it.
+   */
   formatHint?: string;
   /** Returns an error message, or null when the value is acceptable. */
   validate: (value: string) => string | null;
@@ -942,18 +944,17 @@ export function PromptDialog({
   const field = useRef<React.ElementRef<typeof TextInput>>(null);
   const { width, fontScale } = useWindowDimensions();
   const dateForm = request.layout === 'template-date';
-  /** Narrow screens and enlarged text stack the two answers at full width. */
+  /**
+   * Narrow screens and enlarged text stack the date row and the two answers at
+   * full width. The answers themselves are CONTENT-SIZED (64 / 136 dp minimums),
+   * so there is no width arithmetic left to do here.
+   */
   const stacked = width < 350 || fontScale > 1.15;
   /**
-   * The reference's exact 1 : 1.8 split, measured from the sheet's own width (it
-   * is capped at 520 dp): a flex ratio alone would hand each answer its label's
-   * width PLUS a share of the rest, which is not the drawn proportion.
+   * The caller's "Today" shortcut (label + ISO value). Captured once so the
+   * pressable's render callback keeps the narrowing that JSX alone loses.
    */
-  const actionsWidth = Math.max(0, Math.min(width, 520) - 40 - 10);
-  const cancelWidth = Math.round((actionsWidth / 2.8) * 100) / 100;
-  const applyWidth = Math.round((actionsWidth - cancelWidth) * 100) / 100;
-  const cancelSize = stacked ? undefined : { width: cancelWidth };
-  const applySize = stacked ? undefined : { width: applyWidth };
+  const today = request.today;
 
   const confirm = (): void => {
     const failure = request.validate(value);
@@ -988,44 +989,25 @@ export function PromptDialog({
       <Sheet
         name="prompt-dialog"
         variant="template-date"
-        badge={{ material: 'calendar-text-outline' }}
         title={request.title}
         caption={request.contextLabel}
         isDark={isDark}
         onDismiss={request.onCancel}>
         <View style={styles.dateBody}>
-          <View style={styles.dateHeading}>
-            <Text style={[styles.dateLabel, { color: colors.text }]} numberOfLines={2}>
-              {request.fieldLabel ?? request.message}
-            </Text>
-            {request.today !== undefined && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={request.today.label}
-                onPress={fillToday}
-                hitSlop={6}
-                style={({ pressed }) => [
-                  styles.todayChip,
-                  {
-                    backgroundColor: tintAlpha(colors.accent, isDark ? '2E' : '1A'),
-                    opacity: pressed ? 0.65 : 1,
-                  },
-                ]}>
-                <Text style={[styles.todayText, { color: colors.accent }]}>
-                  {request.today.label}
-                </Text>
-              </Pressable>
-            )}
-          </View>
+          {/* A visible label, then the editable masked date itself: no Today
+              shortcut, no second format line and no decorative calendar glyph.
+              The expected shape stays on the field as its accessibility hint. */}
+          <Text style={[styles.dateLabel, { color: colors.text }]}>
+            {request.fieldLabel ?? request.message}
+          </Text>
           <View
             style={[
               styles.dateField,
               {
-                backgroundColor: colors.surfaceVariant,
+                backgroundColor: colors.surface,
                 borderColor: error !== null ? colors.error : colors.border,
               },
             ]}>
-            <MaterialIcon name="calendar-text-outline" size={22} color={colors.textMuted} />
             <TextInput
               ref={field}
               accessibilityLabel={request.fieldLabel ?? request.message}
@@ -1043,7 +1025,9 @@ export function PromptDialog({
               onSubmitEditing={confirm}
             />
           </View>
-          {error !== null ? (
+          {/* An invalid date explains itself BELOW the field and keeps the draft
+              and the label on screen. */}
+          {error !== null && (
             <Text
               testID="prompt-dialog-error"
               accessibilityRole="alert"
@@ -1051,44 +1035,62 @@ export function PromptDialog({
               style={[styles.dateHint, { color: colors.error }]}>
               {error}
             </Text>
-          ) : (
-            <Text style={[styles.dateHint, { color: colors.textMuted }]}>
-              {request.formatHint ?? ''}
-            </Text>
           )}
         </View>
         <View style={[styles.dateDivider, { backgroundColor: colors.cardDivider }]} />
+        {/* Quiet Cancel beside ONE neutral outlined Apply: right aligned, both in
+            real 48/44 dp targets around 36 dp visible buttons. No blue fill and
+            no check glyph - "Apply template" already says what it does. */}
         <View style={[styles.dateActions, stacked && styles.dateActionsStacked]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={request.cancelText}
             onPress={request.onCancel}
-            style={({ pressed }) => [
-              styles.dateButton,
-              stacked ? styles.dateButtonStacked : cancelSize,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-              pressed && { opacity: 0.7 },
-            ]}>
-            <Text style={[styles.dateButtonText, { color: colors.text }]} numberOfLines={2}>
-              {request.cancelText}
-            </Text>
+            style={[styles.dateButtonTarget, stacked && styles.dateButtonStacked]}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.dateButton,
+                  styles.dateCancel,
+                  stacked && styles.dateButtonStacked,
+                  // Two outlined answers: Cancel wears the quieter frame, Apply
+                  // the stronger slate one. Both sit on the card's own surface.
+                  {
+                    backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}>
+                <Text
+                  style={[styles.dateButtonText, { color: colors.textMuted }]}
+                  numberOfLines={2}>
+                  {request.cancelText}
+                </Text>
+              </View>
+            )}
           </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={request.confirmText}
             onPress={confirm}
-            style={({ pressed }) => [
-              styles.dateButton,
-              stacked ? styles.dateButtonStacked : applySize,
-              { backgroundColor: colors.accentFill, borderColor: colors.accentFill },
-              pressed && { opacity: 0.8 },
-            ]}>
-            <Icon name="checkmark" size={20} color={colors.accentFillText} />
-            <Text
-              style={[styles.dateButtonText, { color: colors.accentFillText }]}
-              numberOfLines={2}>
-              {request.confirmText}
-            </Text>
+            style={[styles.dateButtonTarget, stacked && styles.dateButtonStacked]}>
+            {({ pressed }) => (
+              <View
+                style={[
+                  styles.dateButton,
+                  styles.dateApply,
+                  stacked && styles.dateButtonStacked,
+                  {
+                    backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+                    borderColor: colors.textMuted,
+                  },
+                ]}>
+                <Text
+                  style={[styles.dateButtonText, styles.dateApplyText, { color: colors.text }]}
+                  numberOfLines={2}>
+                  {request.confirmText}
+                </Text>
+              </View>
+            )}
           </Pressable>
         </View>
       </Sheet>
@@ -1120,15 +1122,15 @@ export function PromptDialog({
             keyboardType={request.keyboardType}
             maxLength={request.maxLength ?? PROMPT_MAX_LENGTH}
           />
-          {request.today !== undefined && (
+          {today !== undefined && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={request.today.label}
+              accessibilityLabel={today.label}
               onPress={fillToday}
               hitSlop={6}
               style={({ pressed }) => [styles.promptChip, { opacity: pressed ? 0.6 : 1 }]}>
               <Text style={[styles.promptChipText, { color: colors.accent }]}>
-                {request.today.label}
+                {today.label}
               </Text>
             </Pressable>
           )}
@@ -1176,6 +1178,13 @@ export function StatusCaption(): React.JSX.Element | null {
   );
 }
 
+/**
+ * Real touch target: Android asks for 48 dp, iOS' convention is 44 dp. The
+ * date form's visible controls stay at 36 dp INSIDE these targets - nothing here
+ * shrinks a target or fakes one with hitSlop.
+ */
+const TOUCH = Platform.OS === 'android' ? 48 : 44;
+
 const styles = StyleSheet.create({
   /**
    * The sheet rises from the bottom edge over a dim scrim - the round-3 review
@@ -1207,19 +1216,26 @@ const styles = StyleSheet.create({
   /** The question's explanation, muted, under the title. */
   sheetCaption: { fontSize: 13, lineHeight: 19, paddingHorizontal: 16, marginTop: 2 },
   /**
-   * The compact Apply-template sheet (r3 reference): a 520 dp cap with 24 pt
-   * corners, the reference's header - a 40 pt pale-indigo calendar tile, the
-   * bold "Apply template" title with the real template summary (date · meals)
-   * stacked under it, and the close X - then a 12 pt body and a scrollable one
-   * so the answers stay reachable with the keyboard open.
+   * The compact Apply-template sheet: a 520 dp cap with 16 pt corners and 16 dp
+   * gutters, a header that starts at the sheet's top edge (the real template
+   * context over the task title, no badge, no grabber) and a SHORT body - one
+   * labelled date field and two outlined answers.
    */
   sheetDate: {
     maxWidth: 520,
     maxHeight: '92%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
   },
-  headerDate: { columnGap: 12, paddingLeft: 20, paddingRight: 10, marginTop: 12, minHeight: 44 },
+  headerDate: {
+    alignItems: 'flex-start',
+    columnGap: 8,
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingTop: 12,
+    marginTop: 0,
+    minHeight: 0,
+  },
   headerBadge: {
     width: 36,
     height: 36,
@@ -1227,77 +1243,74 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /** The reference's tile: 40 pt square, a 13 pt corner, the calendar at 23 pt. */
-  headerBadgeDate: { width: 40, height: 40, borderRadius: 13 },
-  /** The title + summary column, filling the row between the tile and the X. */
+  /** The context + title column, filling the row between the edge and the X. */
   headerTextDate: { flex: 1, minWidth: 0 },
-  closeDate: { width: 44, height: 44 },
-  /** The template summary under the title: slate ink, 15 pt, one line. */
-  sheetCaptionDate: { fontSize: typeScale.subheadline, lineHeight: 20, marginTop: 1 },
+  /** A real 48/44 dp close target - the 22 pt glyph sits inside it. */
+  closeDate: { width: TOUCH, height: TOUCH },
+  /** The real template (name · count) ABOVE the title: muted 12 pt, wrapping. */
+  sheetCaptionDate: { fontSize: 12, lineHeight: 17, marginBottom: 2 },
   sheetScroll: { flexShrink: 1 },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
-  /** The date form's body: label + Today, the field, then the hint/error line. */
-  dateBody: { paddingHorizontal: 20, marginTop: 12 },
-  dateHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: 12,
-    marginBottom: 8,
-  },
-  dateLabel: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 14 },
-  todayChip: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayText: { fontFamily: fonts.medium, fontSize: 14 },
+  /** The date form's body: the label, then the compact date field. */
+  dateBody: { paddingHorizontal: 16, marginTop: 10 },
+  dateLabel: { fontFamily: fonts.regular, fontSize: 12, marginBottom: 6 },
+  /**
+   * A COMPACT field: content-sized (not a full-width bar) and 40 dp tall, on the
+   * card's own surface with 8 dp corners. No Today shortcut beside it.
+   */
   dateField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 10,
+    alignSelf: 'flex-start',
+    minWidth: 150,
+    minHeight: 40,
+    justifyContent: 'center',
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderRadius: 12,
-    minHeight: 48,
+    borderRadius: 8,
   },
   dateInput: {
-    flex: 1,
+    minHeight: 40,
     minWidth: 0,
-    minHeight: 48,
-    paddingVertical: 10,
+    paddingVertical: 6,
     paddingHorizontal: 0,
     fontFamily: fonts.regular,
-    fontSize: 17,
+    fontSize: 16,
+    fontVariant: ['tabular-nums'],
   },
   dateHint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, marginTop: 6 },
   /** ONE 1 pt inset rule before the answers. */
-  dateDivider: { height: 1, marginHorizontal: 20, marginTop: 16 },
-  dateActions: { flexDirection: 'row', columnGap: 10, paddingHorizontal: 20, paddingTop: 14 },
-  dateActionsStacked: { flexDirection: 'column' },
-  dateButton: {
-    minHeight: 48,
-    borderRadius: 12,
-    borderWidth: 1,
+  dateDivider: { height: 1, marginHorizontal: 16, marginTop: 12 },
+  /** Right-aligned answers, 8 dp apart, 6 dp under the rule. */
+  dateActions: {
     flexDirection: 'row',
+    justifyContent: 'flex-end',
+    columnGap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+  },
+  dateActionsStacked: { flexDirection: 'column' },
+  /** The real 48/44 dp target under each visible 36 dp button. */
+  dateButtonTarget: { minHeight: TOUCH, justifyContent: 'center' },
+  dateButton: {
+    minHeight: 36,
+    borderRadius: 8,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    columnGap: 7,
-    paddingVertical: 11,
+    paddingVertical: 5,
     paddingHorizontal: 12,
   },
-  /** The answers share the row's width as 1 : 1.8 (computed in the component,
-   *  because a flex ratio would add each label's width to the split). */
+  /** Content-driven minimum widths - never the old fixed 1 : 1.8 split. */
+  dateCancel: { minWidth: 64 },
+  dateApply: { minWidth: 136 },
   dateButtonStacked: { width: '100%' },
   dateButtonText: {
-    fontFamily: fonts.medium,
-    fontSize: 15,
+    fontFamily: fonts.regular,
+    fontSize: 13,
     flexShrink: 1,
     textAlign: 'center',
   },
+  /** "Apply template" carries the semibold weight; Cancel stays quiet. */
+  dateApplyText: { fontFamily: fonts.medium },
   /** Content between the caption and the rows (input fields, errors). */
   body: { paddingHorizontal: 16, paddingTop: 14 },
   rows: { marginTop: 12 },
@@ -1315,7 +1328,9 @@ const styles = StyleSheet.create({
   /** The sheet's headline: bold, left aligned, with the close X beside it. */
   title: { flex: 1, minWidth: 0, fontSize: 20, fontFamily: fonts.bold, letterSpacing: -0.3 },
   /** The date form's headline: one step larger - it names the whole form. */
-  titleDate: { fontSize: typeScale.title2, lineHeight: 27, fontFamily: fonts.bold, letterSpacing: -0.3 },
+  /** The task title under the context: 20 pt medium so it can WRAP on one line
+   *  of copy rather than being clamped. */
+  titleDate: { fontSize: 20, lineHeight: 26, fontFamily: fonts.medium },
   /** Text prompt: the field and its optional "Today" shortcut share one row. */
   promptRow: {
     flexDirection: 'row',

@@ -1,23 +1,25 @@
-// The three slot counts of the statistics page's primary panel, laid out exactly
-// as the round-3 mockup draws them:
+// The three slot counts of the statistics page's primary panel, drawn as three
+// compact metric tiles:
 //
-//      ✓ 19            ✕ 7            ◷ 9
-//      Done            Missed         Pending
+//      ┌──────────┐ ┌──────────┐ ┌──────────┐
+//      │ ✓ 19     │ │ ✕ 7      │ │ ◷ 9      │
+//      │ Done     │ │ Missed   │ │ Pending  │
+//      └──────────┘ └──────────┘ └──────────┘
 //
 //      All 35 planned slots in this week.
 //
 // TWO lines per count: the state glyph and the BOLD number share the first line,
-// and the state's name sits under the GLYPH - each cell is one third of the row
-// and left aligned to it, so the three labels line up as columns. The closing
-// sentence sets the period total apart in the theme's ink, the way the mockup
-// does.
+// and the state's name sits under it. Each tile is one third of the row, wears
+// the same 1 dp outline / 8 dp corners as every small control in the app and
+// exposes the state as one accessible label ("Done: 19"), so a screen reader
+// reads a metric instead of three loose words.
 //
-// The panel used to print all three on a single line in 14 pt semibold, which
-// read as one grey sentence and made the numbers the smallest thing in the very
-// block they exist for.
+// The closing sentence is untouched copy: it still names the period's planned
+// slots and discloses the upcoming ones, which are a SUBSET of Pending and never
+// a fourth band.
 
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import type { Counts } from '../statisticsBreakdown';
 import { t, tFmt } from '../strings';
@@ -25,10 +27,22 @@ import { fonts, type ThemeColors } from '../theme';
 import { Icon, type IconName } from './icons';
 
 /**
- * Glyph size of a state mark. The mockup draws the mark just under the height of
- * the number it belongs to, so it never competes with it.
+ * Sizes of the tiles in dp/sp. The number stays the loudest text of the block;
+ * below this width (or above this text scale) the tiles stack, which is the only
+ * case where the three of them do not share one row.
  */
-const SLOT_GLYPH_SIZE = 18;
+const TILE = {
+  radius: 8,
+  borderWidth: 1,
+  minHeight: 56,
+  gap: 6,
+  glyphSize: 15,
+  countSize: 22,
+  labelSize: 11,
+  stackWidth: 330,
+  stackFontScale: 1.4,
+} as const;
+
 
 /**
  * Splits "All {0} planned slots in this {1}." around its number, so the total can
@@ -47,15 +61,19 @@ export function SlotCounts(props: {
 }): React.JSX.Element {
   const { counts, colors } = props;
   const { before, after } = plannedSentence(props.period);
+  /** Enlarged text or a narrow window: the tiles stack instead of squeezing. */
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = fontScale > TILE.stackFontScale || width < TILE.stackWidth;
   return (
     <>
-      <View style={styles.row}>
+      <View style={[styles.metrics, stacked && styles.metricsStacked]}>
         <SlotCount
           icon="checkmark"
           label={t('Dashboard_CountDone')}
           value={counts.done}
           color={colors.done}
           colors={colors}
+          stacked={stacked}
         />
         <SlotCount
           icon="close"
@@ -63,6 +81,7 @@ export function SlotCounts(props: {
           value={counts.missed}
           color={colors.missed}
           colors={colors}
+          stacked={stacked}
         />
         <SlotCount
           icon="time-outline"
@@ -70,6 +89,7 @@ export function SlotCounts(props: {
           value={counts.pending}
           color={colors.pending}
           colors={colors}
+          stacked={stacked}
         />
       </View>
       <Text style={[styles.sentence, { color: colors.textMuted }]}>
@@ -82,18 +102,26 @@ export function SlotCounts(props: {
   );
 }
 
-/** One cell: the state glyph beside its number, the state's name underneath. */
+/** One tile: the state glyph beside its number, the state's name underneath. */
 function SlotCount(props: {
   icon: IconName;
   label: string;
   value: number;
   color: string;
   colors: ThemeColors;
+  stacked: boolean;
 }): React.JSX.Element {
   return (
-    <View style={styles.cell}>
+    <View
+      accessible
+      accessibilityLabel={`${props.label}: ${props.value}`}
+      style={[
+        styles.cell,
+        props.stacked && styles.cellStacked,
+        { borderColor: props.colors.border, backgroundColor: props.colors.surface },
+      ]}>
       <View style={styles.head}>
-        <Icon name={props.icon} size={SLOT_GLYPH_SIZE} color={props.color} />
+        <Icon name={props.icon} size={TILE.glyphSize} color={props.color} />
         <Text style={[styles.value, { color: props.colors.text }]}>{props.value}</Text>
       </View>
       <Text style={[styles.label, { color: props.colors.textSecondary }]}>{props.label}</Text>
@@ -102,22 +130,35 @@ function SlotCount(props: {
 }
 
 const styles = StyleSheet.create({
-  /** Three equal columns; each cell is left aligned to its third of the panel. */
-  row: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 12 },
-  cell: { flex: 1, minWidth: 0, rowGap: 3 },
+  /** Three equal tiles; the stack is the large-text fallback, not the default. */
+  metrics: { flexDirection: 'row', columnGap: TILE.gap, marginTop: 10 },
+  metricsStacked: { flexDirection: 'column', rowGap: TILE.gap },
+  cell: {
+    flex: 1,
+    minWidth: 0,
+    rowGap: 2,
+    borderWidth: TILE.borderWidth,
+    borderRadius: TILE.radius,
+    minHeight: TILE.minHeight,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  /** Stacked tile: glyph + number on the left, the name beside them. */
+  cellStacked: { flex: 0, flexDirection: 'row', alignItems: 'center', columnGap: 8 },
   /** First line: the state glyph and the number it counts. */
-  head: { flexDirection: 'row', alignItems: 'center', columnGap: 7 },
+  head: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
   /** The number is what the block exists for, so it is the largest text in it. */
   value: {
-    fontSize: 22,
+    fontSize: TILE.countSize,
     lineHeight: 26,
     fontFamily: fonts.bold,
     letterSpacing: -0.4,
     fontVariant: ['tabular-nums'],
   },
-  /** Second line: the state's name, under the GLYPH, not under the number. */
-  label: { fontSize: 14, lineHeight: 18, fontFamily: fonts.regular },
-  /** The closing sentence: muted, with the period total set apart below. */
-  sentence: { marginTop: 14, fontSize: 12, lineHeight: 17, fontFamily: fonts.regular },
+  /** Second line: the state's name, quiet and smaller than its number. */
+  label: { fontSize: TILE.labelSize, lineHeight: 15, fontFamily: fonts.regular, flexShrink: 1 },
+  /** The closing sentence: muted, with the period total set apart. */
+  sentence: { marginTop: 8, fontSize: 12, lineHeight: 17, fontFamily: fonts.regular },
   sentenceNumber: { fontFamily: fonts.bold },
 });
+

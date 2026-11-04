@@ -28,15 +28,23 @@
 //   bar        background surface, 1 pt top divider (line), padding 8 / 4 / 13,
 //              five equal columns
 //   tab        min-height 52, column, gap 5, caption 11 pt / 16 pt line
-//   glyph      21 pt, in a 12 pt-rounded chip padded 5 x 14 -> 49 x 31
-//   selected   accent ink, glyph chip filled with the accent tint
+//   glyph      21 pt, in an 8 pt-rounded chip padded 5 x 14 -> 49 x 31
+//   selected   accent ink, glyph chip filled with the accent tint and outlined
+//              in the accent; every other tab keeps the SAME box with a
+//              transparent outline, so switching tabs never shifts a glyph
 
 /** Glyph size inside the bar. */
 export const TAB_GLYPH_SIZE = 21;
-/** Selected-glyph chip: 21 pt glyph + 5 / 14 pt padding, 12 pt corners. */
+/** Selected-glyph chip: 21 pt glyph + 5 / 14 pt padding, 8 pt corners. */
 export const TAB_GLYPH_CHIP_WIDTH = 49;
 export const TAB_GLYPH_CHIP_HEIGHT = 31;
-export const TAB_GLYPH_CHIP_RADIUS = 12;
+export const TAB_GLYPH_CHIP_RADIUS = 8;
+/**
+ * The chip's outline. It is declared on EVERY tab - transparent unless that tab
+ * is selected - so the box never changes size when the selection moves. 1 dp,
+ * like every other small outlined control in the app.
+ */
+export const TAB_GLYPH_CHIP_BORDER_WIDTH = 1;
 /** Caption line box (11 pt type on a 16 pt line) and the chip-to-caption gap. */
 export const TAB_LABEL_LINE_HEIGHT = 16;
 export const TAB_LABEL_GAP = 5;

@@ -117,6 +117,12 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_SyncGuestDetail: 'Sign in to sync across devices',
   /** Calendar (round-3 design): mark key and the selected-day summary. */
   Rn_CalendarDots: '5 dots = 5 meals',
+  /**
+   * Spoken hint on every date cell - opening is available as an action (a second
+   * tap of the same date within 300 ms, a long press, or the cell's accessibility
+   * action). The old visible "Double-tap a date to open" line was removed.
+   */
+  Rn_CalendarSelectHint: 'Select date. Open day is available in accessibility actions.',
   Rn_CalendarDaySummary: '{0} done · {1} missed · {2} pending',
   Rn_CalendarPhotoCount: '{0} photos',
   /** Photo count on one agenda row (a camera glyph plus this number). */

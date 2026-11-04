@@ -12,7 +12,10 @@
 // All geometry comes from src/ui/tabBar.ts, so the chip, the caption line and
 // the bar's height can never drift apart. Nothing here picks a colour on its
 // own: the navigator's tint carries the accent / muted ink, the chip is a wash of
-// the SAME accent (`tabActiveChipFill`), and every value follows the theme.
+// the SAME accent (`tabActiveChipFill`) outlined in that same accent, and every
+// value follows the theme. The eight-dp corners and the one-dp outline are the
+// SHARED indicator for all five tabs - the box is laid out on every tab (with a
+// transparent outline when inactive) so the selection never moves a glyph.
 
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -26,6 +29,7 @@ import {
   type MaterialName,
 } from './icons';
 import {
+  TAB_GLYPH_CHIP_BORDER_WIDTH,
   TAB_GLYPH_CHIP_HEIGHT,
   TAB_GLYPH_CHIP_RADIUS,
   TAB_GLYPH_CHIP_WIDTH,
@@ -60,7 +64,9 @@ export type TabGlyph =
 
 /**
  * One tab glyph. The chip is always laid out (so switching tabs never moves the
- * glyph) and only the ACTIVE tab gives it a fill.
+ * glyph) and only the ACTIVE tab gives it a fill and an outline. `color` is the
+ * navigator's tint, which IS the accent on the active tab, so the outline can
+ * follow it without a second prop.
  */
 export function TabBarGlyph(
   props: TabGlyph & {
@@ -72,7 +78,15 @@ export function TabBarGlyph(
 ): React.JSX.Element {
   return (
     <View
-      style={[styles.chip, props.focused ? { backgroundColor: props.chipFill } : null]}>
+      style={[
+        styles.chip,
+        {
+          // Transparent (not absent) on inactive tabs: the 1 dp frame is part of
+          // the box geometry, so the glyph never shifts when the selection moves.
+          borderColor: props.focused ? props.color : 'transparent',
+        },
+        props.focused ? { backgroundColor: props.chipFill } : null,
+      ]}>
       {glyph(props)}
     </View>
   );
@@ -115,6 +129,7 @@ const styles = StyleSheet.create({
     width: TAB_GLYPH_CHIP_WIDTH,
     height: TAB_GLYPH_CHIP_HEIGHT,
     borderRadius: TAB_GLYPH_CHIP_RADIUS,
+    borderWidth: TAB_GLYPH_CHIP_BORDER_WIDTH,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,17 +1,19 @@
-// The Templates page as the r3 mockup draws it: the "Templates" heading with its
-// small regular subtitle, ONE quiet inline notice, then an outlined card per
-// template - glyph, real name over its update time, a neutral outlined kind
-// chip, the REAL meal count beside the "Meal preview" chevron, and ONE neutral
-// outlined "Apply to date" control that stays at the card's floor in both states.
+// The Templates page: the "Templates" heading with its small regular subtitle,
+// ONE quiet inline notice, then a compact outlined TILE per template - the
+// outlined kind glyph, the real name, ONE metadata row (kind · real meal count,
+// update time at the right) and ONE action row holding two SIBLING targets:
+// "Meal preview" + chevron, and a neutral outlined "Apply to date" inside a real
+// 48/44 dp target. The expanded contents render below that row.
 //
 // Pinned here: the wording, the count and every time/title come from the stored
-// template, the accordion really toggles, the apply action still goes through the
+// template, the accordion really toggles, preview and apply are separate targets
+// (the card itself is not pressable), the apply action still goes through the
 // validated date prompt, and - the invariant of this page - a template can never
 // show a completion state or a photograph.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { StyleSheet, Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { MealCategoryKey, SyncStatus } from '../src/domain/enums';
 import { MealTemplate, MealTemplateContent } from '../src/domain/models';
@@ -139,11 +141,16 @@ function styleOf(node: { props: { style?: unknown } }): Record<string, unknown> 
   return (StyleSheet.flatten(resolved as never) ?? {}) as Record<string, unknown>;
 }
 
-/** Every text the page prints. */
+/**
+ * Every text the page prints. A line built from several runs (the metadata's
+ * "kind · count", or the "All 5 planned …" sentences elsewhere) contributes each
+ * of its runs, so an assertion still reads the WORDS rather than one exact split.
+ */
 function texts(renderer: Renderer): string[] {
   return renderer.root
     .findAllByType(Text)
-    .map((node) => node.props.children)
+    .flatMap((node) => (Array.isArray(node.props.children) ? node.props.children : []))
+    .concat(renderer.root.findAllByType(Text).map((node) => node.props.children))
     .filter((value): value is string => typeof value === 'string');
 }
 
@@ -206,6 +213,16 @@ describe('the template card', () => {
     // Five stored meals, counted from the payload.
     expect(printed).toContain(tFmt('Rn_TemplateMealCount', 5));
     expect(tFmt('Rn_TemplateMealCount', 5)).toBe('5 meals');
+    // The kind and the count share ONE metadata line (the separate kind badge and
+    // the standalone preview-count column are gone) - and it is not duplicated.
+    const kindLines = renderer.root
+      .findAllByType(Text)
+      .map((node) => node.props.children)
+      .filter((children): children is unknown[] => Array.isArray(children))
+      .map((children) => children.join(''))
+      .filter((line) => line.includes(t('Template_KindDay')));
+    expect(kindLines).toHaveLength(1);
+    expect(kindLines[0]).toContain(tFmt('Rn_TemplateMealCount', 5));
   });
 
   test('counts a single-meal template as one meal', async () => {
@@ -257,18 +274,53 @@ describe('the template card', () => {
     expect(printed).not.toContain(t('Rn_TemplateNoTime'));
   });
 
-  test('offers ONE full-width, 44 pt apply button in both states', async () => {
+  test('puts Apply in a real 48/44 pt target around a 36 pt neutral button', async () => {
     const renderer = await renderScreen();
-    const collapsed = styleOf(applyButtons(renderer)[0]);
-    expect(collapsed.minHeight).toBeGreaterThanOrEqual(44);
-    // The neutral outlined control: 10 dp corners, a thin frame - no accent fill.
-    expect(collapsed.borderRadius).toBe(10);
-    expect(collapsed.borderWidth).toBe(1);
+    // The TARGET carries the platform touch height (44 in this iOS test window)
+    // and keeps the design's 140 dp minimum width.
+    const target = styleOf(applyButtons(renderer)[0]);
+    expect(target.minHeight).toBeGreaterThanOrEqual(44);
+    expect(target.minWidth).toBe(140);
+    // The VISIBLE control inside that target is a 36 dp neutral outline: 8 dp
+    // corners, a thin frame on the card's own surface - no accent fill.
+    const visible = applyButtons(renderer)[0]
+      .findAllByType(View)
+      .map((node) => styleOf(node))
+      .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
+    expect(visible).toBeDefined();
+    expect(visible?.minHeight).toBe(36);
     expect(applyButtons(renderer)).toHaveLength(1);
 
+    // Expanding the contents must neither move nor duplicate the control.
     act(() => accordion(renderer).props.onPress());
     expect(styleOf(applyButtons(renderer)[0]).minHeight).toBeGreaterThanOrEqual(44);
     expect(applyButtons(renderer)).toHaveLength(1);
+  });
+
+  test('keeps preview and apply as two sibling targets in a non-clickable card', async () => {
+    const renderer = await renderScreen();
+    const preview = accordion(renderer);
+    const apply = applyButtons(renderer)[0];
+    // Neither target contains the other, so a press can only ever do its own job.
+    expect(
+      apply.findAll((node) => node.props?.accessibilityLabel === t('Rn_TemplateMealPreview')),
+    ).toHaveLength(0);
+    expect(
+      preview.findAll((node) => node.props?.accessibilityLabel === t('Template_Apply')),
+    ).toHaveLength(0);
+    // One template, exactly two controls - no whole-card press, no third action.
+    const controls = renderer.root.findAll(
+      (node) =>
+        typeof node.props?.onPress === 'function' &&
+        typeof node.props?.accessibilityLabel === 'string',
+    );
+    expect(controls.map((node) => node.props.accessibilityLabel)).toEqual([
+      t('Rn_TemplateMealPreview'),
+      t('Template_Apply'),
+    ]);
+    // Previewing alone never opens the apply sheet.
+    act(() => preview.props.onPress());
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(0);
   });
 
   test('never shows a completion state or a photograph', async () => {
@@ -300,9 +352,10 @@ describe('applying', () => {
     expect(texts(renderer)).toContain(
       `${formatMediumDate(DAY_TEMPLATE.name)} · ${tFmt('Rn_TemplateMealCount', 5)}`,
     );
-    // ...and it labels the field it asks for, with the format under it.
+    // ...and it labels the field it asks for. The format is no longer a second
+    // printed line: it lives on the field itself as its hint/placeholder.
     expect(texts(renderer)).toContain(t('Rn_TemplateDateLabel'));
-    expect(texts(renderer)).toContain(t('Rn_TemplateDateFormatHint'));
+    expect(field.props.accessibilityHint).toBe(t('Rn_TemplateDateFormatHint'));
   });
 
   test('writes the template into the typed date', async () => {

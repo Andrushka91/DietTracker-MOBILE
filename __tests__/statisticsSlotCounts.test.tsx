@@ -1,16 +1,18 @@
-// The "meal-slot completion" counts, drawn exactly as the round-3 mockup draws
-// them:
+// The "meal-slot completion" counts, drawn as three compact metric tiles:
 //
-//      ✓ 19            ✕ 7            ◷ 9
-//      Done            Missed         Pending
+//      ┌──────────┐ ┌──────────┐ ┌──────────┐
+//      │ ✓ 19     │ │ ✕ 7      │ │ ◷ 9      │
+//      │ Done     │ │ Missed   │ │ Pending  │
+//      └──────────┘ └──────────┘ └──────────┘
 //
 //      All 35 planned slots in this week.
 //
-// The defect these tests pin: all three counts shared ONE line
+// The defect these tests still pin: all three counts once shared ONE line
 // ("✓ 19 Done   ✕ 7 Missed   ◷ 9 Pending") in 14 pt semibold, centred in their
 // third of the row. The numbers - the only reason the block exists - were the
 // smallest text in it, and each label drifted with the width of the number above
-// it instead of forming a column.
+// it instead of forming a column. The tiles keep the number loud, add the app's
+// 1 dp / 8 dp outline, and give each state ONE accessible label.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -18,6 +20,17 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { SlotCounts } from '../src/ui/components/SlotCounts';
 import { darkColors, fonts, lightColors, type ThemeColors } from '../src/ui/theme';
+
+/**
+ * The tiles stack on a narrow window or at a large text scale. RN's jest window
+ * reports fontScale 2, so the default phone-sized window is set explicitly here
+ * and the tests below read the ROW layout.
+ */
+const mockWindow = { width: 390, height: 844, scale: 3, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -67,7 +80,7 @@ function sentence(renderer: Renderer): TestRenderer.ReactTestInstance {
 
 
 describe('the meal-slot completion counts', () => {
-  test('stacks a glyph and a BOLD number over the label, one cell per state', () => {
+  test('draws one outlined tile per state: BOLD number beside the glyph, label under it', () => {
     for (const colors of [lightColors, darkColors]) {
       const renderer = render(COUNTS, colors);
       const found = cells(renderer);
@@ -97,6 +110,13 @@ describe('the meal-slot completion counts', () => {
         expect(label.props.children).toBe(expectedLabel);
         expect(styleOf(cell).alignItems).toBeUndefined();
 
+        // Each count is its own compact tile: the app's 1 dp outline and 8 dp
+        // corners, and ONE accessible label so a screen reader reads a metric
+        // ("Done: 19") instead of three loose words.
+        expect(styleOf(cell).borderWidth).toBe(1);
+        expect(styleOf(cell).borderRadius).toBe(8);
+        expect(cell.props.accessibilityLabel).toBe(`${expectedLabel}: ${expectedNumber}`);
+
         // The number is the loudest text of the block: 22 pt bold ink with
         // tabular figures, so two- and three-digit counts stay aligned.
         const numberStyle = styleOf(number);
@@ -105,9 +125,10 @@ describe('the meal-slot completion counts', () => {
         expect(numberStyle.fontVariant).toEqual(['tabular-nums']);
         expect(numberStyle.color).toBe(colors.text);
 
-        // The label is a quiet second line, not another number.
+        // The label is a quiet second line, smaller than its number: inside a
+        // third of the card it has to fit "Pending" without stealing the row.
         const labelStyle = styleOf(label);
-        expect(labelStyle.fontSize).toBe(14);
+        expect(labelStyle.fontSize).toBe(11);
         expect(labelStyle.fontFamily).toBe(fonts.regular);
         expect(labelStyle.color).toBe(colors.textSecondary);
       });

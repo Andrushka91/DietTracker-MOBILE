@@ -1,29 +1,38 @@
 // Statistics (spec 8.6) - one primary measure per period, then progressive
-// detail, drawn as OUTLINE cards on the page wash:
+// detail, drawn as compact OUTLINE surfaces on the page wash:
 //
-//   period      a compact outlined Day / Week / Month / Year selector (the
-//               active period is an accent label plus a short underline, not a
-//               heavy tray), then two white 44 dp arrows around the exact range
+//   controls    ONE outlined group, not two frames: the bare previous arrow, the
+//               exact period and the bare next arrow on the TOP row, then a
+//               single internal 1 dp divider, then the four Day / Week / Month /
+//               Year filters. The active filter is a subtle lavender surface
+//               with an accent outline and a semibold label - never a filled
+//               blue action button and never a tiny underline.
 //   primary     one outlined card: "Meal-slot completion" with its info action,
-//               the big percentage beside its fraction/caption, ONE 8 dp
-//               composition bar and the three real slot counts (glyph + bold
-//               number over the label, each in its own third of the row) -
-//               see components/SlotCounts.tsx for that block's layout
+//               the big percentage beside its outlined fraction/caption block,
+//               ONE 10 dp composition strip and the three real slot counts as
+//               compact metric tiles (see components/SlotCounts.tsx)
 //   breakdown   ONE outlined card of grouped compact rows (meals, days, partial
-//               weeks or months) with inset separators and a selection cue
+//               weeks or months) with inset separators and a selection cue; the
+//               Week period draws seven real daily columns on ONE absolute slot
+//               scale whenever the width and text scale can carry seven real
+//               touch targets (see components/WeeklyOutcomeChart.tsx)
 //   selection   counts of the chosen row and an explicit day/calendar action
-//   disclosures two quiet outlined rows: "By meal type" and "How the numbers
-//               work" (the summary's info action opens the same explanation)
+//   details     ONE outlined surface holding the two optional disclosures -
+//               "By meal type" and "How the numbers work" - split by one inset
+//               line (the summary's info action opens the same explanation)
 //
 // Two rates are deliberately BOTH shown, and each is labelled:
 //   * completion = Done / all planned slots (upcoming meals included),
 //   * among recorded outcomes = Done / (Done + Missed) - the domain's
 //     PeriodProgress.percentage, which excludes pending slots.
-// Reporting only one of them is what made the old page easy to misread.
+// Reporting only one of them is what made the old page easy to misread. The
+// upcoming slots stay a disclosed SUBSET of Pending: they are never a fourth
+// band and never leave the denominator.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -44,15 +53,23 @@ import { dateHandoff } from '../dates';
 import { createLatestRequestRunner } from '../latestRequest';
 import { Icon, type IconName } from '../components/icons';
 import { SlotCounts } from '../components/SlotCounts';
+import {
+  CHART,
+  WeeklyOutcomeChart,
+  type WeeklyChartRow,
+} from '../components/WeeklyOutcomeChart';
 import { mealNameKey, t, tFmt } from '../strings';
 import {
   fonts,
   metrics,
   pageTitleStyle,
   themeColors,
+  tintAlpha,
   type ThemeColors,
 } from '../theme';
+
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
+import { weeklyChartFits } from '../statisticsChart';
 import {
   buildRows,
   countSlots,
@@ -69,26 +86,44 @@ import {
 const MODES: Mode[] = ['daily', 'weekly', 'monthly', 'yearly'];
 
 /**
+ * Real touch target: Android asks for 48 dp, iOS' convention is 44 dp. The
+ * visible graphics stay compact inside it - no control here shrinks a target to
+ * fit the design.
+ */
+const TOUCH = Platform.OS === 'android' ? 48 : 44;
+
+/**
  * Sizes of this page in dp/sp - the palette comes from the theme, so light and
- * dark mode stay in step. One card rhythm: 16 dp corners, 14 dp padding, 1 dp
- * outline, 44 dp controls and 44 dp minimum rows.
+ * dark mode stay in step. One rhythm: 16 dp cards, 12 dp padding, 1 dp outlines,
+ * 8 dp small controls with 6 dp inner surfaces, and real 48/44 dp targets.
  */
 const STAT = {
+  pageTop: 8,
+  sectionGap: 12,
   cardRadius: 16,
-  cardPadding: 14,
+  cardPadding: 12,
   borderWidth: 1,
-  controlHeight: 44,
-  controlRadius: 10,
-  segmentRadius: 12,
-  barHeight: 8,
-  rowMinHeight: 44,
+  controlHeight: TOUCH,
+  controlRadius: 8,
+  segmentVisibleMinHeight: 36,
+  segmentSurfaceRadius: 6,
+  segmentInset: 4,
+  segmentLabelSize: 13,
+  periodLabelSize: 14,
+  percentSize: 42,
+  fractionSize: 16,
+  captionSize: 12,
+  barHeight: 10,
+  barRadius: 3,
+  rowMinHeight: TOUCH,
   rowPadding: 12,
   rowGap: 8,
   rowLabelWidth: 64,
   rowValueWidth: 58,
-  rowBarHeight: 7,
+  rowBarHeight: 10,
   dividerWidth: 1,
 } as const;
+
 
 /**
  * One settled period: key, totals and rows travel together, so the heading can
@@ -228,6 +263,46 @@ export function StatisticsScreen(): React.JSX.Element {
   ];
   /** The value column keeps its width while the system text grows. */
   const valueWidth = STAT.rowValueWidth * Math.max(1, fontScale);
+  /**
+   * ONE toggle for both week presentations: a column and a list row select the
+   * same row, and pressing the selected one again clears it. Selecting is all it
+   * does - opening a day still needs the selection panel's explicit action.
+   */
+  const toggleRow = (key: string): void => {
+    setSelectedKey((current) => (current === key ? null : key));
+  };
+  /** Chart columns reuse the settled rows' labels and counts unchanged. */
+  const chartRows: WeeklyChartRow[] = rows.map((row) => {
+    const allLater = row.counts.upcoming === row.counts.total;
+    return {
+      key: row.key,
+      label: row.label,
+      valueLabel: allLater
+        ? t('Rn_StatLater')
+        : tFmt('Rn_StatDoneOfTotal', row.counts.done, row.counts.total),
+      accessibilityLabel: `${row.context}: ${tFmt(
+        'Rn_StatDoneSuffix',
+        row.counts.done,
+        row.counts.total,
+      )}`,
+      counts: row.counts,
+      allLater,
+    };
+  });
+  /**
+   * Seven real daily columns need seven real targets beside the axis. Narrower
+   * windows and enlarged text keep the readable row breakdown instead of
+   * shrinking the chart's targets.
+   */
+  const weeklyChart =
+    mode === 'weekly' &&
+    !stacked &&
+    weeklyChartFits(
+      width - 2 * metrics.pagePadding - 2 * STAT.cardPadding - 2 * STAT.borderWidth,
+      chartRows.length,
+      CHART.axisWidth,
+      CHART.columnWidth,
+    );
 
   /** The tab navigator is untyped here, so the two destinations are named once. */
   const openRow = (row: BreakdownRow): void => {
@@ -256,31 +331,17 @@ export function StatisticsScreen(): React.JSX.Element {
       </Text>
       <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('Rn_StatSubtitle')}</Text>
 
-      {/* Period: the four modes, then the exact range between two 44 dp arrows. */}
-      <PeriodSelector
+      {/* Controls: ONE outlined group. Top row = arrows around the exact period,
+          bottom row = the four filters, zero gap and one shared divider. */}
+      <PeriodControls
         labels={modeLabels}
         index={MODES.indexOf(mode)}
         onChange={(index) => setMode(MODES[index])}
+        period={periodLabel(mode, range.from, range.to)}
+        onPrevious={() => shift(-1)}
+        onNext={() => shift(1)}
         colors={colors}
       />
-
-      <View style={styles.periodRow}>
-        <PeriodArrow
-          direction="back"
-          label={t('Dashboard_PreviousDay')}
-          onPress={() => shift(-1)}
-          colors={colors}
-        />
-        <Text style={[styles.periodLabel, { color: colors.text }]}>
-          {periodLabel(mode, range.from, range.to)}
-        </Text>
-        <PeriodArrow
-          direction="forward"
-          label={t('Dashboard_NextDay')}
-          onPress={() => shift(1)}
-          colors={colors}
-        />
-      </View>
 
       {view === null ? (
         /* The range above already names the requested period, so the body must
@@ -354,87 +415,101 @@ export function StatisticsScreen(): React.JSX.Element {
       ) : (
         <View
           style={[styles.breakdown, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          {rows.map((row, index) => {
-            const isSelected = row.key === selectedKey;
-            const allLater = row.counts.upcoming === row.counts.total;
-            const valueLabel = allLater
-              ? t('Rn_StatLater')
-              : tFmt('Rn_StatDoneOfTotal', row.counts.done, row.counts.total);
-            return (
-              <React.Fragment key={row.key}>
-                {/* Inset 1 dp line: the rows read as one group, not nine cards. */}
-                {index > 0 && (
-                  <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
-                )}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${row.context}: ${tFmt(
-                    'Rn_StatDoneSuffix',
-                    row.counts.done,
-                    row.counts.total,
-                  )}`}
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => setSelectedKey(isSelected ? null : row.key)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    stacked && styles.rowStacked,
-                    pressed && { backgroundColor: colors.surfaceVariant },
-                  ]}>
-                  {isSelected && (
-                    <View
-                      accessible={false}
-                      style={[styles.selectionRail, { backgroundColor: colors.accent }]}
-                    />
+          {weeklyChart ? (
+            /* Seven real days on ONE absolute slot scale; a column selects the
+               same row the list would, and the panel below offers the action. */
+            <View style={styles.chartInset}>
+              <WeeklyOutcomeChart
+                rows={chartRows}
+                selectedKey={selectedKey}
+                onToggleRow={toggleRow}
+                colors={colors}
+              />
+            </View>
+          ) : (
+            rows.map((row, index) => {
+              const isSelected = row.key === selectedKey;
+              const allLater = row.counts.upcoming === row.counts.total;
+              const valueLabel = allLater
+                ? t('Rn_StatLater')
+                : tFmt('Rn_StatDoneOfTotal', row.counts.done, row.counts.total);
+              return (
+                <React.Fragment key={row.key}>
+                  {/* Inset 1 dp line: the rows read as one group, not nine cards. */}
+                  {index > 0 && (
+                    <View style={[styles.rowDivider, { backgroundColor: colors.border }]} />
                   )}
-                  {stacked ? (
-                    <>
-                      <View style={styles.stackedRowHead}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${row.context}: ${tFmt(
+                      'Rn_StatDoneSuffix',
+                      row.counts.done,
+                      row.counts.total,
+                    )}`}
+                    accessibilityState={{ selected: isSelected }}
+                    onPress={() => toggleRow(row.key)}
+
+                    style={({ pressed }) => [
+                      styles.row,
+                      stacked && styles.rowStacked,
+                      pressed && { backgroundColor: colors.surfaceVariant },
+                    ]}>
+                    {isSelected && (
+                      <View
+                        accessible={false}
+                        style={[styles.selectionRail, { backgroundColor: colors.accent }]}
+                      />
+                    )}
+                    {stacked ? (
+                      <>
+                        <View style={styles.stackedRowHead}>
+                          <Text
+                            style={[
+                              styles.rowLabelStacked,
+                              { color: isSelected ? colors.accent : colors.text },
+                            ]}
+                            numberOfLines={2}>
+                            {row.label}
+                          </Text>
+                          <Text
+                            style={[styles.rowValue, { color: colors.textMuted, width: valueWidth }]}
+                            numberOfLines={1}>
+                            {valueLabel}
+                          </Text>
+                        </View>
+                        <CompositionBar
+                          counts={row.counts}
+                          colors={colors}
+                          row
+                          allLater={allLater}
+                          style={styles.rowBarStacked}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {/* Month rows print a full compact range ("26 Oct – 1 Nov"),
+                            which wraps rather than being cut off. */}
                         <Text
                           style={[
-                            styles.rowLabelStacked,
+                            styles.rowLabel,
                             { color: isSelected ? colors.accent : colors.text },
                           ]}
                           numberOfLines={2}>
                           {row.label}
                         </Text>
+                        <CompositionBar counts={row.counts} colors={colors} row allLater={allLater} />
                         <Text
                           style={[styles.rowValue, { color: colors.textMuted, width: valueWidth }]}
                           numberOfLines={1}>
                           {valueLabel}
                         </Text>
-                      </View>
-                      <CompositionBar
-                        counts={row.counts}
-                        colors={colors}
-                        row
-                        allLater={allLater}
-                        style={styles.rowBarStacked}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      {/* Month rows print a full compact range ("26 Oct – 1 Nov"),
-                          which wraps rather than being cut off. */}
-                      <Text
-                        style={[
-                          styles.rowLabel,
-                          { color: isSelected ? colors.accent : colors.text },
-                        ]}
-                        numberOfLines={2}>
-                        {row.label}
-                      </Text>
-                      <CompositionBar counts={row.counts} colors={colors} row allLater={allLater} />
-                      <Text
-                        style={[styles.rowValue, { color: colors.textMuted, width: valueWidth }]}
-                        numberOfLines={1}>
-                        {valueLabel}
-                      </Text>
-                    </>
-                  )}
-                </Pressable>
-              </React.Fragment>
-            );
-          })}
+                      </>
+                    )}
+                  </Pressable>
+                </React.Fragment>
+              );
+            })
+          )}
         </View>
       )}
 
@@ -469,73 +544,85 @@ export function StatisticsScreen(): React.JSX.Element {
         </View>
       )}
 
-      {/* Disclosures: the meal-type table (meaningless for a single day) and the
-          calculation notes, including the separately labelled recorded-outcome
-          rate. */}
-      {mode !== 'daily' && recorded > 0 && (
-        <Disclosure
-          label={t('Rn_StatByMealType')}
-          icon="restaurant-outline"
-          open={openByMeal}
-          onToggle={() => setOpenByMeal((open) => !open)}
-          colors={colors}>
-          {(view.period.days[0]?.slots ?? []).map((slot, index) => {
-            const mealCounts = countSlots(view.period.days, today, slot.mealCategoryKey);
-            return (
-              <View
-                key={slot.mealCategoryKey}
-                style={[
-                  styles.mealTypeRow,
-                  index > 0 && {
-                    borderTopWidth: StyleSheet.hairlineWidth,
-                    borderTopColor: colors.hairline,
-                  },
-                ]}>
-                <Text style={[styles.mealTypeLabel, { color: colors.text }]}>
-                  {t(mealNameKey(slot.mealCategoryKey))}
-                </Text>
-                <Text style={[styles.mealTypeValue, { color: colors.textMuted }]}>
-                  {tFmt('Rn_StatDoneSuffix', mealCounts.done, mealCounts.total)}
-                </Text>
-              </View>
-            );
-          })}
-        </Disclosure>
-      )}
+      {/* Details: ONE calm outlined surface holds both optional disclosures - the
+          meal-type table (meaningless for a single day) and the calculation
+          notes, including the separately labelled recorded-outcome rate - split
+          by one inset line. */}
+      <View
+        style={[
+          styles.detailsGroup,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}>
+        {mode !== 'daily' && recorded > 0 && (
+          <>
+            <Disclosure
+              label={t('Rn_StatByMealType')}
+              icon="restaurant-outline"
+              open={openByMeal}
+              onToggle={() => setOpenByMeal((open) => !open)}
+              colors={colors}>
+              {(view.period.days[0]?.slots ?? []).map((slot, index) => {
+                const mealCounts = countSlots(view.period.days, today, slot.mealCategoryKey);
+                return (
+                  <View
+                    key={slot.mealCategoryKey}
+                    style={[
+                      styles.mealTypeRow,
+                      index > 0 && {
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: colors.hairline,
+                      },
+                    ]}>
+                    <Text style={[styles.mealTypeLabel, { color: colors.text }]}>
+                      {t(mealNameKey(slot.mealCategoryKey))}
+                    </Text>
+                    <Text style={[styles.mealTypeValue, { color: colors.textMuted }]}>
+                      {tFmt('Rn_StatDoneSuffix', mealCounts.done, mealCounts.total)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </Disclosure>
+            {/* One inset line between the two disclosures - not a second frame. */}
+            <View style={[styles.detailsDivider, { backgroundColor: colors.border }]} />
+          </>
+        )}
+
 
       <Disclosure
-        label={t('Rn_StatHowItWorks')}
-        icon="information-circle-outline"
-        open={openCalc}
-        onToggle={() => setOpenCalc((open) => !open)}
-        colors={colors}>
-        <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
-          {t('Rn_StatHowItWorksBody')}
-        </Text>
-        <View style={styles.outcomeRow}>
-          <View style={styles.copyColumn}>
-            <Text style={[styles.outcomeLabel, { color: colors.text }]}>
-              {t('Rn_StatAmongRecorded')}
-            </Text>
-            <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
-              {recorded === 0
-                ? t('Rn_StatNoRecorded')
-                : `${t('Dashboard_CountDone')} ${counts.done} · ${t(
-                    'Dashboard_CountMissed',
-                  )} ${counts.missed}`}
+          label={t('Rn_StatHowItWorks')}
+          icon="information-circle-outline"
+          open={openCalc}
+          onToggle={() => setOpenCalc((open) => !open)}
+          colors={colors}>
+          <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
+            {t('Rn_StatHowItWorksBody')}
+          </Text>
+          <View style={styles.outcomeRow}>
+            <View style={styles.copyColumn}>
+              <Text style={[styles.outcomeLabel, { color: colors.text }]}>
+                {t('Rn_StatAmongRecorded')}
+              </Text>
+              <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
+                {recorded === 0
+                  ? t('Rn_StatNoRecorded')
+                  : `${t('Dashboard_CountDone')} ${counts.done} · ${t(
+                      'Dashboard_CountMissed',
+                    )} ${counts.missed}`}
+              </Text>
+            </View>
+            <Text style={[styles.outcomeValue, { color: colors.text }]}>
+              {recordedRate === null ? '—' : `${recordedRate}%`}
             </Text>
           </View>
-          <Text style={[styles.outcomeValue, { color: colors.text }]}>
-            {recordedRate === null ? '—' : `${recordedRate}%`}
+          <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
+            {t('Rn_StatAmongRecordedBody')}
           </Text>
-        </View>
-        <Text style={[styles.disclosureBodyText, { color: colors.textSecondary }]}>
-          {t('Rn_StatAmongRecordedBody')}
-        </Text>
-        <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
-          {t('Statistics_Disclaimer')}
-        </Text>
-      </Disclosure>
+          <Text style={[styles.disclosureBodyText, { color: colors.textMuted }]}>
+            {t('Statistics_Disclaimer')}
+          </Text>
+        </Disclosure>
+      </View>
         </>
       )}
     </ScrollView>
@@ -544,9 +631,10 @@ export function StatisticsScreen(): React.JSX.Element {
 
 /**
  * One row of the composition bar: sized by the ACTUAL done / missed / pending
- * counts, so the bar and the numbers it sits above can never disagree. The
- * row variant is 7 dp tall; an all-upcoming row is drawn quieter, never
- * recoloured or re-labelled.
+ * counts, so the bar and the numbers it sits above can never disagree. Both
+ * variants are 10 dp tall with the same 3 dp corners, so a row bar and the
+ * summary strip read as the same measure at two scales; an all-upcoming row is
+ * drawn quieter, never recoloured or re-labelled.
  */
 function CompositionBar(props: {
   counts: Counts;
@@ -582,58 +670,99 @@ function CompositionBar(props: {
 }
 
 /**
- * The period selector of THIS page: one white outline, four equal parts, the
- * active period in accent ink above a short underline. The shared `Segmented`
- * control keeps its own tray and raised chip (settings still draws that one).
+ * The page's ONE control group: the period arrows and their exact range on the
+ * top row, the four Day / Week / Month / Year filters on the bottom row, zero
+ * gap between the rows and a single 1 dp line inside. The GROUP carries the
+ * outline - neither row draws a frame or a margin of its own. The shared
+ * `Segmented` control keeps its tray and raised chip (settings still draws it).
+ *
+ * The active filter is a SELECTED FILTER, not a primary action: a subtle
+ * lavender surface, a 1 dp accent outline and a semibold label inside a real
+ * 48/44 dp target. Nothing is filled blue and there is no underline.
  */
-function PeriodSelector(props: {
+function PeriodControls(props: {
   labels: string[];
   index: number;
   onChange: (index: number) => void;
+  period: string;
+  onPrevious: () => void;
+  onNext: () => void;
   colors: ThemeColors;
 }): React.JSX.Element {
   const { colors } = props;
+  /** The selected-chip wash the app already uses (see TabBar and settings). */
+  const selectedFill = tintAlpha(colors.accent, colors.dark ? '2E' : '1A');
   return (
     <View
-      accessibilityRole="tablist"
-      style={[styles.segments, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      {props.labels.map((label, index) => {
-        const selected = index === props.index;
-        return (
-          <Pressable
-            key={label}
-            accessibilityRole="button"
-            accessibilityLabel={label}
-            accessibilityState={{ selected }}
-            onPress={() => props.onChange(index)}
-            hitSlop={2}
-            style={({ pressed }) => [
-              styles.segment,
-              index > 0 && { borderLeftWidth: STAT.borderWidth, borderLeftColor: colors.border },
-              pressed && { backgroundColor: colors.surfaceVariant },
-            ]}>
-            <Text
-              style={[
-                styles.segmentText,
-                { color: selected ? colors.accent : colors.textSecondary },
-                selected && styles.segmentTextSelected,
-              ]}>
-              {label}
-            </Text>
-            {selected && (
-              <View
-                accessible={false}
-                style={[styles.segmentUnderline, { backgroundColor: colors.accent }]}
-              />
-            )}
-          </Pressable>
-        );
-      })}
+      style={[styles.controls, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.periodRow}>
+        <PeriodArrow
+          direction="back"
+          label={t('Dashboard_PreviousDay')}
+          onPress={props.onPrevious}
+          colors={colors}
+        />
+        <Text
+          accessibilityLiveRegion="polite"
+          numberOfLines={2}
+          style={[styles.periodLabel, { color: colors.text }]}>
+          {props.period}
+        </Text>
+        <PeriodArrow
+          direction="forward"
+          label={t('Dashboard_NextDay')}
+          onPress={props.onNext}
+          colors={colors}
+        />
+      </View>
+      {/* ONE shared internal line: the two rows read as a single control group. */}
+      <View style={[styles.controlDivider, { backgroundColor: colors.border }]} />
+      <View accessibilityRole="tablist" style={styles.segments}>
+        {props.labels.map((label, index) => {
+          const selected = index === props.index;
+          return (
+            <Pressable
+              key={label}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityState={{ selected }}
+              onPress={() => props.onChange(index)}
+              style={styles.segment}>
+              {({ pressed }) => (
+                <View
+                  style={[
+                    styles.segmentSurface,
+                    {
+                      // Transparent borders when unselected keep the geometry
+                      // stable: selecting a filter moves nothing.
+                      borderColor: selected ? colors.accent : 'transparent',
+                      backgroundColor: selected
+                        ? selectedFill
+                        : pressed
+                          ? colors.surfaceVariant
+                          : 'transparent',
+                    },
+                  ]}>
+                  <Text
+                    numberOfLines={2}
+                    style={[
+                      styles.segmentText,
+                      { color: selected ? colors.accent : colors.textSecondary },
+                      selected && styles.segmentTextSelected,
+                    ]}>
+                    {label}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
-/** One white outlined 44 dp arrow - the page's only two period controls. */
+/** One BARE 48/44 dp period arrow - the group owns the only frame. */
 function PeriodArrow(props: {
   direction: 'back' | 'forward';
   label: string;
@@ -647,10 +776,7 @@ function PeriodArrow(props: {
       onPress={props.onPress}
       style={({ pressed }) => [
         styles.periodArrow,
-        {
-          backgroundColor: pressed ? props.colors.surfaceVariant : props.colors.surface,
-          borderColor: props.colors.border,
-        },
+        pressed && { backgroundColor: props.colors.surfaceVariant },
       ]}>
       <Icon
         name={props.direction === 'back' ? 'chevron-back' : 'chevron-forward'}
@@ -661,9 +787,12 @@ function PeriodArrow(props: {
   );
 }
 
+
 /**
- * A quiet outlined disclosure row: leading outline glyph, label, caret, and its
- * content opened in place (the caller keeps owning the open state).
+ * One disclosure INSIDE the shared details surface: leading outline glyph, label,
+ * caret, and its content opened in place (the caller keeps owning the open
+ * state). The row itself draws no frame and no margin - the group owns the
+ * outline, and `detailsDivider` puts the single line between the two rows.
  */
 function Disclosure(props: {
   label: string;
@@ -675,8 +804,8 @@ function Disclosure(props: {
 }): React.JSX.Element {
   const { colors } = props;
   return (
-    <View
-      style={[styles.disclosure, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={styles.disclosure}>
+
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={props.label}
@@ -704,51 +833,34 @@ function Disclosure(props: {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
+  content: { paddingHorizontal: metrics.pagePadding, paddingTop: STAT.pageTop },
   pageTitle: { ...pageTitleStyle },
   subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2, fontFamily: fonts.regular },
 
-  /** Period selector: a white outline, four equal parts, one accent underline. */
-  segments: {
-    marginTop: 14,
-    flexDirection: 'row',
+  /**
+   * The ONE control group: outline, 8 dp corners, both rows inside it, zero gap.
+   * `overflow: hidden` keeps the selected filter's wash inside the group's
+   * corners, and the group - not each row - owns the margin to its neighbours.
+   */
+  controls: {
+    marginTop: STAT.sectionGap,
+    marginBottom: STAT.sectionGap,
     borderWidth: STAT.borderWidth,
-    borderRadius: STAT.segmentRadius,
+    borderRadius: STAT.controlRadius,
     overflow: 'hidden',
   },
-  segment: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: STAT.controlHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-  },
-  segmentText: { fontFamily: fonts.regular, fontSize: 14, textAlign: 'center' },
-  segmentTextSelected: { fontFamily: fonts.medium },
-  /** The active period is marked by a short line, not by a heavy grey tray. */
-  segmentUnderline: {
-    position: 'absolute',
-    bottom: 6,
-    alignSelf: 'center',
-    width: 24,
-    height: 2,
-    borderRadius: 1,
-  },
-
-  /** The exact range, between the page's two arrows. */
+  /** Top row: bare arrow, the exact period, bare arrow. */
   periodRow: {
-    marginTop: 10,
-    marginBottom: 12,
+    minHeight: STAT.controlHeight,
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 10,
+    columnGap: 4,
+    paddingHorizontal: STAT.segmentInset,
   },
+  /** The only frame an arrow wears is its pressed feedback. */
   periodArrow: {
     width: STAT.controlHeight,
     height: STAT.controlHeight,
-    borderWidth: STAT.borderWidth,
     borderRadius: STAT.controlRadius,
     alignItems: 'center',
     justifyContent: 'center',
@@ -756,10 +868,43 @@ const styles = StyleSheet.create({
   periodLabel: {
     flex: 1,
     minWidth: 0,
-    fontSize: 14,
+    fontSize: STAT.periodLabelSize,
     fontFamily: fonts.medium,
     textAlign: 'center',
   },
+  /** ONE shared 1 dp line between the period row and the four filters. */
+  controlDivider: { height: STAT.dividerWidth },
+  /** Bottom row: four equal filters, no cell dividers, no second frame. */
+  segments: {
+    flexDirection: 'row',
+    columnGap: STAT.segmentInset,
+    paddingHorizontal: STAT.segmentInset,
+  },
+  /** The real 48/44 dp target; the visible surface stays 36 dp inside it. */
+  segment: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: STAT.controlHeight,
+    justifyContent: 'center',
+    paddingVertical: STAT.segmentInset,
+  },
+  segmentSurface: {
+    width: '100%',
+    minHeight: STAT.segmentVisibleMinHeight,
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.segmentSurfaceRadius,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentText: {
+    fontFamily: fonts.regular,
+    fontSize: STAT.segmentLabelSize,
+    textAlign: 'center',
+  },
+  /** A selected filter is semibold; nothing about it is a filled action. */
+  segmentTextSelected: { fontFamily: fonts.medium },
 
   /** Placeholder while a period settles; the summary's own card frame. */
   loadingPanel: {
@@ -790,22 +935,34 @@ const styles = StyleSheet.create({
   heroStacked: { flexDirection: 'column', alignItems: 'flex-start', rowGap: 6 },
   /** The percentage is the loudest number on the page. */
   heroPercent: {
-    fontSize: 38,
-    lineHeight: 44,
+    fontSize: STAT.percentSize,
+    lineHeight: 48,
     fontFamily: fonts.bold,
-    letterSpacing: -1.2,
+    letterSpacing: -1.4,
     fontVariant: ['tabular-nums'],
   },
   heroDivider: { width: 1, height: 36 },
-  heroCopy: { flex: 1, minWidth: 0 },
+  /** The fraction/caption sits in its own SMALL outlined block, not loose text. */
+  heroCopy: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: STAT.borderWidth,
+    borderRadius: STAT.controlRadius,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
   heroCopyStacked: { flex: 0, width: '100%' },
-  heroFraction: { fontSize: 16, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  heroCaption: { fontSize: 12, marginTop: 1, fontFamily: fonts.regular },
+  heroFraction: {
+    fontSize: STAT.fractionSize,
+    fontFamily: fonts.medium,
+    fontVariant: ['tabular-nums'],
+  },
+  heroCaption: { fontSize: STAT.captionSize, marginTop: 1, fontFamily: fonts.regular },
   /** Composition: three flex segments, never a fixed width. */
   composition: {
     flexDirection: 'row',
     height: STAT.barHeight,
-    borderRadius: STAT.barHeight / 2,
+    borderRadius: STAT.barRadius,
     overflow: 'hidden',
     marginTop: 12,
   },
@@ -813,7 +970,7 @@ const styles = StyleSheet.create({
   barQuiet: { opacity: 0.55 },
 
   breakdownHeading: {
-    marginTop: 18,
+    marginTop: STAT.sectionGap,
     marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
@@ -829,6 +986,8 @@ const styles = StyleSheet.create({
     borderRadius: STAT.cardRadius,
     overflow: 'hidden',
   },
+  /** The week chart sits inside that card, inset like the list rows are. */
+  chartInset: { paddingHorizontal: STAT.cardPadding, paddingBottom: STAT.cardPadding },
   row: {
     minHeight: STAT.rowMinHeight,
     flexDirection: 'row',
@@ -858,7 +1017,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexDirection: 'row',
     height: STAT.rowBarHeight,
-    borderRadius: STAT.rowBarHeight / 2,
+    borderRadius: STAT.barRadius,
     overflow: 'hidden',
   },
   rowBarStacked: { flex: 0, width: '100%' },
@@ -898,13 +1057,17 @@ const styles = StyleSheet.create({
   selectionAction: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
   selectionActionText: { fontSize: 12, fontFamily: fonts.medium },
 
-  /** Disclosures: quiet outlined rows that open in place. */
-  disclosure: {
-    marginTop: 12,
+  /** Details: ONE outlined surface for both optional disclosures. */
+  detailsGroup: {
+    marginTop: STAT.sectionGap,
     borderWidth: STAT.borderWidth,
     borderRadius: STAT.cardRadius,
     overflow: 'hidden',
   },
+  /** The single inset line between the two disclosures - never a second frame. */
+  detailsDivider: { height: STAT.dividerWidth, marginHorizontal: STAT.cardPadding },
+  /** A disclosure row inside that surface: no frame, no margin of its own. */
+  disclosure: { overflow: 'hidden' },
   disclosureButton: {
     minHeight: STAT.controlHeight,
     flexDirection: 'row',

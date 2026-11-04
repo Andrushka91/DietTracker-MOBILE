@@ -20,6 +20,7 @@ import {
   tabActiveChipFill,
 } from '../src/ui/components/TabBar';
 import {
+  TAB_GLYPH_CHIP_BORDER_WIDTH,
   TAB_GLYPH_CHIP_HEIGHT,
   TAB_GLYPH_CHIP_RADIUS,
   TAB_GLYPH_CHIP_WIDTH,
@@ -66,12 +67,13 @@ describe('the active tab chip', () => {
     expect(parseInt(darkChip.slice(-2), 16)).toBeGreaterThan(parseInt(lightChip.slice(-2), 16));
   });
 
-  test('is the mockups rounded rect around the glyph, on the active tab only', () => {
-    // The reference pads the 21 pt glyph by 5 x 14 and rounds it by 12:
-    // 49 x 31 with soft corners, not a full capsule.
+  test('is the shared rounded box around the glyph, on the active tab only', () => {
+    // The reference pads the 21 pt glyph by 5 x 14 -> 49 x 31, and the shared
+    // indicator is now an 8 dp radius with a 1 dp outline: still a soft rect, not
+    // a full capsule.
     expect(TAB_GLYPH_CHIP_WIDTH).toBe(TAB_GLYPH_SIZE + 14 * 2);
     expect(TAB_GLYPH_CHIP_HEIGHT).toBe(TAB_GLYPH_SIZE + 5 * 2);
-    expect(TAB_GLYPH_CHIP_RADIUS).toBe(12);
+    expect(TAB_GLYPH_CHIP_RADIUS).toBe(8);
     expect(TAB_GLYPH_CHIP_RADIUS).toBeLessThan(TAB_GLYPH_CHIP_HEIGHT / 2);
 
     const chipFill = tabActiveChipFill(darkColors);
@@ -89,9 +91,12 @@ describe('the active tab chip', () => {
     expect(focused.width).toBe(TAB_GLYPH_CHIP_WIDTH);
     expect(focused.height).toBe(TAB_GLYPH_CHIP_HEIGHT);
     expect(focused.borderRadius).toBe(TAB_GLYPH_CHIP_RADIUS);
+    // The indicator is outlined in the theme accent it is tinted with...
+    expect(focused.borderWidth).toBe(TAB_GLYPH_CHIP_BORDER_WIDTH);
+    expect(focused.borderColor).toBe(darkColors.accent);
 
-    // An inactive tab keeps the SAME box (so nothing moves when the selection
-    // changes) but without a fill.
+    // An inactive tab keeps the SAME box - same size, same 1 dp frame, now
+    // transparent - so nothing moves when the selection changes.
     const inactive = chip(
       render(
         React.createElement(TabBarGlyph, {
@@ -103,6 +108,8 @@ describe('the active tab chip', () => {
       ),
     );
     expect(inactive.backgroundColor).toBeUndefined();
+    expect(inactive.borderWidth).toBe(TAB_GLYPH_CHIP_BORDER_WIDTH);
+    expect(inactive.borderColor).toBe('transparent');
     expect(inactive.width).toBe(focused.width);
     expect(inactive.height).toBe(focused.height);
   });

@@ -1,12 +1,14 @@
-// The Calendar page as the mockup draws it: one compact month card, a filled
-// indigo selection, today's thin outline (also when another day is selected),
-// five meal marks per recorded day, the Done / Missed / Pending key with
-// "5 dots = 5 meals", and a selected-day row plus a grouped agenda.
+// The Calendar page as the mockup draws it: three outlined blocks (month strip,
+// weekday strip, date matrix with its attached key), a filled indigo selection,
+// today's thin outline (also when another day is selected), five meal marks per
+// recorded day, and a selected-day row plus a grouped agenda.
 //
 // The page is driven here through its REAL component with the data layer mocked,
 // so the assertions are about behaviour, not markup: the markers follow the real
 // clock (today is computed from the machine's date), the grid comes from the real
-// `monthGrid`, and "Open day" must hand back the exact selected date.
+// `monthGrid`, one tap previews a date (no navigation), and a SECOND tap of the
+// same date within 300 ms opens exactly that date - the same thing long press and
+// the cell's accessibility action do.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -17,13 +19,7 @@ import { MealEntry } from '../src/domain/models';
 import { formatDate } from '../src/domain/analytics';
 import { monthGrid } from '../src/ui/calendarGrid';
 import { CalendarScreen } from '../src/ui/screens/CalendarScreen';
-import {
-  formatCompactDayMonth,
-  formatLongDate,
-  formatMonthLabel,
-  t,
-  tFmt,
-} from '../src/ui/strings';
+import { formatLongDate, formatMonthLabel, t, tFmt } from '../src/ui/strings';
 import { darkColors, lightColors } from '../src/ui/theme';
 /** ONE stable app object, mutable per test (the theme, the clock). */
 const mockApp = { profile: { id: 'profile-1' }, isDark: false, use12HourClock: false };
@@ -157,6 +153,20 @@ function cell(renderer: Renderer, date: string): TestRenderer.ReactTestInstance 
   return found;
 }
 
+/** A control of the page, found by its accessible name. */
+function pressable(renderer: Renderer, label: string): TestRenderer.ReactTestInstance {
+  const found = renderer.root
+    .findAll(
+      (node) =>
+        node.props?.accessibilityLabel === label && typeof node.props.onPress === 'function',
+    )
+    .pop();
+  if (found === undefined) {
+    throw new Error(`no control labelled "${label}"`);
+  }
+  return found;
+}
+
 /** The five meal marks inside one cell. */
 function marksOf(renderer: Renderer, date: string): Record<string, unknown>[] {
   return cell(renderer, date)
@@ -262,11 +272,12 @@ describe('the day marks', () => {
 
 
 describe('the selected day row', () => {
-  test('shows a concise date, the counts and photographs, and opens THAT day', async () => {
+  test('shows the counts and photographs of THAT day, and opens it', async () => {
     const { renderer, onOpenDay } = await renderScreen(OTHER);
     const printed = texts(renderer);
-    // A compact date (weekday, day, abbreviated month), not the long form.
-    expect(printed).toContain(formatCompactDayMonth(OTHER));
+    // The old heading row is gone: no compact date line and no "double-tap"
+    // hint (asserted on the literal copy, so re-adding the line fails here).
+    expect(printed).not.toContain('Double-tap a date to open');
     expect(printed).not.toContain(formatLongDate(OTHER));
     // The summary follows the data: three real counts, each keeping its status
     // word, plus the day's photograph total - the items can wrap, so nothing is
@@ -287,15 +298,19 @@ describe('the selected day row', () => {
       .pop();
     expect(spoken).toBeDefined();
 
-    const open = renderer.root
-      .findAll(
+    // Neither the filled "Open day" button nor the old inline hint row is back:
+    // no control on the page carries the open action as its own press.
+    expect(printed).not.toContain('Double-tap a date to open');
+    expect(
+      renderer.root.findAll(
         (node) =>
           node.props?.accessibilityLabel === t('Calendar_OpenDay') &&
           typeof node.props.onPress === 'function',
-      )
-      .pop();
-    expect(open).toBeDefined();
-    act(() => open?.props.onPress());
+      ),
+    ).toHaveLength(0);
+
+    // Long press still opens that exact date (the fallback for the gesture).
+    act(() => cell(renderer, OTHER).props.onLongPress());
     expect(onOpenDay).toHaveBeenCalledWith(OTHER);
   });
 
@@ -400,22 +415,166 @@ describe('the agenda of the selected day', () => {
     }
   });
 
-  test('draws one matching rule above the legend', async () => {
+  test('attaches the legend to the matrix with ONE shared rule', async () => {
     const { renderer } = await renderScreen(OTHER);
-    const rules = renderer.root
+    const legends = renderer.root.findAllByType(View).filter((node) => {
+      const style = styleOf(node);
+      // The key is the matrix's footer: its own borderTop is the shared line.
+      return style.borderTopWidth === 1 && style.marginTop === 4 && style.paddingVertical === 6;
+    });
+    expect(legends).toHaveLength(1);
+    // Full width inside the matrix: no horizontal margin, so the line meets both
+    // side borders - and there is no separate 1 dp rule above the key.
+    expect(styleOf(legends[0]).marginHorizontal).toBeUndefined();
+    expect(styleOf(legends[0]).paddingHorizontal).toBe(8);
+    const standaloneRules = renderer.root
       .findAllByType(View)
       .map((node) => styleOf(node))
       .filter(
         (style) => style.height === 1 && style.backgroundColor === lightColors.cardDivider,
       );
-    // Four between the meal rows + one above the key, all in the same colour.
-    expect(rules).toHaveLength(5);
-    expect(rules.filter((rule) => rule.marginHorizontal === 14)).toHaveLength(4);
-    // The board's 10 dp padding + 4 dp margin + 1 dp frame: inset from both edges.
-    expect(rules.filter((rule) => rule.marginHorizontal === 4)).toHaveLength(1);
+    // Only the agenda's four inset row rules are separate 1 dp Views.
+    expect(standaloneRules).toHaveLength(4);
+    expect(standaloneRules.every((rule) => rule.marginHorizontal === 14)).toBe(true);
   });
 });
 
+
+describe('opening a day with the date gesture', () => {
+  /** A controlled clock: the page reads Date.now() through this, nothing sleeps. */
+  let now = 1_700_000_000_000;
+  let clock: jest.SpyInstance<number, []>;
+
+  beforeEach(() => {
+    now = 1_700_000_000_000;
+    clock = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+
+  afterEach(() => {
+    clock.mockRestore();
+  });
+
+  function tap(renderer: Renderer, date: string): void {
+    act(() => cell(renderer, date).props.onPress());
+  }
+
+  test('a single tap previews the date immediately and opens nothing', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    expect(cell(renderer, OTHER).props.accessibilityState.selected).toBe(false);
+    tap(renderer, OTHER);
+    expect(onOpenDay).not.toHaveBeenCalled();
+    // The preview followed the FIRST tap - no timer, no delayed selection. The
+    // state is read from the CELL, which is now the only thing carrying the date.
+    expect(cell(renderer, OTHER).props.accessibilityState.selected).toBe(true);
+  });
+
+  test('a second tap of the SAME date inside 300 ms opens that exact date once', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    tap(renderer, OTHER);
+    now += 120;
+    tap(renderer, OTHER);
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    expect(onOpenDay).toHaveBeenCalledWith(OTHER);
+  });
+
+  test('a different date, or a tap after 300 ms, opens nothing', async () => {
+    const different = await renderScreen();
+    tap(different.renderer, OTHER);
+    now += 100;
+    tap(different.renderer, TODAY);
+    expect(different.onOpenDay).not.toHaveBeenCalled();
+
+    const late = await renderScreen();
+    tap(late.renderer, OTHER);
+    now += 301;
+    tap(late.renderer, OTHER);
+    expect(late.onOpenDay).not.toHaveBeenCalled();
+  });
+
+  test('a rapid third press never opens a second time', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    tap(renderer, OTHER);
+    now += 100;
+    tap(renderer, OTHER);
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    // The pair was consumed by the open: a third press starts a NEW candidate.
+    now += 100;
+    tap(renderer, OTHER);
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+  });
+
+  test('first-tapping a neighbouring month still allows the second tap', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    const neighbour = monthGrid(MONTH).dates.find((date) => date.slice(0, 7) !== MONTH);
+    expect(neighbour).toBeDefined();
+    // The first tap selects it AND moves the grid; that month change must NOT
+    // clear the pair, or the gesture could never work on those days.
+    tap(renderer, neighbour as string);
+    now += 80;
+    tap(renderer, neighbour as string);
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    expect(onOpenDay).toHaveBeenCalledWith(neighbour);
+  });
+
+  test('the explicit controls clear a pending first tap', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    // The header's "Today" shortcut is gone; the month arrows are the page's
+    // explicit controls now.
+    expect(
+      renderer.root.findAll(
+        (node) =>
+          node.props?.accessibilityLabel === t('Calendar_Today') &&
+          typeof node.props.onPress === 'function',
+      ),
+    ).toHaveLength(0);
+    tap(renderer, OTHER);
+    // Previous + next month: back on the same grid, but the candidate is gone.
+    act(() => pressable(renderer, t('Calendar_PreviousMonth')).props.onPress());
+    act(() => pressable(renderer, t('Calendar_NextMonth')).props.onPress());
+    tap(renderer, OTHER);
+    expect(onOpenDay).not.toHaveBeenCalled();
+  });
+
+  test('an externally requested date clears a pending first tap', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    tap(renderer, OTHER);
+    await act(async () => {
+      renderer.update(
+        <CalendarScreen onOpenDay={onOpenDay} initialDate={TODAY} initialDateRequestId={2} />,
+      );
+    });
+    tap(renderer, OTHER);
+    expect(onOpenDay).not.toHaveBeenCalled();
+  });
+
+  test('long press opens the exact date and swallows its trailing onPress', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    act(() => cell(renderer, OTHER).props.onLongPress());
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    expect(onOpenDay).toHaveBeenCalledWith(OTHER);
+    // Both platforms emit the press after a long press: it must not open twice.
+    tap(renderer, OTHER);
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    // The NEXT completed pair still opens: a long press does not disarm the cell.
+    now += 400;
+    tap(renderer, OTHER);
+    now += 80;
+    tap(renderer, OTHER);
+    expect(onOpenDay).toHaveBeenCalledTimes(2);
+  });
+
+  test('the accessibility action opens the exact date once', async () => {
+    const { renderer, onOpenDay } = await renderScreen();
+    const target = cell(renderer, OTHER);
+    expect(target.props.accessibilityActions).toEqual([
+      { name: 'openDay', label: t('Calendar_OpenDay') },
+    ]);
+    expect(target.props.accessibilityHint).toBe(t('Rn_CalendarSelectHint'));
+    act(() => target.props.onAccessibilityAction({ nativeEvent: { actionName: 'openDay' } }));
+    expect(onOpenDay).toHaveBeenCalledTimes(1);
+    expect(onOpenDay).toHaveBeenCalledWith(OTHER);
+  });
+});
 
 describe('the dark theme', () => {
   afterEach(() => {

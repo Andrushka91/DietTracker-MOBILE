@@ -8,12 +8,12 @@
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { ActivityIndicator, Modal, StyleSheet, Text, TextInput } from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ChoiceDialog, ConfirmDialog, LoadingSheet, PromptDialog } from '../src/ui/components/dialogs';
 import { dateDraft, dateInputProblem, DATE_INPUT_LENGTH } from '../src/ui/dates';
 import { t } from '../src/ui/strings';
-import { fonts, lightColors, tintAlpha, typeScale } from '../src/ui/theme';
+import { fonts, lightColors, typeScale } from '../src/ui/theme';
 
 /**
  * The compact Apply-template sheet stacks its two answers at full width below
@@ -767,6 +767,19 @@ describe('the compact Apply-template sheet', () => {
   const dateError = (value: string): string | null =>
     dateInputProblem(value) === null ? null : t('Rn_TemplateDateRequired');
 
+  /** The visible 36 dp control INSIDE a labelled 48/44 dp target. */
+  function visibleButton(renderer: Renderer, label: string) {
+    const target = pressable(renderer, label);
+    const visible = target
+      .findAllByType(View)
+      .map((node) => styleOf(node))
+      .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
+    if (visible === undefined) {
+      throw new Error(`no visible button inside "${label}"`);
+    }
+    return { target: styleOf(target), visible };
+  }
+
   function renderSheet(initialValue = '2026-11-02') {
     const onCancel = jest.fn();
     const onConfirm = jest.fn();
@@ -796,92 +809,108 @@ describe('the compact Apply-template sheet', () => {
     return { renderer, onCancel, onConfirm };
   }
 
-  test('draws the badge, the real summary, the labelled field and the answers', () => {
+  test('shows the real template ABOVE the title, then one small labelled field', () => {
     const { renderer } = renderSheet();
     const printed = texts(renderer);
 
-    // Title, the REAL template summary, the field label, Today and the hint.
+    // Title, the REAL template summary, the field label and the two answers.
     expect(printed).toContain(t('Rn_TemplateApplyTitle'));
     expect(t('Rn_TemplateApplyTitle')).toBe('Apply template');
     expect(printed).toContain('Full day · 5 meals');
     expect(printed).toContain(t('Rn_TemplateDateLabel'));
-    expect(printed).toContain(t('Calendar_Today'));
-    expect(printed).toContain(t('Rn_TemplateDateFormatHint'));
     expect(printed).not.toContain(t('Rn_TemplateDatePrompt'));
     // The longer Windows headline ("Apply the template") is not this header.
     expect(printed).not.toContain(t('Template_ApplyTitle'));
+    // The separate format line and the Today shortcut are gone.
+    expect(printed).not.toContain(t('Rn_TemplateDateFormatHint'));
+    expect(printed).not.toContain(t('Calendar_Today'));
 
-    // The reference's header: a 40 pt pale-indigo calendar tile, then the bold
-    // title with the real summary stacked UNDER it - all in ONE row, not a
-    // full-width caption below the header.
+    // Context ABOVE the task title, in ONE column at 12 / 20 pt, in that order.
     const title = textOf(renderer, t('Rn_TemplateApplyTitle'));
     const summary = textOf(renderer, 'Full day · 5 meals');
-    expect(styleOf(title).fontSize).toBe(typeScale.title2);
-    expect(styleOf(summary).fontSize).toBe(typeScale.subheadline);
-    // Both lines share one column...
+    expect(styleOf(summary).fontSize).toBe(12);
+    expect(styleOf(title).fontSize).toBe(20);
     expect(summary.parent).toBe(title.parent);
-    // ...and that column is INSIDE the header row, beside the tile.
-    const tile = renderer.root
-      .findAll(
+    expect(summary.parent?.findAllByType(Text).map((node) => node.props.children)).toEqual([
+      'Full day · 5 meals',
+      'Apply template',
+    ]);
+    // Neither line is clamped: a long real name/title wraps instead of being cut.
+    expect(summary.props.numberOfLines).toBeUndefined();
+    expect(title.props.numberOfLines).toBeUndefined();
+
+    // No decorative badge, calendar tile or drag handle in this sheet.
+    const glyphs = renderer.root
+      .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
+      .map((node) => node.props.accessibilityLabel as string);
+    expect(glyphs).not.toContain('material:calendar-text-outline');
+    expect(
+      renderer.root.findAll(
         (node) =>
           typeof node.type === 'string' &&
           styleOf(node).width === 40 &&
-          styleOf(node).borderRadius === 13,
-      )
-      .pop();
-    expect(tile).toBeDefined();
-    expect(styleOf(tile!).height).toBe(40);
-    expect(styleOf(tile!).backgroundColor).toBe(tintAlpha(lightColors.accent, '1A'));
-    // The nearest row above the tile is the header (RN wraps both in a host
-    // component, so the walk skips the wrappers).
-    let headerRow = tile!.parent!;
-    while (headerRow.parent !== null && styleOf(headerRow).flexDirection !== 'row') {
-      headerRow = headerRow.parent;
-    }
-    expect(styleOf(headerRow).flexDirection).toBe('row');
-    const headerLines = headerRow.findAllByType(Text).map((node) => node.props.children);
-    expect(headerLines).toContain(t('Rn_TemplateApplyTitle'));
-    expect(headerLines).toContain('Full day · 5 meals');
-    // The tile wears the reference's calendar face (thin hangers + text lines).
-    const tileGlyphs = new Set(
-      tile!
-        .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
-        .map((node) => node.props.accessibilityLabel as string),
+          styleOf(node).height === 4,
+      ),
+    ).toHaveLength(0);
+    // One date field, and NO second control beside it (the Today chip is gone).
+    const controls = renderer.root.findAll(
+      (node) =>
+        typeof node.props?.onPress === 'function' &&
+        typeof node.props?.accessibilityLabel === 'string',
     );
-    expect(tileGlyphs).toContain('material:calendar-text-outline');
+    expect(controls.map((node) => node.props.accessibilityLabel)).toEqual([
+      t('Common_Close'),
+      t('Common_Cancel'),
+      t('Rn_TemplateApplyConfirm'),
+    ]);
 
-    // The compact sheet: 520 dp cap, 24 pt corners.
+    // The sheet itself: 520 dp cap with 16 dp top corners.
     const card = styleOf(
       renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-card').pop()!,
     );
     expect(card.maxWidth).toBe(520);
-    expect(card.borderTopLeftRadius).toBe(24);
+    expect(card.borderTopLeftRadius).toBe(16);
+    expect(card.borderTopRightRadius).toBe(16);
 
-    // The date field: 48 pt tall, 12 pt corners, a 1 pt frame with the calendar
-    // glyph and the editable ISO value inside it.
+    // A COMPACT field: 40 dp tall, content-sized (not a full-width bar), on the
+    // card's own surface, with no calendar glyph inside it.
     const input = renderer.root.findByType(TextInput);
     const field = styleOf(input.parent!);
-    expect(field.minHeight).toBe(48);
-    expect(field.borderRadius).toBe(12);
+    expect(field.minHeight).toBe(40);
+    expect(field.alignSelf).toBe('flex-start');
+    expect(field.flex).toBeUndefined();
+    expect(field.borderRadius).toBe(8);
     expect(field.borderWidth).toBe(1);
     expect(field.borderColor).toBe(lightColors.border);
-    expect(styleOf(input).fontSize).toBe(17);
+    expect(field.backgroundColor).toBe(lightColors.surface);
+    expect(
+      input.parent!.findAll(
+        (node) =>
+          typeof node.props?.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel as string).startsWith('material:'),
+      ),
+    ).toHaveLength(0);
+    expect(styleOf(input).fontSize).toBe(16);
     expect(input.props.keyboardType).toBe('number-pad');
     expect(input.props.maxLength).toBe(DATE_INPUT_LENGTH);
+    // The format is still discoverable - as the field's hint, not a second line.
+    expect(input.props.accessibilityHint).toBe(t('Rn_TemplateDateFormatHint'));
 
-    // Cancel is outlined on the left, Apply is filled and wider (1 : 1.8).
-    const cancel = styleOf(pressable(renderer, t('Common_Cancel')));
-    const apply = styleOf(pressable(renderer, t('Rn_TemplateApplyConfirm')));
-    expect(cancel.minHeight).toBe(48);
-    expect(cancel.borderRadius).toBe(12);
-    expect(cancel.borderWidth).toBe(1);
-    expect(cancel.borderColor).toBe(lightColors.border);
-    expect(cancel.backgroundColor).toBe(lightColors.surface);
-    expect(apply.minHeight).toBe(48);
-    expect(apply.backgroundColor).toBe(lightColors.accentFill);
-    expect(cancel.width).toBe(121.43);
-    expect(apply.width).toBe(218.57);
-    expect((cancel.width as number) + (apply.width as number)).toBeCloseTo(340, 5);
+    // Footer: BOTH answers are outlined, in real targets around 36 dp buttons,
+    // sized by content (64 / 136 dp) instead of the old 1 : 1.8 split.
+    const cancel = visibleButton(renderer, t('Common_Cancel'));
+    const apply = visibleButton(renderer, t('Rn_TemplateApplyConfirm'));
+    expect(cancel.target.minHeight).toBeGreaterThanOrEqual(44);
+    expect(apply.target.minHeight).toBeGreaterThanOrEqual(44);
+    expect(cancel.visible.minHeight).toBe(36);
+    expect(apply.visible.minHeight).toBe(36);
+    expect(cancel.visible.borderWidth).toBe(1);
+    expect(cancel.visible.borderColor).toBe(lightColors.border);
+    expect(apply.visible.borderColor).toBe(lightColors.textMuted);
+    expect(apply.visible.backgroundColor).toBe(lightColors.surface);
+    expect(apply.visible.backgroundColor).not.toBe(lightColors.accentFill);
+    expect(cancel.visible.minWidth).toBe(64);
+    expect(apply.visible.minWidth).toBe(136);
   });
 
   test('an invalid date keeps the sheet open, explains why and applies nothing', () => {
@@ -896,20 +925,30 @@ describe('the compact Apply-template sheet', () => {
       renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-error').length,
     ).toBeGreaterThan(0);
     expect(texts(renderer)).toContain(t('Rn_TemplateDateRequired'));
-    // ...and the hint gives way to the error, so only one line is shown.
-    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateFormatHint'));
+    // ...and the label stays on screen while the field keeps the format as its
+    // accessibility hint, so the error still has context.
+    expect(texts(renderer)).toContain(t('Rn_TemplateDateLabel'));
+    expect(renderer.root.findByType(TextInput).props.accessibilityHint).toBe(
+      t('Rn_TemplateDateFormatHint'),
+    );
+    // The typed draft is kept, never silently replaced by another date.
+    expect(renderer.root.findByType(TextInput).props.value).toBe('');
   });
 
 
 
-  test('Today only fills the field; the user still applies it', () => {
-    const { renderer, onConfirm } = renderSheet('');
-    act(() => pressable(renderer, t('Calendar_Today')).props.onPress());
-    expect(renderer.root.findByType(TextInput).props.value).toBe('2026-11-04');
-    expect(onConfirm).not.toHaveBeenCalled();
-
+  test('confirms the date as it stands, without a Today shortcut', () => {
+    const { renderer, onConfirm } = renderSheet();
+    // No Today control exists in this sheet any more...
+    expect(
+      renderer.root.findAll(
+        (node) => node.props?.accessibilityLabel === t('Calendar_Today'),
+      ),
+    ).toHaveLength(0);
+    // ...so the initial value (today) is what gets applied, once confirmed.
+    expect(renderer.root.findByType(TextInput).props.value).toBe('2026-11-02');
     act(() => pressable(renderer, t('Rn_TemplateApplyConfirm')).props.onPress());
-    expect(onConfirm).toHaveBeenCalledWith('2026-11-04');
+    expect(onConfirm).toHaveBeenCalledWith('2026-11-02');
   });
 
   test('Cancel and the close X dismiss without applying', () => {
@@ -922,26 +961,29 @@ describe('the compact Apply-template sheet', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  test('stacks both answers at full width on a narrow screen or large text', () => {
+  test('stacks the two answers on a narrow screen or large text', () => {
     mockWindow.width = 320;
     const narrow = renderSheet();
     expect(styleOf(pressable(narrow.renderer, t('Common_Cancel'))).width).toBe('100%');
     expect(styleOf(pressable(narrow.renderer, t('Rn_TemplateApplyConfirm'))).width).toBe('100%');
+    // The date field stays the same compact box - it never becomes a bar.
+    const narrowField = styleOf(narrow.renderer.root.findByType(TextInput).parent!);
+    expect(narrowField.width).toBeUndefined();
+    expect(narrowField.minHeight).toBe(40);
 
     mockWindow.width = 390;
     mockWindow.fontScale = 1.5;
     const large = renderSheet();
     expect(styleOf(pressable(large.renderer, t('Common_Cancel'))).width).toBe('100%');
 
-    // Back at a phone width with normal text, they sit side by side again and
-    // share the row as the reference's 1 : 1.8.
+    // Back at a phone width with normal text they sit side by side, sized by
+    // their own content: the old fixed 121.43 / 218.57 split and its 1 : 1.8
+    // ratio are gone.
     mockWindow.fontScale = 1;
     const wide = renderSheet();
-    const wideCancel = styleOf(pressable(wide.renderer, t('Common_Cancel'))).width as number;
-    const wideApply = styleOf(pressable(wide.renderer, t('Rn_TemplateApplyConfirm'))).width as number;
-    expect(wideCancel).toBe(121.43);
-    expect(wideApply).toBe(218.57);
-    expect(wideApply / wideCancel).toBeCloseTo(1.8, 2);
+    expect(styleOf(pressable(wide.renderer, t('Common_Cancel'))).width).toBeUndefined();
+    expect(visibleButton(wide.renderer, t('Common_Cancel')).visible.minWidth).toBe(64);
+    expect(visibleButton(wide.renderer, t('Rn_TemplateApplyConfirm')).visible.minWidth).toBe(136);
   });
 
   test('keeps the default prompt (template naming) on its own rows', () => {
