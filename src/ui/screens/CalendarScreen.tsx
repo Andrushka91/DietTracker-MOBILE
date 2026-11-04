@@ -210,23 +210,16 @@ export function CalendarScreen(props: {
   const selectedPhotos =
     selectedProgress?.slots.reduce((total, slot) => total + slot.photoCount, 0) ?? 0;
   /**
-   * The selected-day line reads like the mockup: only the counts that are not
-   * zero ("3 done · 2 pending · 3 photos"), so an untouched morning never
-   * announces "0 missed". A day with nothing decided still says "5 pending".
+   * The selected-day line always shows the same three counts in the same order
+   * ("0 done · 0 missed · 5 pending"), so an untouched day reads as plainly as a
+   * busy one, and appends the photograph total only when the day holds photos.
    */
-  const summaryParts: string[] = [];
-  if (selectedProgress !== undefined && selectedProgress.completed > 0) {
-    summaryParts.push(tFmt('Rn_CalendarDoneCount', selectedProgress.completed));
-  }
-  if (selectedProgress !== undefined && selectedProgress.missed > 0) {
-    summaryParts.push(tFmt('Rn_CalendarMissedCount', selectedProgress.missed));
-  }
-  if (selectedProgress === undefined || selectedProgress.pending > 0) {
-    summaryParts.push(tFmt('Rn_CalendarPendingCount', selectedProgress?.pending ?? 0));
-  }
-  const selectedSummary = `${summaryParts.join(' · ')}${
-    selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''
-  }`;
+  const selectedSummary = `${tFmt(
+    'Rn_CalendarDaySummary',
+    selectedProgress?.completed ?? 0,
+    selectedProgress?.missed ?? 0,
+    selectedProgress?.pending ?? 0,
+  )}${selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''}`;
 
   return (
     <ScrollView
@@ -463,10 +456,10 @@ export function CalendarScreen(props: {
           hitSlop={4}
           style={({ pressed }) => [
             styles.openDay,
-            { backgroundColor: colors.accent },
+            { backgroundColor: colors.accentFill },
             pressed && { opacity: 0.85 },
           ]}>
-          <Text style={[styles.openDayText, { color: colors.accentText }]} numberOfLines={1}>
+          <Text style={[styles.openDayText, { color: colors.accentFillText }]} numberOfLines={1}>
             {t('Calendar_OpenDay')}
           </Text>
         </Pressable>
@@ -494,65 +487,72 @@ export function CalendarScreen(props: {
           /**
            * Hierarchy: a meal WITH a title leads with it and names its meal slot
            * underneath; an untouched slot leads with the CATEGORY itself and shows
-           * whatever description it does hold - it never prints "No meal recorded"
-           * five times, which said nothing about which meal the row is.
+           * the description it really holds - it never prints "No meal recorded"
+           * five times, and it never repeats the category as its own subtitle.
            */
           const hasTitle = slot.title !== '';
           const primary = hasTitle ? slot.title : name;
-          const secondary = hasTitle ? name : slot.ingredients;
+          const secondary = hasTitle
+            ? name
+            : slot.ingredients !== name
+              ? slot.ingredients
+              : '';
+          // Photos are real data: show the line for them even when a slot has no
+          // description at all, so a count is never silently dropped.
+          const hasDetail = secondary !== '' || slot.photoCount > 0;
           return (
-            <View
-              key={slot.mealCategoryKey}
-              style={[
-                styles.agendaRow,
-                index > 0 && {
-                  borderTopWidth: StyleSheet.hairlineWidth,
-                  borderTopColor: colors.hairline,
-                },
-              ]}>
-              {/* Time: aligned column on the left. */}
-              <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
-                {time}
-              </Text>
-              {/* Icon tile: the same line icon the meal card wears, in a pale rounded tile. */}
-              <View style={[styles.agendaIcon, { backgroundColor: colors.surfaceVariant }]}>
-                <MaterialIcon
-                  name={mealCategoryGlyph(slot.mealCategoryKey)}
-                  size={AGENDA_GLYPH_SIZE}
-                  color={colors.textSecondary}
-                />
-              </View>
-              {/* Text: title over category + photo count (or category alone). */}
-              <View style={styles.copy}>
-                <Text style={[styles.agendaTitle, { color: colors.text }]} numberOfLines={1}>
-                  {primary}
+            <React.Fragment key={slot.mealCategoryKey}>
+              {/* One 1 dp divider between every pair of rows, inset to the same
+                  gutters as the content so it never touches the card's frame. */}
+              {index > 0 && (
+                <View style={[styles.agendaDivider, { backgroundColor: colors.cardDivider }]} />
+              )}
+              <View style={styles.agendaRow}>
+                {/* Time: aligned column on the left. */}
+                <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
+                  {time}
                 </Text>
-                {secondary !== '' && (
-                  <View style={styles.agendaDetailRow}>
-                    <Text
-                      style={[styles.agendaDetail, { color: colors.textMuted }]}
-                      numberOfLines={1}
-                    >
-                      {secondary}
-                    </Text>
-                    {slot.photoCount > 0 && (
-                      <View style={styles.agendaPhotos}>
-                        <Icon name="camera-outline" size={12} color={colors.textMuted} />
-                        <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
-                          {slot.photoCount}
+                {/* Icon tile: the same line icon the meal card wears, in a pale rounded tile. */}
+                <View style={[styles.agendaIcon, { backgroundColor: colors.surfaceVariant }]}>
+                  <MaterialIcon
+                    name={mealCategoryGlyph(slot.mealCategoryKey)}
+                    size={AGENDA_GLYPH_SIZE}
+                    color={colors.textSecondary}
+                  />
+                </View>
+                {/* Text: title over category + photo count (or category alone). */}
+                <View style={styles.copy}>
+                  <Text style={[styles.agendaTitle, { color: colors.text }]} numberOfLines={1}>
+                    {primary}
+                  </Text>
+                  {hasDetail && (
+                    <View style={styles.agendaDetailRow}>
+                      {secondary !== '' && (
+                        <Text
+                          style={[styles.agendaDetail, { color: colors.textMuted }]}
+                          numberOfLines={1}>
+                          {secondary}
                         </Text>
-                      </View>
-                    )}
-                  </View>
-                )}
+                      )}
+                      {slot.photoCount > 0 && (
+                        <View style={styles.agendaPhotos}>
+                          <Icon name="camera-outline" size={12} color={colors.textMuted} />
+                          <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
+                            {slot.photoCount}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </View>
+                {/* Status badge: a soft pill on the right. */}
+                <View style={[styles.agendaPill, { backgroundColor: pill.fill }]}>
+                  <Text style={[styles.agendaPillText, { color: pill.ink }]}>
+                    {statusLabel(slot.status)}
+                  </Text>
+                </View>
               </View>
-              {/* Status badge: a soft pill on the right. */}
-              <View style={[styles.agendaPill, { backgroundColor: pill.fill }]}>
-                <Text style={[styles.agendaPillText, { color: pill.ink }]}>
-                  {statusLabel(slot.status)}
-                </Text>
-              </View>
-            </View>
+            </React.Fragment>
           );
         })}
       </View>
@@ -730,6 +730,13 @@ const styles = StyleSheet.create({
   selectedDetail: { fontSize: 13, lineHeight: 17, marginTop: 2 },
   /** Grouped agenda: time | icon | text | status badge. */
   agenda: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  /**
+   * The rule between two rows: a full 1 dp line in the card's separator token
+   * (cardDivider is one deliberate step stronger than `border`, so it stays
+   * visible on white and on the dark card). Inset to the row gutters, so it
+   * lines up with the content and never doubles the card's own frame.
+   */
+  agendaDivider: { height: 1, marginHorizontal: 14 },
   agendaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -749,7 +756,7 @@ const styles = StyleSheet.create({
   agendaTime: { fontSize: 13, width: 44, fontVariant: ['tabular-nums'] },
   agendaTitle: { fontSize: 15, fontFamily: fonts.medium, lineHeight: 20 },
   /** Detail line: category text + optional photo count, on one row. */
-  agendaDetailRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
+  agendaDetailRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4, minWidth: 0 },
   agendaDetail: { fontSize: 12, lineHeight: 16, flexShrink: 1 },
   /** Camera glyph plus the photograph count, inline with the category. */
   agendaPhotos: { flexDirection: 'row', alignItems: 'center', columnGap: 3, flexShrink: 0 },

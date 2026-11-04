@@ -108,10 +108,6 @@ export const RN_STRINGS: Record<string, string> = {
   /** Calendar (round-3 design): mark key and the selected-day summary. */
   Rn_CalendarDots: '5 dots = 5 meals',
   Rn_CalendarDaySummary: '{0} done · {1} missed · {2} pending',
-  /** One count in the selected-day line; zero counts are left out, as drawn. */
-  Rn_CalendarDoneCount: '{0} done',
-  Rn_CalendarMissedCount: '{0} missed',
-  Rn_CalendarPendingCount: '{0} pending',
   Rn_CalendarPhotoCount: '{0} photos',
   /** Photo count on one agenda row (a camera glyph plus this number). */
   Rn_Agenda: 'Agenda',

@@ -287,6 +287,17 @@ describe('the selected day row', () => {
     act(() => open?.props.onPress());
     expect(onOpenDay).toHaveBeenCalledWith(OTHER);
   });
+
+  test('an untouched day still shows all three counts, in order', async () => {
+    mealsMock.mockResolvedValue([]);
+    const { renderer } = await renderScreen(OTHER);
+    // 0 done · 0 missed · 5 pending - the same shape a busy day uses.
+    expect(texts(renderer)).toContain(tFmt('Rn_CalendarDaySummary', 0, 0, 5));
+    // No photographs were invented for the empty slots.
+    expect(texts(renderer).some((line) => line.includes(tFmt('Rn_CalendarPhotoCount', 0)))).toBe(
+      false,
+    );
+  });
 });
 
 describe('the agenda of the selected day', () => {
@@ -352,6 +363,22 @@ describe('the agenda of the selected day', () => {
       expect(texts(renderer)).toContain(name);
     }
     expect(texts(renderer)).not.toContain('Oatmeal');
+  });
+
+  test('separates every pair of rows with one inset 1 dp divider', async () => {
+    const { renderer } = await renderScreen(OTHER);
+    const dividers = renderer.root
+      .findAllByType(View)
+      .map((node) => styleOf(node))
+      .filter(
+        (style) => style.height === 1 && style.backgroundColor === lightColors.cardDivider,
+      );
+    // Five rows -> four rules, none before the first row or after the last.
+    expect(dividers).toHaveLength(4);
+    for (const divider of dividers) {
+      // Inset to the row gutters on both sides: no double border at the card edge.
+      expect(divider.marginHorizontal).toBe(14);
+    }
   });
 });
 
