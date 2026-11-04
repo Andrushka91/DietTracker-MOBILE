@@ -894,6 +894,22 @@ npm start
     page never stretches a card to fill the screen, and it never draws a status
     pill, a counter or a photo chip: a template carries neither state nor
     photographs (`__tests__/templatesScreen.test.tsx`).
+  * The **Settings page** follows the same reference layout: one scrollable column
+    of grouped white cards (16 pt corners, 1 pt frame, 16 pt gutter), 11 pt caps
+    section captions, 52 pt rows (64 pt when a row carries a detail line) and ONE
+    1 pt divider between two rows, inset to the gutter - no row draws its own
+    border, which is what doubled every line before. Every row's glyph is 22 pt in
+    a 24 pt column, so the labels line up down the page. The account card ends
+    with a QUIET action row - red glyph + red label to sign out, accent to sign in
+    - instead of the solid red button, and the flow behind it (sync first, retry,
+    "sign out anyway") is untouched. The sync row keeps the engine's own words and
+    adds an explicit pale-indigo **Sync now** pill (44 pt, 12 pt corners) that
+    runs the SAME manual cycle behind the global busy sheet; the row's leading
+    glyph takes the state colour - green only for a genuine success, red for a
+    failure or an expired login, amber while offline - so the row never looks
+    "done" while something is wrong. Photo storage still prints the real size and
+    count, and every expanded panel (schedule, privacy, diagnostics), disabled
+    rule and dialog is unchanged (`__tests__/settingsScreen.test.tsx`).
   * The card state bar sits on the **top** edge of the card: the Windows card draws the
     same 4 px bar along its bottom border (`BorderThickness="1,1,1,4"`). On the phone the
     state colour is the card's **top border** (`borderTopWidth: metrics.stateBar` in

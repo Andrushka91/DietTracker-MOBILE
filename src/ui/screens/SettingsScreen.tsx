@@ -1,9 +1,21 @@
-// Settings (spec 8.8) - card grid, same order & contents as Windows:
-//  1 Guest info (only signed out)   2 Account card
-//  3 General (auto-save hint + toggles - every control writes immediately,
-//    no Save button)                 4 Synchronization card
-//  5 Privacy and backup card         6 About card
-//  7 Floating status line (StatusCaption, rendered by the shell)
+// Settings (spec 8.8) - the r3 reference layout, same order & contents as
+// Windows, ONE scrollable page:
+//  1 Account (identity row + ONE account action)   2 General (12-hour clock)
+//  3 Cloud sync (status + Sync now, schedule, contents)
+//  4 Data & backup (export, restore, calendar PDF, photo storage)
+//  5 More (privacy, advanced/diagnostics, about)
+//  6 Floating status line (StatusCaption, rendered by the shell)
+//
+// Every group is a white card on the page wash: a 1 pt frame, 16 pt corners, one
+// 1 pt divider INSET to the 16 pt gutter and only BETWEEN two rows - no row
+// draws its own border, so no line is ever doubled. Rows are 52 pt (64 pt when
+// they carry a detail line) and grow with the system text size; the icon of
+// every row sits in one 24 pt column so the labels line up down the page.
+//
+// The account card ends with a QUIET action row - red glyph + red label to sign
+// out, accent to sign in - instead of the solid red button it used to draw: the
+// identity is the card's subject, and a full-width red block made signing out
+// look like the page's primary purpose.
 //
 // Signing in runs behind the GLOBAL busy sheet (shell.tsx), not a button
 // spinner: the account change touches the whole database, so no other control of
@@ -13,9 +25,11 @@
 // uploads every pending change and cannot be skipped, because the local cache is
 // the only copy of those records until then.
 //
-// "Synchronize now" raises the SAME bottom sheet with a plain spinner and the
-// "Synchronizing your data…" sentence, so every wait in the app looks alike and
-// the row's refresh glyph is only the trigger, never the progress report.
+// "Sync now" is an explicit pale-indigo pill in the status row; it raises the
+// SAME global busy sheet as every other wait, and its own label says "Syncing"
+// while the cycle runs. The row's glyph carries the state colour - green only
+// for a genuine success, red for a failure or an expired login, amber while
+// offline - and never claims a state the engine did not report.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -37,9 +51,49 @@ import { signOutCardCopy } from '../accountProgress';
 import { BarButton, Segmented } from '../components/buttons';
 import { ConfirmDialog, type ConfirmRequest } from '../components/dialogs';
 import { Icon } from '../components/icons';
-import { fonts, metrics, pageTitleStyle, themeColors, type ThemeColors } from '../theme';
+import {
+  fonts,
+  metrics,
+  pageTitleStyle,
+  themeColors,
+  tintAlpha,
+  typeScale,
+  type ThemeColors,
+} from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatInstant, formatMegabytes, t, tFmt } from '../strings';
+
+/**
+ * Settings layout values (dp), taken from the r3 reference and scoped to this
+ * page: the theme keeps owning colour and type, these numbers keep the grouped
+ * rows of THIS screen on the reference's rhythm.
+ */
+const LAYOUT = {
+  /** Air above the page title. */
+  pageTop: 12,
+  /** Space between a section caption and the group above it. */
+  sectionGap: 22,
+  /** Space between a section caption and its group. */
+  headingGap: 8,
+  /** Row gutter on both sides - the divider's inset is the same number. */
+  rowInset: 16,
+  /** Icon column: every glyph is centred in it, so the labels line up. */
+  iconColumn: 24,
+  iconSize: 22,
+  rowMinHeight: 52,
+  detailRowMinHeight: 64,
+  dividerInset: 16,
+  avatarSize: 44,
+} as const;
+
+/**
+ * The one rule between two rows of a group: 1 pt, inset to the row gutter, never
+ * drawn above a group's first row or below its last (the card's frame is the
+ * edge there), so no line is ever doubled.
+ */
+function Divider({ colors }: { colors: ThemeColors }): React.JSX.Element {
+  return <View style={[styles.divider, { backgroundColor: colors.hairline }]} />;
+}
 
 export function SettingsScreen(): React.JSX.Element {
   const app = useApp();
@@ -409,6 +463,8 @@ export function SettingsScreen(): React.JSX.Element {
         ? SyncState.Synced
         : app.syncState;
   const sync = describeSync(shownSyncState, app.lastSyncSuccess, app.signedIn, app.use12HourClock);
+  /** Ink of the status glyph - green only for a genuine success (see syncTone). */
+  const syncColor = syncTone(shownSyncState, app.signedIn, colors);
   const accountName = app.signedIn
     ? accountIdentity.name !== ''
       ? accountIdentity.name
@@ -453,7 +509,8 @@ export function SettingsScreen(): React.JSX.Element {
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Settings')}</Text>
 
-      {/* Account: identity row + the one account action, in a single card. */}
+      {/* Account: the identity row, a divider, then the ONE account action as a
+          quiet tinted row - red to sign out, accent to sign in. */}
       <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <Pressable
           accessibilityRole="button"
@@ -471,35 +528,35 @@ export function SettingsScreen(): React.JSX.Element {
             )}
           </View>
           <View style={styles.copy}>
-            <Text style={[styles.label, { color: colors.text }]} numberOfLines={1}>
+            <Text style={[styles.accountName, { color: colors.text }]} numberOfLines={1}>
               {accountName}
             </Text>
-            <Text style={[styles.detail, { color: colors.textMuted }]} numberOfLines={1}>
+            <Text style={[styles.detail, { color: colors.textMuted }]} numberOfLines={2}>
               {accountDetail}
             </Text>
           </View>
-          <Icon name="chevron-forward" size={16} color={colors.textMuted} />
+          <Icon name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
-        <View style={styles.accountAction}>
-          {app.signedIn ? (
-            <BarButton
-              danger
-              label={t('Account_SignOut')}
-              style={styles.accountButton}
-              onPress={confirmSignOut}
-              colors={colors}
-            />
-          ) : (
-            <BarButton
-              accent
-              icon="log-in-outline"
-              label={t('Account_Google')}
-              style={styles.accountButton}
-              onPress={() => void signIn()}
-              colors={colors}
-            />
-          )}
-        </View>
+        <Divider colors={colors} />
+        {app.signedIn ? (
+          <SettingsRow
+            icon="log-out-outline"
+            label={t('Account_SignOut')}
+            tint={colors.error}
+            chevron={false}
+            onPress={confirmSignOut}
+            colors={colors}
+          />
+        ) : (
+          <SettingsRow
+            icon="log-in-outline"
+            label={t('Account_Google')}
+            tint={colors.accent}
+            chevron={false}
+            onPress={() => void signIn()}
+            colors={colors}
+          />
+        )}
       </View>
 
 
@@ -511,55 +568,56 @@ export function SettingsScreen(): React.JSX.Element {
         <SettingsRow
           icon="time-outline"
           label={t('Settings_12Hour')}
-          divider={false}
           colors={colors}
           trailingControl={
             <Switch
               value={prefs?.use12HourClock ?? false}
               onValueChange={(value) => void app.setPreference('use12HourClock', value)}
               accessibilityLabel={t('Settings_12Hour')}
-              trackColor={{ false: colors.border, true: colors.success }}
+              trackColor={{ false: colors.border, true: colors.accent }}
               thumbColor="#FFFFFF"
             />
           }
         />
       </View>
 
-      {/* Cloud sync: state, schedule, contents - the three questions this
-          section answers, in that order. */}
+      {/* Cloud sync: state + the explicit Sync now action, schedule, contents -
+          the three questions this section answers, in that order. */}
       <Text style={[styles.sectionHeader, { color: colors.textMuted }]}>
         {t('Rn_SectionCloud')}
       </Text>
       <View style={[styles.group, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         <SettingsRow
           icon={sync.icon}
+          iconColor={syncColor}
           label={sync.title}
           detail={sync.detail}
-          divider={false}
           colors={colors}
           trailingControl={
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={t('Settings_SyncNow')}
-              accessibilityState={{ disabled: !app.signedIn || syncing }}
+              accessibilityLabel={t('Rn_SyncNow')}
+              accessibilityState={{ disabled: !app.signedIn || syncing, busy: syncing }}
               disabled={!app.signedIn || syncing}
               onPress={() => void synchronizeNow()}
-              hitSlop={8}
+              hitSlop={4}
               style={({ pressed }) => [
-                styles.refreshButton,
+                styles.syncButton,
                 {
-                  backgroundColor: pressed ? colors.surfaceVariant : 'transparent',
-                  opacity: app.signedIn ? 1 : 0.4,
+                  backgroundColor: pressed
+                    ? colors.surfaceVariant
+                    : tintAlpha(colors.accent, app.isDark ? '2E' : '1A'),
+                  opacity: app.signedIn ? 1 : 0.55,
                 },
               ]}>
-              <Icon
-                name="refresh"
-                size={20}
-                color={syncing ? colors.accent : colors.textSecondary}
-              />
+              <Icon name="sync-outline" size={18} color={colors.accent} />
+              <Text style={[styles.syncLabel, { color: colors.accent }]} numberOfLines={1}>
+                {syncing ? t('Sync_Syncing') : t('Rn_SyncNow')}
+              </Text>
             </Pressable>
           }
         />
+        <Divider colors={colors} />
         <SettingsRow
           icon="calendar-outline"
           label={t('Rn_ScheduledChecks')}
@@ -573,7 +631,7 @@ export function SettingsScreen(): React.JSX.Element {
           colors={colors}
         />
         {openRows.syncSchedule === true && (
-          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+          <View style={styles.expanded}>
             <Segmented
               options={[t('Sync_FrequencyWeekly'), t('Sync_FrequencyMonthly')]}
               index={(prefs?.syncFrequency ?? 1) === SyncFrequency.Monthly ? 1 : 0}
@@ -596,6 +654,7 @@ export function SettingsScreen(): React.JSX.Element {
             </Text>
           </View>
         )}
+        <Divider colors={colors} />
         <SettingsRow
           icon="cloud-outline"
           label={t('Rn_CloudContents')}
@@ -616,10 +675,10 @@ export function SettingsScreen(): React.JSX.Element {
           icon="download-outline"
           label={t('Settings_Export')}
           detail={t('Rn_ExportDetail')}
-          divider={false}
           onPress={() => void exportData()}
           colors={colors}
         />
+        <Divider colors={colors} />
         <SettingsRow
           icon="cloud-download-outline"
           label={t('Settings_Import')}
@@ -627,12 +686,14 @@ export function SettingsScreen(): React.JSX.Element {
           onPress={() => void restoreBackupFile()}
           colors={colors}
         />
+        <Divider colors={colors} />
         <SettingsRow
           icon="calendar-number-outline"
           label={t('Settings_ExportCalendar')}
           onPress={() => void exportCalendar()}
           colors={colors}
         />
+        <Divider colors={colors} />
         {/* Real repository values: how many photographs are stored, and the
             storage they occupy on this device. */}
         <SettingsRow
@@ -655,13 +716,12 @@ export function SettingsScreen(): React.JSX.Element {
         <SettingsRow
           icon="shield-checkmark-outline"
           label={t('Rn_PrivacyRow')}
-          divider={false}
           expanded={openRows.privacy === true}
           onPress={() => toggleRow('privacy')}
           colors={colors}
         />
         {openRows.privacy === true && (
-          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+          <View style={styles.expanded}>
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
               {t('Settings_PrivacyHint')}
             </Text>
@@ -670,6 +730,7 @@ export function SettingsScreen(): React.JSX.Element {
             </Text>
           </View>
         )}
+        <Divider colors={colors} />
         <SettingsRow
           icon="construct-outline"
           label={t('Rn_AdvancedRow')}
@@ -678,7 +739,7 @@ export function SettingsScreen(): React.JSX.Element {
           colors={colors}
         />
         {openRows.advanced === true && (
-          <View style={[styles.expanded, { borderTopColor: colors.hairline }]}>
+          <View style={styles.expanded}>
             <Text style={[styles.detail, { color: colors.textMuted }]}>
               {t('Rn_LocalDatabase')}
             </Text>
@@ -698,6 +759,7 @@ export function SettingsScreen(): React.JSX.Element {
             )}
           </View>
         )}
+        <Divider colors={colors} />
         <SettingsRow
           icon="information-circle-outline"
           label={t('Rn_AboutApp')}
@@ -799,41 +861,72 @@ function describeSync(
 }
 
 /**
- * One row of a grouped card, in the round-3 anatomy: a 20 pt leading glyph, a
- * 14 pt label over an 11 pt detail, and a trailing value / control / chevron. A
- * row with `onPress` is a button; the others are plain information rows.
+ * Ink for the sync row's glyph. GREEN is reserved for a genuine success; a
+ * failure or an expired login is red, an offline / paused account is amber, and
+ * a guest (or an account the engine never configured) keeps the quiet neutral -
+ * the row must never look "done" while something is wrong.
+ */
+function syncTone(state: SyncState, signedIn: boolean, colors: ThemeColors): string {
+  if (!signedIn) {
+    return colors.textMuted;
+  }
+  switch (state) {
+    case SyncState.Synced:
+      return colors.success;
+    case SyncState.AuthenticationRequired:
+    case SyncState.Error:
+      return colors.error;
+    case SyncState.Offline:
+    case SyncState.Paused:
+      return colors.warning;
+    default:
+      return colors.textMuted;
+  }
+}
+
+/**
+ * One row of a grouped card, in the r3 reference's anatomy: a 22 pt leading
+ * glyph centred in a 24 pt column, a 16 pt label over a 12 pt detail line, and a
+ * trailing value / control / chevron. 52 pt tall (64 pt with a detail line) and
+ * free to grow with the system text size. A row with `onPress` is a button; the
+ * others are plain information rows. `tint` paints the glyph AND the label for an
+ * action row (red to sign out, accent to sign in), while `iconColor` paints only
+ * the glyph (the sync state), and `chevron={false}` keeps an action from looking
+ * like a disclosure.
  */
 function SettingsRow(props: {
   icon: React.ComponentProps<typeof Icon>['name'];
   label: string;
   detail?: string;
   trailing?: string;
-  /** Any trailing control (a switch, an icon button) - replaces value + chevron. */
+  /** Any trailing control (a switch, the Sync now pill) - replaces value + chevron. */
   trailingControl?: React.ReactNode;
   expanded?: boolean;
   disabled?: boolean;
+  /** Ink of the glyph AND the label (an action row: sign out / sign in). */
+  tint?: string;
+  /** Ink of the glyph only, when it must not follow the label (sync state). */
+  iconColor?: string;
+  /** False for an action row: no chevron, because it does not open anything. */
+  chevron?: boolean;
   onPress?: () => void;
-  /** False for the first row of a group (the card's own frame is the top edge). */
-  divider?: boolean;
   colors: ThemeColors;
 }): React.JSX.Element {
   const interactive = props.onPress !== undefined && props.disabled !== true;
+  const showChevron = props.onPress !== undefined && props.chevron !== false;
+  const labelColor =
+    props.tint ?? (props.disabled === true ? props.colors.disabledText : props.colors.text);
+  const glyphColor =
+    props.disabled === true
+      ? props.colors.disabledText
+      : props.iconColor ?? props.tint ?? props.colors.textMuted;
   const content = (
     <>
       <View style={styles.leading}>
-        <Icon
-          name={props.icon}
-          size={20}
-          color={props.disabled === true ? props.colors.disabledText : props.colors.textMuted}
-        />
+        <Icon name={props.icon} size={LAYOUT.iconSize} color={glyphColor} />
       </View>
       <View style={styles.copy}>
-        <Text
-          style={[
-            styles.label,
-            { color: props.disabled === true ? props.colors.disabledText : props.colors.text },
-          ]}
-          numberOfLines={2}>
+        <Text style={[styles.label, { color: labelColor }]} numberOfLines={2}>
           {props.label}
         </Text>
         {props.detail !== undefined && props.detail !== '' && (
@@ -845,14 +938,14 @@ function SettingsRow(props: {
       {props.trailingControl ?? (
         <View style={styles.trailing}>
           {props.trailing !== undefined && (
-            <Text style={[styles.trailingText, { color: props.colors.textMuted }]}>
+            <Text style={[styles.trailingText, { color: props.colors.textMuted }]} numberOfLines={2}>
               {props.trailing}
             </Text>
           )}
-          {props.onPress !== undefined && (
+          {showChevron && (
             <Icon
               name={props.expanded === true ? 'chevron-down' : 'chevron-forward'}
-              size={16}
+              size={18}
               color={props.colors.textMuted}
             />
           )}
@@ -860,25 +953,26 @@ function SettingsRow(props: {
       )}
     </>
   );
+  const rowStyle = [
+    styles.row,
+    props.detail !== undefined && props.detail !== '' && styles.detailRow,
+    props.disabled === true && styles.rowDisabled,
+  ];
 
-  const dividerStyle = {
-    borderTopColor: props.divider === false ? 'transparent' : props.colors.hairline,
-  };
   if (props.onPress === undefined) {
-    return <View style={[styles.row, dividerStyle]}>{content}</View>;
+    return <View style={rowStyle}>{content}</View>;
   }
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={
-        props.trailing === undefined ? props.label : `${props.label}, ${props.trailing}`
-      }
+      accessibilityLabel={[props.label, props.detail, props.trailing]
+        .filter((part) => part !== undefined && part !== '')
+        .join(', ')}
       accessibilityState={{ disabled: props.disabled === true, expanded: props.expanded }}
       disabled={props.disabled === true}
       onPress={props.onPress}
       style={({ pressed }) => [
-        styles.row,
-        dividerStyle,
+        rowStyle,
         pressed && interactive && { backgroundColor: props.colors.surfaceVariant },
       ]}>
       {content}
@@ -889,76 +983,94 @@ function SettingsRow(props: {
 
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
-  pageTitle: { ...pageTitleStyle, marginBottom: 14 },
+  content: { paddingHorizontal: metrics.pagePadding, paddingTop: LAYOUT.pageTop },
+  pageTitle: { ...pageTitleStyle, marginBottom: 16 },
   /** Grouped card: a hairline frame on the page surface, no heavy shadow. */
   group: {
-    borderRadius: 15,
+    borderRadius: metrics.radius,
     borderWidth: 1,
     overflow: 'hidden',
   },
   /** iOS-style grouped section caption, 11 pt caps with wide tracking. */
   sectionHeader: {
-    fontSize: 11,
+    fontSize: typeScale.caption2,
     lineHeight: 18,
     fontFamily: fonts.medium,
     textTransform: 'uppercase',
     letterSpacing: 1.1,
     marginLeft: 2,
-    marginTop: 18,
-    marginBottom: 7,
+    marginTop: LAYOUT.sectionGap,
+    marginBottom: LAYOUT.headingGap,
   },
+  /** 1 pt rule, inset to the row gutter - only ever BETWEEN two rows. */
+  divider: { height: 1, marginHorizontal: LAYOUT.dividerInset },
   accountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 12,
-    padding: 14,
+    padding: LAYOUT.rowInset,
+    minHeight: 80,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: LAYOUT.avatarSize,
+    height: LAYOUT.avatarSize,
+    borderRadius: LAYOUT.avatarSize / 2,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   avatarImage: { width: '100%', height: '100%' },
   copy: { flex: 1, minWidth: 0 },
-  label: { fontSize: 14, lineHeight: 19, fontFamily: fonts.medium },
-  detail: { fontSize: 11, lineHeight: 16, marginTop: 2 },
-  /** The account action keeps the card's inner padding on every side. */
-  accountAction: { paddingHorizontal: 14, paddingBottom: 14 },
-  accountButton: { minHeight: 46, justifyContent: 'center' },
-  /** One row of a group; the hairline above it is drawn by the row itself. */
+  accountName: { fontSize: typeScale.body, lineHeight: 21, fontFamily: fonts.medium },
+  /** One row of a group: glyph column, label over detail, trailing value. */
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 11,
-    minHeight: 58,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'transparent',
+    columnGap: 12,
+    minHeight: LAYOUT.rowMinHeight,
+    paddingHorizontal: LAYOUT.rowInset,
+    paddingVertical: 10,
   },
-  leading: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
-  trailing: { flexDirection: 'row', alignItems: 'center', columnGap: 6 },
-  trailingText: { fontSize: 12 },
-  refreshButton: {
-    width: 40,
-    height: 40,
+  detailRow: { minHeight: LAYOUT.detailRowMinHeight },
+  /** A disabled row keeps its text readable - it is dimmed, not recoloured. */
+  rowDisabled: { opacity: 0.55 },
+  leading: { width: LAYOUT.iconColumn, alignItems: 'center' },
+  label: { fontSize: typeScale.body, lineHeight: 21, fontFamily: fonts.regular },
+  detail: { fontSize: typeScale.caption, lineHeight: 17, marginTop: 2 },
+  trailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 6,
+    flexShrink: 1,
+    maxWidth: '38%',
+  },
+  trailingText: { fontSize: typeScale.caption, textAlign: 'right', flexShrink: 1 },
+  /** "Sync now": a pale indigo pill on the accent, 44 pt tall, 12 pt corners. */
+  syncButton: {
+    minHeight: metrics.minTouch,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    columnGap: 6,
+    borderRadius: 12,
+    flexShrink: 1,
   },
+  syncLabel: { fontSize: typeScale.caption, fontFamily: fonts.medium, flexShrink: 1 },
   /** Revealed detail inside a group (schedule picker, privacy, diagnostics). */
   expanded: {
-    paddingHorizontal: 13,
-    paddingBottom: 13,
+    paddingHorizontal: LAYOUT.rowInset,
+    paddingBottom: LAYOUT.rowInset,
     rowGap: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  hint: { fontSize: 12, lineHeight: 17 },
-  note: { fontSize: 11, lineHeight: 16, marginTop: 8, marginLeft: 3, marginRight: 3 },
+  hint: { fontSize: typeScale.caption, lineHeight: 17 },
+  note: {
+    fontSize: typeScale.caption,
+    lineHeight: 17,
+    marginTop: 8,
+    paddingHorizontal: 2,
+  },
   mono: { fontSize: 11, lineHeight: 16, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   integrityButton: { alignSelf: 'flex-start', justifyContent: 'center' },
 });

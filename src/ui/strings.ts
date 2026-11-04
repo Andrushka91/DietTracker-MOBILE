@@ -91,6 +91,12 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_CheckIntegrity: 'Check database integrity',
   Rn_AccountDetails: 'Account details',
   Rn_SyncAutoHint: 'When connected, saving a meal starts a sync attempt automatically.',
+  /**
+   * The compact label of the explicit sync action. The Windows key
+   * (`Settings_SyncNow`, "Synchronize now") is the long form; the pill draws the
+   * short one so it stays on a single line beside the status on a narrow phone.
+   */
+  Rn_SyncNow: 'Sync now',
   Rn_LastSync: 'Last sync',
   /** Cloud-sync row states, one title + one detail each. */
   Rn_SyncOk: 'Up to date',
