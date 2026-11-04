@@ -1,8 +1,8 @@
 // The Templates page as the r3 mockup draws it: the "Templates" heading with its
-// subtitle, ONE quiet info strip, then a compact white card per template - glyph,
-// real name over its update time, the kind badge, the REAL meal count, a
-// full-width "Meal preview" accordion and ONE full-width "Apply to date" button
-// that stays at the card's floor in both states.
+// small regular subtitle, ONE quiet inline notice, then an outlined card per
+// template - glyph, real name over its update time, a neutral outlined kind
+// chip, the REAL meal count beside the "Meal preview" chevron, and ONE neutral
+// outlined "Apply to date" control that stays at the card's floor in both states.
 //
 // Pinned here: the wording, the count and every time/title come from the stored
 // template, the accordion really toggles, the apply action still goes through the
@@ -181,7 +181,7 @@ beforeEach(() => {
 
 
 describe('the page head', () => {
-  test('keeps the heading, adds the subtitle and ONE quiet info strip', async () => {
+  test('keeps the heading, adds the subtitle and ONE quiet notice', async () => {
     const renderer = await renderScreen();
     const printed = texts(renderer);
     expect(printed).toContain(t('Nav_Templates'));
@@ -261,7 +261,9 @@ describe('the template card', () => {
     const renderer = await renderScreen();
     const collapsed = styleOf(applyButtons(renderer)[0]);
     expect(collapsed.minHeight).toBeGreaterThanOrEqual(44);
-    expect(collapsed.borderRadius).toBe(12);
+    // The neutral outlined control: 10 dp corners, a thin frame - no accent fill.
+    expect(collapsed.borderRadius).toBe(10);
+    expect(collapsed.borderWidth).toBe(1);
     expect(applyButtons(renderer)).toHaveLength(1);
 
     act(() => accordion(renderer).props.onPress());
