@@ -88,6 +88,8 @@ android-build.log
 *.db
 *.db-wal
 *.db-shm
+# Emulator screenshots captured while comparing a screen against its mockup
+.screens/
 
 # Standalone release APKs built by scripts\build-apk.bat (published on the release page)
 release/

@@ -162,7 +162,7 @@ function marksOf(renderer: Renderer, date: string): Record<string, unknown>[] {
   return cell(renderer, date)
     .findAllByType(View)
     .map((node) => styleOf(node))
-    .filter((style) => style.width === 4 && style.height === 4);
+    .filter((style) => style.width === 5 && style.height === 5);
 }
 
 beforeEach(() => {

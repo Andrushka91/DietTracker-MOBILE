@@ -42,7 +42,15 @@ import { monthGrid } from '../calendarGrid';
 import { isCalendarDate } from '../dates';
 import { Icon, MaterialIcon } from '../components/icons';
 import { mealCategoryGlyph } from '../mealGlyphs';
-import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
+import {
+  cardShadow,
+  fonts,
+  metrics,
+  pageTitleStyle,
+  softPillColors,
+  themeColors,
+  tintAlpha,
+} from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
   formatCompactDayMonth,
@@ -201,15 +209,24 @@ export function CalendarScreen(props: {
   const selectedProgress = progressByDate[selected];
   const selectedPhotos =
     selectedProgress?.slots.reduce((total, slot) => total + slot.photoCount, 0) ?? 0;
-  const selectedSummary =
-    selectedProgress === undefined
-      ? tFmt('Rn_CalendarDaySummary', 0, 0, 0)
-      : `${tFmt(
-          'Rn_CalendarDaySummary',
-          selectedProgress.completed,
-          selectedProgress.missed,
-          selectedProgress.pending,
-        )}${selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''}`;
+  /**
+   * The selected-day line reads like the mockup: only the counts that are not
+   * zero ("3 done · 2 pending · 3 photos"), so an untouched morning never
+   * announces "0 missed". A day with nothing decided still says "5 pending".
+   */
+  const summaryParts: string[] = [];
+  if (selectedProgress !== undefined && selectedProgress.completed > 0) {
+    summaryParts.push(tFmt('Rn_CalendarDoneCount', selectedProgress.completed));
+  }
+  if (selectedProgress !== undefined && selectedProgress.missed > 0) {
+    summaryParts.push(tFmt('Rn_CalendarMissedCount', selectedProgress.missed));
+  }
+  if (selectedProgress === undefined || selectedProgress.pending > 0) {
+    summaryParts.push(tFmt('Rn_CalendarPendingCount', selectedProgress?.pending ?? 0));
+  }
+  const selectedSummary = `${summaryParts.join(' · ')}${
+    selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''
+  }`;
 
   return (
     <ScrollView
@@ -228,14 +245,16 @@ export function CalendarScreen(props: {
           accessibilityRole="button"
           accessibilityLabel={t('Calendar_Today')}
           onPress={goToToday}
-          hitSlop={10}
+          hitSlop={4}
           style={({ pressed }) => [
             styles.todayButton,
-            { backgroundColor: app.isDark ? '#1E2240' : '#E8EBFB' },
+            // A pale wash of the ONE accent, so the button follows the theme in
+            // both modes instead of pinning a hex that only works in light mode.
+            { backgroundColor: tintAlpha(colors.accent, app.isDark ? '2E' : '1A') },
             pressed && { opacity: 0.85 },
           ]}>
-          <MaterialIcon name="calendar-month-outline" size={16} color={app.isDark ? '#8B95F6' : '#4655D6'} />
-          <Text style={[styles.todayButtonText, { color: app.isDark ? '#8B95F6' : '#4655D6' }]}>
+          <MaterialIcon name="calendar-month-outline" size={16} color={colors.accent} />
+          <Text style={[styles.todayButtonText, { color: colors.accent }]}>
             {t('Calendar_Today')}
           </Text>
         </Pressable>
@@ -244,7 +263,12 @@ export function CalendarScreen(props: {
       {/* Month navigation, weekday grid and the mark key read as ONE compact
           surface: the arrows sit on the card's edges so the month label is exactly
           centred, whatever its length. */}
-      <View style={[styles.board, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View
+        style={[
+          styles.board,
+          cardShadow,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}>
         {/* Month navigation: label on the left, grouped arrows on the right. */}
         <View style={styles.monthRow}>
           <Text style={[styles.monthLabel, { color: colors.text }]} numberOfLines={1}>
@@ -255,10 +279,11 @@ export function CalendarScreen(props: {
               accessibilityRole="button"
               accessibilityLabel={t('Calendar_PreviousMonth')}
               onPress={() => shiftMonth(-1)}
-              hitSlop={4}
+              hitSlop={2}
               style={({ pressed }) => [
                 styles.monthArrow,
-                { backgroundColor: pressed ? colors.surfaceVariant : colors.surfaceVariant },
+                { backgroundColor: colors.surfaceVariant },
+                pressed && { opacity: 0.7 },
               ]}>
               <Icon name="chevron-back" size={20} color={colors.textSecondary} />
             </Pressable>
@@ -266,10 +291,11 @@ export function CalendarScreen(props: {
               accessibilityRole="button"
               accessibilityLabel={t('Calendar_NextMonth')}
               onPress={() => shiftMonth(1)}
-              hitSlop={4}
+              hitSlop={2}
               style={({ pressed }) => [
                 styles.monthArrow,
-                { backgroundColor: pressed ? colors.surfaceVariant : colors.surfaceVariant },
+                { backgroundColor: colors.surfaceVariant },
+                pressed && { opacity: 0.7 },
               ]}>
               <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
             </Pressable>
@@ -410,10 +436,12 @@ export function CalendarScreen(props: {
               {t('Status_Pending')}
             </Text>
           </View>
-          <View style={[styles.keySeparator, { backgroundColor: colors.hairline }]} />
-          <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
-            {t('Rn_CalendarDots')}
-          </Text>
+          <View style={styles.keyCaption}>
+            <View style={[styles.keySeparator, { backgroundColor: colors.hairline }]} />
+            <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
+              {t('Rn_CalendarDots')}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -446,7 +474,12 @@ export function CalendarScreen(props: {
 
       {/* Grouped agenda of the selected date: category icon, aligned time, the
           meal's title over its category, its photographs and a small status pill. */}
-      <View style={[styles.agenda, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View
+        style={[
+          styles.agenda,
+          cardShadow,
+          { backgroundColor: colors.surface, borderColor: colors.border },
+        ]}>
         {(selectedProgress?.slots ?? []).map((slot, index) => {
           const category = categories.find((c) => c.fixedCategoryKey === slot.mealCategoryKey);
           const pill = softPillColors(colors, slot.status);
@@ -504,7 +537,7 @@ export function CalendarScreen(props: {
                     </Text>
                     {slot.photoCount > 0 && (
                       <View style={styles.agendaPhotos}>
-                        <Icon name="camera-outline" size={11} color={colors.textMuted} />
+                        <Icon name="camera-outline" size={12} color={colors.textMuted} />
                         <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
                           {slot.photoCount}
                         </Text>
@@ -552,6 +585,8 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    // 36 + 4 pt hitSlop on every side = a 44 pt target without a taller chip.
+    minHeight: 36,
     borderRadius: metrics.radiusPill,
   },
   todayButtonText: {
@@ -578,7 +613,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     textAlign: 'left',
-    fontSize: 18,
+    fontSize: 19,
     fontFamily: fonts.bold,
     letterSpacing: -0.4,
   },
@@ -586,9 +621,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  /** 40 pt chip + 2 pt hitSlop = the 44 pt minimum target. */
   monthArrow: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: metrics.radiusSmall,
     alignItems: 'center',
     justifyContent: 'center',
@@ -603,7 +639,7 @@ const styles = StyleSheet.create({
   },
   openDayText: {
     fontFamily: fonts.medium,
-    fontSize: 14,
+    fontSize: 15,
   },
   weekHeader: { flexDirection: 'row' },
   weekday: { flex: 1, textAlign: 'center', fontSize: 11, paddingVertical: 4 },
@@ -653,10 +689,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1.5,
   },
-  dayNumber: { fontSize: 14, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  /** Five slot marks in meal order: 5 x 4 pt dots, 2 pt apart (28 pt wide). */
-  marks: { flexDirection: 'row', alignItems: 'center', columnGap: 2, height: 4, maxWidth: '100%' },
-  mark: { width: 4, height: 4, borderRadius: 2 },
+  dayNumber: { fontSize: 15, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
+  /** Five slot marks in meal order: 5 x 5 pt dots, 2 pt apart (33 pt wide). */
+  marks: { flexDirection: 'row', alignItems: 'center', columnGap: 2, height: 5, maxWidth: '100%' },
+  mark: { width: 5, height: 5, borderRadius: 2.5 },
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -675,11 +711,12 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
-  keyText: { fontSize: 12 },
-  /** Thin vertical separator between the key items and the dots caption. */
-  keySeparator: { width: 1, height: 12, marginHorizontal: 6, flexShrink: 0 },
-  /** "5 dots = 5 meals" caption on the right. */
-  footText: { fontSize: 11 },
+  keyText: { fontSize: 13 },
+  /** Separator + caption travel together, so a wrapped key never strands the rule. */
+  keyCaption: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' },
+  keySeparator: { width: 1, height: 12, marginRight: 6, flexShrink: 0 },
+  /** "5 dots = 5 meals" caption, pinned to the card's right edge like the mockup. */
+  footText: { fontSize: 12 },
   /** Selected date + its counts, with the explicit Open day action. */
   selectedRow: {
     flexDirection: 'row',
@@ -689,40 +726,40 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   copy: { flex: 1, minWidth: 0 },
-  selectedTitle: { fontSize: 16, fontFamily: fonts.bold, lineHeight: 21 },
-  selectedDetail: { fontSize: 12, lineHeight: 16, marginTop: 2 },
+  selectedTitle: { fontSize: 19, fontFamily: fonts.bold, lineHeight: 24 },
+  selectedDetail: { fontSize: 13, lineHeight: 17, marginTop: 2 },
   /** Grouped agenda: time | icon | text | status badge. */
   agenda: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   agendaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 8,
-    minHeight: 56,
-    paddingHorizontal: 10,
+    columnGap: 10,
+    minHeight: 58,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  /** The meal slot's own icon, in the same 30 pt tile shape as a meal card. */
+  /** The meal slot's own icon, in the same tile shape as a meal card. */
   agendaIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  agendaTime: { fontSize: 12, width: 40, fontVariant: ['tabular-nums'] },
-  agendaTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
+  agendaTime: { fontSize: 13, width: 44, fontVariant: ['tabular-nums'] },
+  agendaTitle: { fontSize: 15, fontFamily: fonts.medium, lineHeight: 20 },
   /** Detail line: category text + optional photo count, on one row. */
   agendaDetailRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4 },
-  agendaDetail: { fontSize: 11, flexShrink: 1 },
+  agendaDetail: { fontSize: 12, lineHeight: 16, flexShrink: 1 },
   /** Camera glyph plus the photograph count, inline with the category. */
   agendaPhotos: { flexDirection: 'row', alignItems: 'center', columnGap: 3, flexShrink: 0 },
   /** Status badge: a soft pill on the right. */
   agendaPill: {
     borderRadius: metrics.radiusPill,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     flexShrink: 0,
   },
-  agendaPillText: { fontSize: 11, fontFamily: fonts.medium },
+  agendaPillText: { fontSize: 12, fontFamily: fonts.medium },
 });
 
