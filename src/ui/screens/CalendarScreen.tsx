@@ -1,31 +1,31 @@
-// Calendar (spec 8.5) - one compact month card: ‹ November 2026 › between the
-// card's edges (so the label is centred however long the month name is), the
-// seven equal columns Monday-first, the day cells, then the Done / Missed /
-// Pending key with "5 dots = 5 meals", the selected-day row (a concise date, its
-// counts and "Open day") and the grouped agenda of that date.
-//
-// Day markers: the SELECTED day is the filled indigo circle with white text, and
-// TODAY is a thin outline drawn in EVERY state - when another date is selected the
-// outline is the accent, and when today IS the selection the outline is drawn in
-// the fill's own ink so the two markers never cancel each other out. Both marks
-// are child Views; a background/border on a re-used cell loses its corner radius
-// on Android (see the cell comment). Tapping a cell selects it; long press /
-// "Open day" opens the Dashboard for that date. "Today" is never a constant: it is
-// read from the clock on every focus, so the outline moves by itself after
-// midnight.
-//
-// A day with any decision shows its FIVE meal-slot marks (green done, red missed,
-// gray pending - the same three inks as the key) in meal-category order, below the
-// date, small enough that seven columns never collide; an untouched day shows no
-// marks at all, because a pending meal never produced a figure. The neighbouring
-// months' days that fill the first and last week carry their marks too, so a month
-// boundary never looks like a gap in the diary.
-//
-// The agenda lists the five slots of the selected date with the SAME line icon the
-// meal card wears, an aligned time, the meal's title over its category (or the
-// CATEGORY alone when the slot has no title - never five "No meal recorded"
-// lines), its photograph count and a small status pill. Photos and navigation are
-// untouched: this page still only reads.
+  // Calendar (spec 8.5) - one compact month card: a left-aligned month label, a
+  // pale-indigo "Today" button with a calendar icon, the seven equal columns
+  // Monday-first, the day cells, then the Done / Missed / Pending key in a single
+  // compact row with "5 dots = 5 meals", the selected-day row (a bold compact date,
+  // its counts and "Open day") and the grouped agenda of that date.
+  //
+  // Day markers: the SELECTED day is the filled indigo circle with white text, and
+  // TODAY is a thin outline drawn in EVERY state - when another date is selected the
+  // outline is the accent, and when today IS the selection the outline is drawn in
+  // the fill's own ink so the two markers never cancel each other out. Both marks
+  // are child Views; a background/border on a re-used cell loses its corner radius
+  // on Android (see the cell comment). Tapping a cell selects it; long press /
+  // "Open day" opens the Dashboard for that date. "Today" is never a constant: it is
+  // read from the clock on every focus, so the outline moves by itself after
+  // midnight.
+  //
+  // A day with any decision shows its FIVE meal-slot marks (green done, red missed,
+  // gray pending - the same three inks as the key) in meal-category order, below the
+  // date, small enough that seven columns never collide; an untouched day shows no
+  // marks at all, because a pending meal never produced a figure. The neighbouring
+  // months' days that fill the first and last week carry their marks too, so a month
+  // boundary never looks like a gap in the diary.
+  //
+  // The agenda lists the five slots of the selected date with the SAME line icon the
+  // meal card wears, an aligned time, the meal's title over its category (or the
+  // CATEGORY alone when the slot has no title - never five "No meal recorded"
+  // lines), its photograph count and a small status pill. Photos and navigation are
+  // untouched: this page still only reads.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -222,16 +222,18 @@ export function CalendarScreen(props: {
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <View style={styles.pageHead}>
-        <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Calendar')}</Text>
+        <Text style={[styles.pageTitle, { color: colors.text }]} numberOfLines={1}>
+          {t('Nav_Calendar')}
+        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('Calendar_Today')}
           onPress={goToToday}
           hitSlop={10}
-          style={({ pressed }) => [styles.todayLink, { opacity: pressed ? 0.6 : 1 }]}>
-          <Text style={[styles.todayLinkText, { color: colors.accent }]}>
-            {t('Calendar_Today')}
-          </Text>
+          style={styles.todayButton}
+        >
+          <MaterialIcon name="calendar-month-outline" size={16} color={colors.accentFillText} />
+          <Text style={styles.todayButtonText}>{t('Calendar_Today')}</Text>
         </Pressable>
       </View>
 
@@ -239,24 +241,27 @@ export function CalendarScreen(props: {
           surface: the arrows sit on the card's edges so the month label is exactly
           centred, whatever its length. */}
       <View style={[styles.board, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {/* Month navigation: label on the left, grouped arrows on the right. */}
         <View style={styles.monthRow}>
-          <IconButton
-            label={t('Calendar_PreviousMonth')}
-            icon="chevron-back"
-            onPress={() => shiftMonth(-1)}
-            size={20}
-            colors={colors}
-          />
           <Text style={[styles.monthLabel, { color: colors.text }]} numberOfLines={1}>
             {formatMonthLabel(month)}
           </Text>
-          <IconButton
-            label={t('Calendar_NextMonth')}
-            icon="chevron-forward"
-            onPress={() => shiftMonth(1)}
-            size={20}
-            colors={colors}
-          />
+          <View style={styles.monthNav}>
+            <IconButton
+              label={t('Calendar_PreviousMonth')}
+              icon="chevron-back"
+              onPress={() => shiftMonth(-1)}
+              size={20}
+              colors={colors}
+            />
+            <IconButton
+              label={t('Calendar_NextMonth')}
+              icon="chevron-forward"
+              onPress={() => shiftMonth(1)}
+              size={20}
+              colors={colors}
+            />
+          </View>
         </View>
 
         <View style={styles.weekHeader}>
@@ -372,7 +377,9 @@ export function CalendarScreen(props: {
           ))}
         </View>
 
-        <View style={[styles.keyRow, { borderTopColor: colors.cardDivider }]}>
+        {/* A single compact key row: done / missed / pending with their dots,
+            followed by "5 dots = 5 meals". */}
+        <View style={styles.keyRow}>
           <KeyItem icon="checkmark" color={colors.done} label={t('Status_Done')} colors={colors} />
           <KeyItem icon="close" color={colors.missed} label={t('Status_Missed')} colors={colors} />
           <KeyItem
@@ -381,41 +388,20 @@ export function CalendarScreen(props: {
             label={t('Status_Pending')}
             colors={colors}
           />
-        </View>
-        <View style={styles.boardFoot}>
-          <View style={styles.footDots}>
-            {/* Five sample dots in the pending tone: the caption says what a full
-                row of them means, and the state colours are already in the key. */}
-            <View style={styles.dotSample}>
-              {[0, 1, 2, 3, 4].map((index) => (
-                <View key={index} style={[styles.mark, { backgroundColor: colors.pending }]} />
-              ))}
-            </View>
-            <Text style={[styles.footText, { color: colors.textMuted }]}>
-              {t('Rn_CalendarDots')}
-            </Text>
-          </View>
-          <View style={styles.footToday}>
-            {/* The same thin outline the grid draws around today, so the key
-                explains the exact mark instead of a filled dot that is not used
-                for "today" anywhere on the board. */}
-            <View style={[styles.footSwatch, { borderColor: colors.accent }]} />
-            <Text style={[styles.footText, { color: colors.textMuted }]}>
-              {t('Calendar_Today')}
-            </Text>
-          </View>
+          <Text style={[styles.footText, { color: colors.textMuted }]}>
+            {t('Rn_CalendarDots')}
+          </Text>
         </View>
       </View>
 
 
-      {/* Selected day: one concise date, an accurate count/photo summary and an
-          explicit "Open day" - selecting a date only PREVIEWS its agenda. */}
+      {/* Selected day: a bold compact date, its counts and an "Open day" action. */}
       <View style={styles.selectedRow}>
         <View style={styles.copy}>
           <Text style={[styles.selectedTitle, { color: colors.text }]} numberOfLines={1}>
             {formatMediumDate(selected)}
           </Text>
-          <Text style={[styles.selectedDetail, { color: colors.textMuted }]}>
+          <Text style={[styles.selectedDetail, { color: colors.textMuted }]} numberOfLines={1}>
             {selectedSummary}
           </Text>
         </View>
@@ -460,8 +446,11 @@ export function CalendarScreen(props: {
                   borderTopColor: colors.hairline,
                 },
               ]}>
-              {/* The SAME line icon the meal card's header wears, so a slot looks
-                  like itself everywhere in the app. */}
+              {/* Time: aligned column on the left. */}
+              <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
+                {time}
+              </Text>
+              {/* Icon tile: the same line icon the meal card wears, in a pale rounded tile. */}
               <View style={[styles.agendaIcon, { backgroundColor: colors.surfaceVariant }]}>
                 <MaterialIcon
                   name={mealCategoryGlyph(slot.mealCategoryKey)}
@@ -469,9 +458,7 @@ export function CalendarScreen(props: {
                   color={colors.textSecondary}
                 />
               </View>
-              <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
-                {time}
-              </Text>
+              {/* Text: title over category (or category alone). */}
               <View style={styles.copy}>
                 <Text style={[styles.agendaTitle, { color: colors.text }]} numberOfLines={1}>
                   {primary}
@@ -482,14 +469,7 @@ export function CalendarScreen(props: {
                   </Text>
                 )}
               </View>
-              {slot.photoCount > 0 && (
-                <View style={styles.agendaPhotos}>
-                  <Icon name="camera-outline" size={12} color={colors.textMuted} />
-                  <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
-                    {slot.photoCount}
-                  </Text>
-                </View>
-              )}
+              {/* Status badge: a soft pill on the right. */}
               <View style={[styles.agendaPill, { backgroundColor: pill.fill }]}>
                 <Text style={[styles.agendaPillText, { color: pill.ink }]}>
                   {statusLabel(slot.status)}
@@ -503,7 +483,7 @@ export function CalendarScreen(props: {
   );
 }
 
-/** One entry of the mark key: glyph in the state colour plus its word. */
+/** One entry of the mark key: a coloured dot plus its word. */
 function KeyItem(props: {
   icon: React.ComponentProps<typeof Icon>['name'];
   color: string;
@@ -535,9 +515,22 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
   pageHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   pageTitle: { ...pageTitleStyle },
-  /** "Today" is a quiet accent link, not a filled button. */
-  todayLink: { minHeight: 32, justifyContent: 'center', paddingHorizontal: 6, marginTop: 2 },
-  todayLinkText: { fontSize: 13, fontFamily: fonts.medium },
+  /** "Today" is a pale-indigo button with a calendar icon. */
+  todayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: metrics.radiusPill,
+    backgroundColor: colors.accent,
+  },
+  todayButtonText: {
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    color: colors.accentFillText,
+  },
   /** Month navigation + weekday grid + key form one compact surface. */
   board: {
     marginTop: 10,
@@ -547,7 +540,7 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 6,
   },
-  /** ‹ | month | › - the arrows hold the card's edges, the label takes the middle. */
+  /** Month navigation: label on the left, arrows grouped on the right. */
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -557,10 +550,14 @@ const styles = StyleSheet.create({
   monthLabel: {
     flex: 1,
     minWidth: 0,
-    textAlign: 'center',
+    textAlign: 'left',
     fontSize: 18,
     fontFamily: fonts.bold,
     letterSpacing: -0.4,
+  },
+  monthNav: {
+    flexDirection: 'row',
+    gap: 6,
   },
   weekHeader: { flexDirection: 'row' },
   weekday: { flex: 1, textAlign: 'center', fontSize: 11, paddingVertical: 4 },
@@ -617,12 +614,9 @@ const styles = StyleSheet.create({
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // The three states share the full width evenly, so the key reads across the
-    // whole board instead of sitting as a centred cluster.
     justifyContent: 'space-between',
-    // The same line the meal card draws under a meal (`cardDivider`, one step
-    // above the hairline): it closes the grid and hands the space to the key.
     borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.cardDivider,
     marginTop: 8,
     paddingTop: 8,
     paddingHorizontal: 4,
@@ -636,23 +630,8 @@ const styles = StyleSheet.create({
     columnGap: 4,
   },
   keyText: { fontSize: 11 },
-  boardFoot: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
-    paddingHorizontal: 2,
-  },
-  /** The five sample dots and what they mean. */
-  footDots: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
-  dotSample: { flexDirection: 'row', alignItems: 'center', columnGap: 2 },
+  /** "5 dots = 5 meals" caption on the right. */
   footText: { fontSize: 11 },
-  footToday: { flexDirection: 'row', alignItems: 'center', columnGap: 5 },
-  /**
-   * The footer's "Today" key: the same thin outline the grid draws around today
-   * (a filled dot is no longer used anywhere on the board).
-   */
-  footSwatch: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5 },
   /** Selected date + its counts, with the explicit Open day action. */
   selectedRow: {
     flexDirection: 'row',
@@ -664,7 +643,7 @@ const styles = StyleSheet.create({
   copy: { flex: 1, minWidth: 0 },
   selectedTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
   selectedDetail: { fontSize: 11, lineHeight: 16, marginTop: 2 },
-  /** Grouped agenda: category icon | time | meal | photos | status. */
+  /** Grouped agenda: time | icon | text | status badge. */
   agenda: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
   agendaRow: {
     flexDirection: 'row',
@@ -685,9 +664,7 @@ const styles = StyleSheet.create({
   agendaTime: { fontSize: 12, width: 40, fontVariant: ['tabular-nums'] },
   agendaTitle: { fontSize: 13, fontFamily: fonts.medium, lineHeight: 18 },
   agendaDetail: { fontSize: 11, flexShrink: 1 },
-  /** Camera glyph plus the photograph count, on one line. */
-  agendaPhotos: { flexDirection: 'row', alignItems: 'center', columnGap: 3 },
-  /** Soft pill: the state colour on a wash of itself. */
+  /** Status badge: a soft pill on the right. */
   agendaPill: {
     borderRadius: metrics.radiusPill,
     paddingHorizontal: 9,
