@@ -1,15 +1,16 @@
-// The meal card's ACTION STRIP, drawn the way the reference card draws it:
+// The meal card's ACTION TOOLBAR, drawn the way the r3 reference card draws it:
 //
-//   meal (category / time / status, title, description, photos)
+//   meal (category / time / status badge, title, description, photos)
 //   ────────────────────────────────────────────────────────────────
 //   ░ [camera] [edit] [clear]              │        [✕ missed] [✓ done] ░
-//   ░                    tinted strip                             ░
+//   ░                  nearly-white toolbar                         ░
 //
 // The five tools are the card's WHOLE affordance, and every one of them can go
 // missing silently: a renamed glyph renders as nothing, a tile below 44 pt of
 // touch is unusable with a thumb, a line in `hairline` disappears on the dark
-// card. These tests pin the glyph names (header, pencil, bin), their ink, the two
-// groups and their divider, the tile/target geometry, the strip's tint and line in
+// card. These tests pin the glyph names (header, clock, pencil, bin), their ink,
+// the two groups and their short separator, the real 44 pt targets around the
+// 36 pt visible tiles, the toolbar's near-white tint and the single inset rule in
 // BOTH themes, and that the meal's CURRENT state stays visible on its mark.
 
 import React from 'react';
@@ -20,14 +21,28 @@ import { MealCategoryKey, MealStatus, SyncStatus } from '../src/domain/enums';
 import { MealCategory, MealEntry } from '../src/domain/models';
 import {
   CARD_STRIP_PADDING,
+  CARD_TOOLBAR_GAP,
+  CARD_TOOLBAR_SEPARATOR_HEIGHT,
   CARD_TOOL_GAP,
   CARD_TOOL_GLYPH,
+  CARD_TOOL_RADIUS,
   CARD_TOOL_SIZE,
   CARD_TOOL_TOUCH,
   MealCard,
 } from '../src/ui/components/MealCard';
 import { t } from '../src/ui/strings';
-import { darkColors, lightColors, metrics } from '../src/ui/theme';
+import { darkColors, lightColors, metrics, tintAlpha } from '../src/ui/theme';
+
+/**
+ * The card's responsive branch is read from the window. RN's jest window reports
+ * fontScale 2, so a phone-sized window is set explicitly here; the large-text
+ * fallback gets its own test in `mealCardRead.test.tsx`.
+ */
+const mockWindow = { width: 390, height: 844, scale: 3, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
 
 const NOW = new Date('2026-11-01T18:00:00.000Z');
 
@@ -41,7 +56,7 @@ const CATEGORY: MealCategory = {
   displayOrder: 0,
 };
 
-/** Pending, so the status pill draws a dot and the only glyphs are the tools. */
+/** Pending: the badge draws its clock glyph, next to the five tools. */
 const MEAL: MealEntry = {
   id: 'meal-breakfast',
   localProfileId: 'profile',
@@ -105,6 +120,17 @@ function tool(renderer: Renderer, label: string): TestRenderer.ReactTestInstance
   return found;
 }
 
+/** The visible 36 pt chip inside a tool's 44 pt pressable. */
+function tileOf(renderer: Renderer, label: string): TestRenderer.ReactTestInstance {
+  const found = tool(renderer, label)
+    .findAllByType(View)
+    .find((node) => styleOf(node).width === CARD_TOOL_SIZE);
+  if (found === undefined) {
+    throw new Error(`no visible tile inside "${label}"`);
+  }
+  return found;
+}
+
 /** A node's style, whether it is still a pressable function or already an array. */
 function styleOf(node: TestRenderer.ReactTestInstance): Record<string, unknown> {
   const style = node.props.style;
@@ -140,6 +166,8 @@ describe('the meal card tools', () => {
     expect(glyphs).toEqual([
       // The header's category glyph comes first (Breakfast's bowl and spoon).
       'material:bowl-mix-outline',
+      // The PENDING badge repeats its word with a clock - not a bare dot.
+      'icon:time-outline',
       'icon:camera-outline',
       // The mockup's pencil: a square open at the top-right with a plain pencil
       // through it - Feather `edit`, not Ionicons' nibbed `create-outline`.
@@ -171,7 +199,7 @@ describe('the meal card tools', () => {
     }
   });
 
-  test('gives every tool a compact tile with a 44 pt touch target', () => {
+  test('gives every tool a real 44 pt pressable around a 36 pt tile', () => {
     const renderer = render(false);
     for (const label of [
       t('Photo_Add'),
@@ -180,13 +208,21 @@ describe('the meal card tools', () => {
       t('Meal_MarkMissed'),
       t('Meal_MarkDone'),
     ]) {
-      const style = styleOf(tool(renderer, label));
-      expect(style.width).toBe(CARD_TOOL_SIZE);
-      expect(style.height).toBe(CARD_TOOL_SIZE);
-      // The visible tile is compact; the hit slop is what makes the TARGET big.
-      const slop = tool(renderer, label).props.hitSlop as number;
-      expect(CARD_TOOL_SIZE + slop * 2).toBeGreaterThanOrEqual(CARD_TOOL_TOUCH);
+      // The pressable IS the touch target: 44 x 44, with no hit slop that could
+      // overlap the neighbouring tool.
+      const touch = styleOf(tool(renderer, label));
+      expect(touch.width).toBe(CARD_TOOL_TOUCH);
+      expect(touch.height).toBe(CARD_TOOL_TOUCH);
+      expect(tool(renderer, label).props.hitSlop).toBeUndefined();
       expect(CARD_TOOL_TOUCH).toBeGreaterThanOrEqual(44);
+
+      // ...and the visible chip inside it is the compact 36 pt outlined tile.
+      const tile = tileOf(renderer, label);
+      expect(styleOf(tile).width).toBe(CARD_TOOL_SIZE);
+      expect(styleOf(tile).height).toBe(CARD_TOOL_SIZE);
+      expect(styleOf(tile).borderRadius).toBe(CARD_TOOL_RADIUS);
+      expect(styleOf(tile).borderWidth).toBe(1);
+      expect(CARD_TOOL_SIZE).toBe(36);
     }
     // A consistent 20 pt glyph in every tile, at both ends of the strip.
     expect(CARD_TOOL_GLYPH).toBe(20);
@@ -213,69 +249,73 @@ describe('the meal card tools', () => {
     expect(labelsOf(groups[1])).toEqual([t('Meal_MarkMissed'), t('Meal_MarkDone')]);
     expect(styleOf(groups[1]).justifyContent).not.toBe('flex-start');
 
-    // ONE divider between the two groups - not a line per boundary.
+    // ONE short separator between the two groups - not a line per boundary.
     const dividers = viewsWhere(
       renderer,
-      (style) => style.width === 1 && style.alignSelf === 'stretch',
+      (style) => style.width === 1 && style.height === CARD_TOOLBAR_SEPARATOR_HEIGHT,
     );
     expect(dividers).toHaveLength(1);
-    // ...and it hugs the marks: the auto margin takes every free pixel, so the
-    // line ends one strip padding before the ✕ (see the strip test below).
+    // ...and it hugs the marks: the auto margin takes every free pixel.
     expect(styleOf(dividers[0]).marginLeft).toBe('auto');
-    expect(CARD_TOOL_SIZE * 5 + CARD_TOOL_GAP * 4 + 24).toBeLessThan(360 - 32 - 15 - 13);
+    expect(CARD_TOOLBAR_SEPARATOR_HEIGHT).toBe(24);
+    // Five 44 pt targets, two group gaps, the 8 pt air on both sides of the
+    // separator and the toolbar's 10 pt padding still fit a 360 pt phone card.
+    expect(
+      CARD_TOOL_TOUCH * 5 + CARD_TOOL_GAP * 4 + CARD_TOOLBAR_GAP * 2 + 1 + CARD_STRIP_PADDING * 2,
+    ).toBeLessThan(360 - 32 - 2);
   });
 
-  test('marks the meal CURRENT state on the strip', () => {
+  test('marks the meal CURRENT state on the toolbar', () => {
     // A DONE meal: the check tile keeps a ring in the done colour, the X does not.
     const done = render(false, { ...MEAL, status: MealStatus.Done });
-    const doneTile = styleOf(tool(done, t('Meal_MarkDone')));
-    expect(doneTile.borderColor).toBe(lightColors.done);
+    expect(styleOf(tileOf(done, t('Meal_MarkDone'))).borderColor).toBe(lightColors.done);
     // Disabled (pressing it again changes nothing) but NOT faded: it is the answer.
-    expect(doneTile.opacity).toBe(1);
-    expect(styleOf(tool(done, t('Meal_MarkMissed'))).borderColor).toBe('transparent');
+    expect(styleOf(tool(done, t('Meal_MarkDone'))).opacity).toBe(1);
+    expect(styleOf(tileOf(done, t('Meal_MarkMissed'))).borderColor).toBe(lightColors.cardDivider);
 
     // A missed meal mirrors it.
     const missed = render(false, { ...MEAL, status: MealStatus.Missed });
-    expect(styleOf(tool(missed, t('Meal_MarkMissed'))).borderColor).toBe(lightColors.missed);
-    expect(styleOf(tool(missed, t('Meal_MarkDone'))).borderColor).toBe('transparent');
+    expect(styleOf(tileOf(missed, t('Meal_MarkMissed'))).borderColor).toBe(lightColors.missed);
+    expect(styleOf(tileOf(missed, t('Meal_MarkDone'))).borderColor).toBe(lightColors.cardDivider);
   });
 
-  test('the strip is a tinted footer closed by one clear line', () => {
+  test('is a nearly-white toolbar under ONE inset 1 pt rule', () => {
     for (const colors of [lightColors, darkColors]) {
       const renderer = render(colors.dark);
-      const strips = viewsWhere(
-        renderer,
-        (style) => style.borderTopWidth === 1 && style.backgroundColor === colors.surfaceVariant,
-      );
-      expect(strips).toHaveLength(1);
-      const strip = styleOf(strips[0]);
-      // A deliberate step above the card border - `hairline` and even `border` were
-      // too faint to read on the dark card.
-      expect(strip.borderTopColor).toBe(colors.cardDivider);
-      expect(colors.cardDivider).not.toBe(colors.border);
-      expect(colors.cardDivider).not.toBe(colors.hairline);
-      // It follows the card's corners and bleeds to the card's edges.
-      expect(strip.borderBottomLeftRadius).toBe(metrics.radius - 1);
-      expect(strip.marginLeft).toBe(-15);
-      expect(strip.marginRight).toBe(-13);
-      // The divider and the card's right edge carry the SAME air: the strip's
-      // side padding is its column gap, so the line sits one padding from the ✕.
-      expect(strip.paddingHorizontal).toBe(CARD_STRIP_PADDING);
-      expect(strip.columnGap).toBe(CARD_STRIP_PADDING);
-      expect(CARD_STRIP_PADDING).toBe(10);
 
-      // It is the LAST block of the card: below every glyph of the meal.
-      const viewsInOrder = renderer.root.findAllByType(View);
+      // The rule: 1 pt tall, inset 14 pt from BOTH card edges, in `cardDivider`.
+      const rules = viewsWhere(
+        renderer,
+        (style) => style.height === 1 && style.marginHorizontal === 14,
+      );
+      expect(rules).toHaveLength(1);
+      expect(styleOf(rules[0]).backgroundColor).toBe(colors.cardDivider);
+
+      // The toolbar: the card's own fill with a whisper of ink - never the heavy
+      // control wash the old full-bleed strip used.
+      const bars = viewsWhere(
+        renderer,
+        (style) =>
+          style.paddingHorizontal === CARD_STRIP_PADDING && style.paddingVertical === 4,
+      );
+      expect(bars).toHaveLength(1);
+      const bar = styleOf(bars[0]);
+      expect(bar.backgroundColor).toBe(tintAlpha(colors.text, colors.dark ? '06' : '04'));
+      expect(bar.backgroundColor).not.toBe(colors.surfaceVariant);
+      expect(bar.columnGap).toBe(CARD_TOOLBAR_GAP);
+      expect(bar.borderBottomLeftRadius).toBe(metrics.radius - 1);
+      expect(bar.borderBottomRightRadius).toBe(metrics.radius - 1);
+
+      // No full-bleed band anymore: nothing cancels the card's padding.
+      expect(
+        viewsWhere(renderer, (style) => style.marginLeft === -15 || style.marginRight === -13),
+      ).toHaveLength(0);
+
+      // The rule comes first, then the toolbar: both BELOW every glyph of the meal.
+      const views = renderer.root.findAllByType(View);
       const firstTile = viewsWhere(renderer, (style) => style.width === CARD_TOOL_SIZE)[0];
-      expect(viewsInOrder.indexOf(strips[0])).toBeLessThan(viewsInOrder.indexOf(firstTile));
-
-      // One 12 pt value above the line, held by the strip's host - no chain of
-      // paddings to keep in sync.
-      const hosts = viewsWhere(
-        renderer,
-        (style) => style.paddingTop === 12 && style.marginTop === 'auto',
-      );
-      expect(hosts).toHaveLength(1);
+      expect(views.indexOf(firstTile)).toBeLessThan(views.indexOf(rules[0]));
+      expect(views.indexOf(rules[0])).toBeLessThan(views.indexOf(bars[0]));
     }
   });
 });

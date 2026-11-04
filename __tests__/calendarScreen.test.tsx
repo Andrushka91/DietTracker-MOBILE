@@ -268,13 +268,24 @@ describe('the selected day row', () => {
     // A compact date (weekday, day, abbreviated month), not the long form.
     expect(printed).toContain(formatCompactDayMonth(OTHER));
     expect(printed).not.toContain(formatLongDate(OTHER));
-    // The summary follows the data: 1 done, 1 missed, 3 pending (+ 2 photos).
-    expect(
-      printed.some((line) => line.startsWith(tFmt('Rn_CalendarDaySummary', 1, 1, 3))),
-    ).toBe(true);
+    // The summary follows the data: three real counts, each keeping its status
+    // word, plus the day's photograph total - the items can wrap, so nothing is
+    // truncated on a narrow card.
+    expect(printed).toContain(`1 ${t('Status_Done')}`);
+    expect(printed).toContain(`1 ${t('Status_Missed')}`);
+    expect(printed).toContain(`3 ${t('Status_Pending')}`);
     expect(
       printed.some((line) => line.includes(tFmt('Rn_CalendarPhotoCount', 2))),
     ).toBe(true);
+    // The row is still SPOKEN as the one sentence the page always read out.
+    const spoken = renderer.root
+      .findAll(
+        (node) =>
+          node.props?.accessibilityLabel ===
+          `${tFmt('Rn_CalendarDaySummary', 1, 1, 3)} · ${tFmt('Rn_CalendarPhotoCount', 2)}`,
+      )
+      .pop();
+    expect(spoken).toBeDefined();
 
     const open = renderer.root
       .findAll(
@@ -291,12 +302,14 @@ describe('the selected day row', () => {
   test('an untouched day still shows all three counts, in order', async () => {
     mealsMock.mockResolvedValue([]);
     const { renderer } = await renderScreen(OTHER);
-    // 0 done · 0 missed · 5 pending - the same shape a busy day uses.
-    expect(texts(renderer)).toContain(tFmt('Rn_CalendarDaySummary', 0, 0, 5));
+    // 0 Done · 0 Missed · 5 Pending - the same three items a busy day shows, and
+    // the zeros stay visible.
+    const printed = texts(renderer);
+    expect(printed).toContain(`0 ${t('Status_Done')}`);
+    expect(printed).toContain(`0 ${t('Status_Missed')}`);
+    expect(printed).toContain(`5 ${t('Status_Pending')}`);
     // No photographs were invented for the empty slots.
-    expect(texts(renderer).some((line) => line.includes(tFmt('Rn_CalendarPhotoCount', 0)))).toBe(
-      false,
-    );
+    expect(printed.some((line) => line.includes(tFmt('Rn_CalendarPhotoCount', 0)))).toBe(false);
   });
 });
 
@@ -365,11 +378,12 @@ describe('the agenda of the selected day', () => {
     expect(texts(renderer)).not.toContain('Oatmeal');
   });
 
-  test('separates every pair of rows with one full-width 1 dp divider', async () => {
+  test('separates every pair of rows with one inset 1 dp divider', async () => {
     const { renderer } = await renderScreen(OTHER);
     const agenda = renderer.root.findAllByType(View).find((node) => {
       const style = styleOf(node);
-      return style.borderRadius === 14 && style.borderWidth === 1;
+      // The flat 16 dp agenda surface (the rounded, clipped card).
+      return style.borderRadius === 16 && style.borderWidth === 1 && style.overflow === 'hidden';
     });
     expect(agenda).toBeDefined();
     const dividers = agenda!
@@ -381,8 +395,8 @@ describe('the agenda of the selected day', () => {
     // Five rows -> four rules, none before the first row or after the last.
     expect(dividers).toHaveLength(4);
     for (const divider of dividers) {
-      // Full-bleed: no horizontal margin, so the rule runs the whole card.
-      expect(divider.marginHorizontal).toBeUndefined();
+      // INSET to the row gutters, so a rule never touches the card's frame.
+      expect(divider.marginHorizontal).toBe(14);
     }
   });
 
@@ -396,9 +410,9 @@ describe('the agenda of the selected day', () => {
       );
     // Four between the meal rows + one above the key, all in the same colour.
     expect(rules).toHaveLength(5);
-    expect(rules.filter((rule) => rule.marginHorizontal === undefined)).toHaveLength(4);
-    // The board's 8 dp padding + 7 dp margin + 1 dp frame = the same 16 dp inset.
-    expect(rules.filter((rule) => rule.marginHorizontal === 7)).toHaveLength(1);
+    expect(rules.filter((rule) => rule.marginHorizontal === 14)).toHaveLength(4);
+    // The board's 10 dp padding + 4 dp margin + 1 dp frame: inset from both edges.
+    expect(rules.filter((rule) => rule.marginHorizontal === 4)).toHaveLength(1);
   });
 });
 

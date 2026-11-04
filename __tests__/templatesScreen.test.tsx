@@ -291,8 +291,10 @@ describe('applying', () => {
     act(() => applyButtons(renderer)[0].props.onPress());
     const field = renderer.root.findByType(TextInput);
     expect(field.props.value).toBe(formatDate(new Date()));
-    // The compact sheet names the real template (a day-named one as a long
-    // date, exactly like the card) and counts its real meals.
+    // The sheet's headline is the reference's "Apply template"...
+    expect(texts(renderer)).toContain(t('Rn_TemplateApplyTitle'));
+    // ...over the compact sheet's summary: the real template (a day-named one as
+    // a long date, exactly like the card) and its real meal count.
     expect(texts(renderer)).toContain(
       `${formatMediumDate(DAY_TEMPLATE.name)} · ${tFmt('Rn_TemplateMealCount', 5)}`,
     );

@@ -21,7 +21,11 @@
  *
  *   [1/5] Toolchain    which Android SDK and JDK are used (or how to install one)
  *   [2/5] Device       reuses a running emulator (or a connected phone), else
- *                      boots the AVD with a live "booting ... 37 s" line
+ *                      boots the AVD with a live "booting ... 37 s" line, and
+ *                      only reports it as ready once adb really answers (a
+ *                      quick-boot snapshot restores sys.boot_completed before
+ *                      adbd reconnects, which used to hand the install an
+ *                      "offline" device)
  *   [3/5] Build        gradle assembleDebug for the target ABI ONLY, then
  *                      adb install -r (full output still in android-build.log)
  *   [4/5] Metro        reuses a Metro that is already serving, else starts one
@@ -36,9 +40,15 @@
  *   [3/6] Release      scripts\build-apk.bat -> both release APKs in release\
  *                      (the two files are checked by timestamp, so a failed
  *                      bundle can never be installed as "the new build")
- *   [4/6] Device       boot / reuse the AVD
+ *   [4/6] Device       boot / reuse the AVD, then wait until adb really reaches
+ *                      it (not just sys.boot_completed)
  *   [5/6] Install      adb install -r -d of the universal APK (x86_64 cannot run
- *                      the arm64 build)
+ *                      the arm64 build); a transport that drops right after the
+ *                      boot is waited for and the install is retried, the last
+ *                      attempt with --no-streaming (no abb_exec). A PackageManager
+ *                      that never answers - the state a half-restored quick-boot
+ *                      snapshot brings back - is healed by deleting that snapshot
+ *                      and cold booting the AVD, so the install still happens
  *   [6/6] Launch       am start com.diettracker.app
  *
  * No Metro and no dev client: the JavaScript is bundled inside the APK, so this
@@ -101,6 +111,14 @@ const DEFAULT_PORT = 8081;
 const DEVICE_TIMEOUT_MS = 90 * 1000;
 const BOOT_TIMEOUT_MS = 5 * 60 * 1000;
 const METRO_TIMEOUT_MS = 120 * 1000;
+/** A quick-boot snapshot hands the device back to adb a few seconds after boot. */
+const READY_TIMEOUT_MS = 60 * 1000;
+/** One `adb install` (31 MB APK, dexopt included) - longer means it hung. */
+const INSTALL_TIMEOUT_MS = 180 * 1000;
+/** How long the PackageManager may take to answer after a boot. */
+const PM_TIMEOUT_MS = 45 * 1000;
+/** adb install attempts: a snapshot boot can drop the transport exactly once. */
+const INSTALL_ATTEMPTS = 3;
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -409,18 +427,113 @@ function deviceName(tools, device) {
   return parts.join(', ');
 }
 
-/** Polls adb until the AVD we just spawned shows up, and returns its serial. */
-async function waitForEmulatorSerial(tools) {
+/**
+ * Polls adb until the AVD we just spawned shows up, and returns its serial.
+ * `before` holds the serials adb already listed before the spawn: those belong to
+ * a stale entry or another emulator, so only a NEW serial counts - unless the
+ * emulator reused one and that serial really answers.
+ */
+async function waitForEmulatorSerial(tools, before = new Set()) {
   const started = Date.now();
   while (Date.now() - started < DEVICE_TIMEOUT_MS) {
-    const emulator = listDevices(tools).find((device) => device.isEmulator);
-    if (emulator) {
-      return emulator.serial;
+    const emulators = listDevices(tools).filter((device) => device.isEmulator);
+    const fresh = emulators.find((device) => !before.has(device.serial));
+    if (fresh) {
+      return fresh.serial;
+    }
+    const answered = emulators.find((device) => before.has(device.serial) && device.state === 'device');
+    if (answered) {
+      return answered.serial;
     }
     process.stdout.write('.');
     await sleep(1000);
   }
   return null;
+}
+
+/** `adb get-state` for one serial: "device", "offline", "unauthorized" or "" when it is gone. */
+function deviceState(tools, serial) {
+  const result = run(tools.adb, ['-s', serial, 'get-state'], { env: tools.env, timeoutMs: 15000 });
+  return result.code === 0 ? result.stdout.trim() : '';
+}
+
+/**
+ * True when adb can really use the device right now: the transport is "device",
+ * a shell round trip answers and Android reports boot_completed.
+ *
+ * `getprop sys.boot_completed` on its own is not enough - a quick-boot snapshot
+ * restores that property (= 1) within seconds while adbd has not re-registered
+ * yet, and everything started in that gap fails with "device offline"
+ * (`adb install`: "failed to run abb_exec. Error: device offline").
+ */
+function deviceAnswers(tools, serial) {
+  if (deviceState(tools, serial) !== 'device') {
+    return false;
+  }
+  const echo = run(tools.adb, ['-s', serial, 'shell', 'echo', 'ready'], {
+    env: tools.env,
+    timeoutMs: 20000,
+  });
+  if (echo.code !== 0 || echo.stdout.trim() !== 'ready') {
+    return false;
+  }
+  const booted = run(tools.adb, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
+    env: tools.env,
+    timeoutMs: 20000,
+  });
+  return booted.code === 0 && booted.stdout.trim() === '1';
+}
+
+/**
+ * Waits until the device answers TWICE in a row, 1.5 s apart. A restored snapshot
+ * reconnects adbd once right after boot, and a single successful probe can land
+ * in front of that reconnect - two in a row cannot.
+ */
+async function waitForDeviceReady(tools, serial, timeoutMs = READY_TIMEOUT_MS) {
+  const started = Date.now();
+  let streak = 0;
+  while (Date.now() - started < timeoutMs) {
+    streak = deviceAnswers(tools, serial) ? streak + 1 : 0;
+    if (streak >= 2) {
+      return Date.now() - started;
+    }
+    process.stdout.write(
+      `\r       waiting for adb to reach ${serial} ... ${Math.round((Date.now() - started) / 1000)} s   `,
+    );
+    await sleep(1500);
+  }
+  return -1;
+}
+
+/**
+ * True when the device's PackageManager answers. A half-restored quick-boot
+ * snapshot leaves it wedged, and then every `adb install` hangs until the client
+ * timeout with no output at all - detecting that here turns a 9-minute wait into
+ * one clear message with the fix.
+ */
+function packageManagerAnswers(tools, serial) {
+  const probe = run(tools.adb, ['-s', serial, 'shell', 'pm', 'path', 'android'], {
+    env: tools.env,
+    timeoutMs: 20000,
+  });
+  return probe.code === 0 && probe.stdout.trim() !== '';
+}
+
+/** Waits (up to `timeoutMs`) for the PackageManager to come up after a boot. */
+async function waitForPackageManager(tools, serial, timeoutMs = PM_TIMEOUT_MS) {
+  const started = Date.now();
+  let streak = 0;
+  while (Date.now() - started < timeoutMs) {
+    streak = packageManagerAnswers(tools, serial) ? streak + 1 : 0;
+    if (streak >= 2) {
+      return true;
+    }
+    process.stdout.write(
+      `\r       waiting for the package manager ... ${Math.round((Date.now() - started) / 1000)} s   `,
+    );
+    await sleep(2000);
+  }
+  return false;
 }
 
 /** Polls `sys.boot_completed` with an elapsed-seconds line until Android is up. */
@@ -431,7 +544,10 @@ async function waitForBoot(tools, serial) {
       env: tools.env,
     });
     if (result.stdout.trim() === '1') {
-      return Date.now() - started;
+      // Booting counts as finished only once adb can actually use the device,
+      // otherwise the install that follows hits the offline window.
+      const ready = await waitForDeviceReady(tools, serial);
+      return ready < 0 ? -1 : Date.now() - started;
     }
     process.stdout.write(`\r       booting ... ${Math.round((Date.now() - started) / 1000)} s   `);
     await sleep(2000);
@@ -439,8 +555,8 @@ async function waitForBoot(tools, serial) {
   return -1;
 }
 
-/** Starts the AVD detached (its own window) and waits until Android is booted. */
-async function bootEmulator(tools) {
+/** The AVD a session boots: `--avd`, the documented default, or the first one. */
+function chooseAvd(tools) {
   const avds = listAvds(tools);
   if (avds.length === 0) {
     fail('no Android Virtual Device (AVD) is defined.', [
@@ -451,14 +567,31 @@ async function bootEmulator(tools) {
   if (opts.avd && !avds.includes(opts.avd)) {
     fail(`the AVD "${opts.avd}" does not exist.`, [`Available: ${avds.join(', ')}`]);
   }
-  const name = opts.avd || (avds.includes(DEFAULT_AVD) ? DEFAULT_AVD : avds[0]);
+  return opts.avd || (avds.includes(DEFAULT_AVD) ? DEFAULT_AVD : avds[0]);
+}
 
-  const emulatorArgs = ['-avd', name].concat(opts.cold ? ['-no-snapshot'] : []);
+/**
+ * Starts the AVD detached (its own window) and waits until Android is booted.
+ * `options.cold` overrides `--cold` and `options.avd` overrides `--avd`, so the
+ * heal in installApk() can boot the wedged AVD cold without touching the flags
+ * the user passed.
+ */
+async function bootEmulator(tools, options = {}) {
+  const cold = options.cold === undefined ? opts.cold : options.cold;
+  const name = options.avd || chooseAvd(tools);
+
+  const emulatorArgs = ['-avd', name].concat(cold ? ['-no-snapshot'] : []);
   // -no-boot-anim shaves several seconds off every boot.
   emulatorArgs.push('-no-boot-anim');
 
   console.log('');
-  info(`starting the AVD "${name}"${opts.cold ? ' (cold boot)' : ''} - its window stays open`);
+  info(`starting the AVD "${name}"${cold ? ' (cold boot)' : ''} - its window stays open`);
+  // Serials adb lists before the spawn are not ours: only a new one is this AVD.
+  const before = new Set(
+    listDevices(tools)
+      .filter((device) => device.isEmulator)
+      .map((device) => device.serial),
+  );
   const child = spawn(tools.emulator, emulatorArgs, {
     env: tools.env,
     detached: true,
@@ -471,7 +604,7 @@ async function bootEmulator(tools) {
   });
 
   process.stdout.write('       waiting for the device');
-  const serial = await waitForEmulatorSerial(tools);
+  const serial = await waitForEmulatorSerial(tools, before);
   if (!serial) {
     if (died) {
       fail('the emulator exited while starting.', [
@@ -492,6 +625,115 @@ async function bootEmulator(tools) {
     ]);
   }
   return { serial, isEmulator: true, model: '', state: 'device', bootMs: boot, avd: name };
+}
+
+/** The `avd` folder the emulator reads: `ANDROID_AVD_HOME` first, else `~/.android/avd`. */
+function avdHome(tools) {
+  if (tools.env.ANDROID_AVD_HOME) {
+    return tools.env.ANDROID_AVD_HOME;
+  }
+  const userHome =
+    tools.env.ANDROID_USER_HOME ||
+    path.join(tools.env.USERPROFILE || tools.env.HOME || '', '.android');
+  return path.join(userHome, 'avd');
+}
+
+/**
+ * The `snapshots` folder of an AVD. The folder is NOT named after the AVD
+ * (`Medium_Phone_API_37.0` lives in `Medium_Phone.avd`), so the `<avd>.ini` -
+ * which holds the real `path=` - is read instead of guessing the name.
+ */
+function avdSnapshotsDir(tools, name) {
+  const home = avdHome(tools);
+  let dir = path.join(home, `${name}.avd`);
+  try {
+    const ini = fs.readFileSync(path.join(home, `${name}.ini`), 'utf8');
+    const match = /^path=(.+)$/m.exec(ini);
+    if (match) {
+      dir = match[1].trim();
+    }
+  } catch {
+    // No .ini to read: the folder next to it is the best guess.
+  }
+  return fs.existsSync(dir) ? path.join(dir, 'snapshots') : null;
+}
+
+/** The AVD a running emulator belongs to (`adb emu avd name`), or null. */
+function avdNameOf(tools, serial) {
+  const result = run(tools.adb, ['-s', serial, 'emu', 'avd', 'name'], {
+    env: tools.env,
+    timeoutMs: 15000,
+  });
+  const name = result.stdout.split(/\r?\n/)[0].trim();
+  return result.code === 0 && name !== '' && name !== 'OK' ? name : null;
+}
+
+/**
+ * Shuts every emulator down with `adb emu kill` (never a force-kill: that is what
+ * corrupts a quick-boot snapshot) and waits until adb stops listing them.
+ * Returns the serials that are still there - empty means they are all gone.
+ */
+async function killEmulators(tools) {
+  const emulators = listDevices(tools).filter((device) => device.isEmulator);
+  for (const device of emulators) {
+    run(tools.adb, ['-s', device.serial, 'emu', 'kill'], { env: tools.env });
+  }
+  const started = Date.now();
+  let remaining = emulators.map((device) => device.serial);
+  while (remaining.length > 0 && Date.now() - started < 30000) {
+    await sleep(1000);
+    remaining = listDevices(tools)
+      .filter((device) => device.isEmulator)
+      .map((device) => device.serial);
+  }
+  return remaining;
+}
+
+/**
+ * Deletes a folder the dead emulator may still have a file mapped from (the RAM
+ * image of a snapshot), so a sharing violation is retried for a while instead of
+ * failing the whole session.
+ */
+async function removeWithRetry(dir) {
+  const started = Date.now();
+  while (Date.now() - started < 20000) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return true;
+    } catch {
+      await sleep(500);
+    }
+  }
+  return false;
+}
+
+/**
+ * The heal for a PackageManager that never answers. Restarting Android inside the
+ * emulator (rebootEmulatorAndroid) cannot help when the guest RAM itself is the
+ * broken part, and that is exactly what a half-restored quick-boot snapshot is:
+ * `sys.boot_completed` says 1 while `pm` / `am` / `cmd` hang forever. So the AVD
+ * is stopped, its snapshot is deleted (that is what comes back wedged) and it is
+ * booted cold; the next graceful stop writes a fresh snapshot.
+ *
+ * Returns the new target, or null when the emulator could not be restarted.
+ */
+async function coldBootEmulator(tools, serial) {
+  const avd = avdNameOf(tools, serial) || opts.avd || DEFAULT_AVD;
+  info(`stopping ${serial} and booting "${avd}" from scratch - about 40 s`);
+  const remaining = await killEmulators(tools);
+  if (remaining.length > 0) {
+    warn(`${remaining.join(', ')} did not stop within 30 s - close the emulator window`);
+    return null;
+  }
+  const snapshots = avdSnapshotsDir(tools, avd);
+  if (snapshots) {
+    if (await removeWithRetry(snapshots)) {
+      info('deleted the broken quick-boot snapshot - the next start is a clean cold boot');
+    } else {
+      warn(`could not delete ${snapshots} - it is ignored by this cold boot anyway`);
+    }
+  }
+  return bootEmulator(tools, { cold: true, avd });
 }
 
 /** Reuses a running emulator / phone, or boots the AVD when nothing is ready. */
@@ -704,6 +946,136 @@ function gradleBuild(tools, abi) {
   });
 }
 
+/** adb prints "Performing Streamed Install" without a newline - keep only the real error. */
+function adbMessage(output) {
+  return output
+    .replace(/Performing (Streamed|Push) Install/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' | ');
+}
+
+/**
+ * Errors that mean "the transport dropped", not "this APK is wrong": a restored
+ * quick-boot snapshot reconnects adbd once right after boot, so the first install
+ * can land in that gap and fail with
+ *   Performing Streamed Installadb: failed to run abb_exec. Error: device offline
+ * Those are retried; signature / ABI / space failures are reported immediately.
+ */
+const TRANSIENT_INSTALL_ERROR =
+  /device offline|device .{0,3} ?not found|error: closed|protocol fault|connection reset|no devices\/emulators found|abb_exec/i;
+
+/** Emulator serials are `emulator-<port>`: only those are rebooted automatically. */
+function isEmulatorSerial(serial) {
+  return /^emulator-\d+$/.test(serial);
+}
+
+/**
+ * Reboots Android INSIDE the emulator (`adb reboot`, not the emulator process):
+ * zygote + system_server restart, which clears a wedged PackageManager while the
+ * emulator window stays open. ~40 s, where a cold AVD boot costs minutes.
+ */
+async function rebootEmulatorAndroid(tools, serial) {
+  info(`rebooting Android on ${serial} - the restored snapshot left its package manager wedged`);
+  const reboot = run(tools.adb, ['-s', serial, 'reboot'], { env: tools.env, timeoutMs: 30000 });
+  if (reboot.code !== 0) {
+    return false;
+  }
+  await sleep(5000);
+  run(tools.adb, ['-s', serial, 'wait-for-device'], {
+    env: tools.env,
+    timeoutMs: DEVICE_TIMEOUT_MS,
+  });
+  const boot = await waitForBoot(tools, serial);
+  process.stdout.write('\r       ');
+  return boot >= 0;
+}
+
+/**
+ * `adb install -r -d` with the three recoveries this setup needs:
+ *   - a wedged PackageManager is detected and healed first (every install would
+ *     otherwise just hang until the client timeout),
+ *   - a transport that dropped ("device offline") is waited for and retried,
+ *   - a streamed install that hangs or fails is repeated with `--no-streaming`,
+ *     which pushes the APK and runs `pm install` instead of the abb stream.
+ */
+async function installApk(tools, serial, file) {
+  // The emulator can be replaced while healing: `device` is the serial the
+  // install really runs against, and `serial` stays what the caller asked for.
+  let device = serial;
+  let packageManager = await waitForPackageManager(tools, device);
+  if (!packageManager && isEmulatorSerial(device)) {
+    console.log('');
+    warn('the package manager does not answer - restarting Android inside the emulator');
+    packageManager =
+      (await rebootEmulatorAndroid(tools, device)) && (await waitForPackageManager(tools, device));
+  }
+  if (!packageManager && isEmulatorSerial(device)) {
+    console.log('');
+    warn('the package manager is still wedged - rebooting the AVD from a clean snapshot');
+    const cold = await coldBootEmulator(tools, device);
+    if (cold) {
+      device = cold.serial;
+      ok(`cold booted ${device} in ${duration(cold.bootMs)}`);
+      packageManager = await waitForPackageManager(tools, device);
+    }
+  }
+  if (!packageManager) {
+    fail(`the package manager on ${device} does not answer ("pm path android" times out).`, [
+      'A half-restored quick-boot snapshot leaves it wedged, so nothing can be installed.',
+      'npm run emulator:stop',
+      'npm run emulator:apk -- --cold      (cold boot; Wipe Data in Device Manager if that fails)',
+    ]);
+  }
+
+  for (let attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt += 1) {
+    const streaming = attempt === 1;
+    const installArgs = ['-s', device, 'install', '-r', '-d'];
+    if (!streaming) {
+      installArgs.push('--no-streaming');
+    }
+    installArgs.push(file);
+    const command = `adb ${installArgs.join(' ')}`;
+
+    const result = run(tools.adb, installArgs, { env: tools.env, timeoutMs: INSTALL_TIMEOUT_MS });
+    const output = `${result.stdout || ''}${result.stderr || ''}`;
+    if (result.code === 0 && /Success/i.test(output)) {
+      return { ok: true, output, attempts: attempt, command, serial: device };
+    }
+    // A hung install (our own timeout) is retried like a dropped transport.
+    const transient = result.timedOut || TRANSIENT_INSTALL_ERROR.test(output);
+    if (attempt === INSTALL_ATTEMPTS || !transient) {
+      return {
+        ok: false,
+        output,
+        attempts: attempt,
+        command,
+        timedOut: result.timedOut,
+        serial: device,
+      };
+    }
+
+    console.log('');
+    if (result.timedOut) {
+      info(`the install did not finish within ${duration(INSTALL_TIMEOUT_MS)} - retrying`);
+    } else {
+      info(`${device} dropped the connection during the install - waiting for it and retrying`);
+      info(`attempt ${attempt}/${INSTALL_ATTEMPTS}: ${adbMessage(output)}`);
+    }
+    info(`next attempt: ${attempt === 1 ? 'adb install --no-streaming (push + pm install)' : 'the same, once the device has settled'}`);
+    run(tools.adb, ['-s', device, 'wait-for-device'], {
+      env: tools.env,
+      timeoutMs: READY_TIMEOUT_MS,
+    });
+    await waitForDeviceReady(tools, device);
+    await waitForPackageManager(tools, device);
+    process.stdout.write('\r       ');
+  }
+  // Unreachable: the loop returns on success, on a real error or on the last try.
+  return { ok: false, output: '', attempts: INSTALL_ATTEMPTS, command: '', serial: device };
+}
+
 async function buildAndInstall(tools, target) {
   step('Build');
   prepareNativeBuild(tools);
@@ -729,16 +1101,16 @@ async function buildAndInstall(tools, target) {
     fail('Gradle reported success but app-debug.apk is missing.', [APK_FILE]);
   }
 
-  const install = run(tools.adb, ['-s', target.serial, 'install', '-r', '-d', APK_FILE], {
-    env: tools.env,
-    timeoutMs: 180000,
-  });
-  if (install.code !== 0) {
+  const install = await installApk(tools, target.serial, APK_FILE);
+  if (!install.ok) {
     fail('adb install failed.', [
-      install.stderr || install.stdout || '',
-      `Retry:  adb -s ${target.serial} install -r -d "${APK_FILE}"`,
+      adbMessage(install.output) || 'no output',
+      `Retry:  ${install.command}`,
     ]);
   }
+  // A cold boot (the heal for a wedged PackageManager) usually comes back on the
+  // same serial, but the launch below must use the device that was installed on.
+  target.serial = install.serial;
   ok(`${duration(result.elapsed)} - app-debug.apk ${size} (${abi || 'all ABIs'}) installed`);
 }
 
@@ -795,26 +1167,33 @@ async function installReleaseApk(tools, target) {
 
   // A release APK is signed with the debug key too, so `-r` updates an installed
   // debug build and vice versa; `-d` keeps that true across version codes.
-  const install = run(tools.adb, ['-s', target.serial, 'install', '-r', '-d', file], {
-    env: tools.env,
-    timeoutMs: 180000,
-  });
-  const output = `${install.stdout || ''}${install.stderr || ''}`;
-  if (install.code !== 0 || !/Success/i.test(output)) {
+  // installApk() retries the "device offline" window a snapshot boot leaves open.
+  const install = await installApk(tools, target.serial, file);
+  if (!install.ok) {
     const hints = [
-      output.trim(),
-      `Retry:  adb -s ${target.serial} install -r -d "${file}"`,
+      adbMessage(install.output) || 'no output',
+      `Retry:  ${install.command}`,
     ];
-    if (/INSTALL_FAILED_UPDATE_INCOMPATIBLE|signatures do not match/i.test(output)) {
+    if (/offline/i.test(install.output)) {
+      hints.push(`${target.serial} never came back online - the emulator is still booting.`);
+      hints.push(`Check it:  adb -s ${target.serial} get-state    (must print "device")`);
+      hints.push('Then install what is already built:  npm run emulator:apk:only');
+      hints.push('If it stays offline:  npm run emulator:stop   then   npm run emulator:apk -- --cold');
+    }
+    if (/INSTALL_FAILED_UPDATE_INCOMPATIBLE|signatures do not match/i.test(install.output)) {
       hints.push('An APK with another signature is installed - remove it once:');
       hints.push(`  adb -s ${target.serial} uninstall ${PACKAGE_ID}`);
     }
-    if (/INSTALL_FAILED_NO_MATCHING_ABIS/i.test(output)) {
+    if (/INSTALL_FAILED_NO_MATCHING_ABIS/i.test(install.output)) {
       hints.push(`${name} does not contain the ABI of ${target.serial} (${abi || 'unknown'}) - use the universal APK.`);
     }
     fail(`adb install failed for ${name}.`, hints);
   }
-  ok(`${name} (${size}, ${abi || 'unknown ABI'}, version ${version}) installed`);
+  // A cold boot (the heal for a wedged PackageManager) usually comes back on the
+  // same serial, but the launch below must use the device that was installed on.
+  target.serial = install.serial;
+  const retried = install.attempts > 1 ? ` (attempt ${install.attempts}/${INSTALL_ATTEMPTS})` : '';
+  ok(`${name} (${size}, ${abi || 'unknown ABI'}, version ${version}) installed${retried}`);
   return { file, version };
 }
 
@@ -1089,19 +1468,9 @@ async function stopEmulator(tools) {
   }
   for (const device of emulators) {
     console.log(`Stopping ${device.serial} with "adb emu kill" (snapshot-safe) ...`);
-    run(tools.adb, ['-s', device.serial, 'emu', 'kill'], { env: tools.env });
   }
   const started = Date.now();
-  let remaining = emulators.map((device) => device.serial);
-  while (Date.now() - started < 30000) {
-    remaining = listDevices(tools)
-      .filter((device) => device.isEmulator)
-      .map((device) => device.serial);
-    if (remaining.length === 0) {
-      break;
-    }
-    await sleep(1000);
-  }
+  const remaining = await killEmulators(tools);
   if (remaining.length > 0) {
     warn(`still running after 30 s: ${remaining.join(', ')}`);
     info('close the emulator window as a last resort');

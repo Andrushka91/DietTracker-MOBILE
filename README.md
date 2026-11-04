@@ -5,8 +5,8 @@ schema and migration history, same Google Drive dataset — the same account see
 the same meals on Windows and on the phone. System dark/light theme, English only.
 
 **At a glance:** Expo SDK 58 · React Native 0.88 · TypeScript · SQLite with 12
-migrations (`user_version = 12`) · Drive `appDataFolder` sync · 35 test suites /
-275 tests · package `com.diettracker.app` · version `1.0.0.1` (`versionCode 2`).
+migrations (`user_version = 12`) · Drive `appDataFolder` sync · 37 test suites /
+308 tests · package `com.diettracker.app` · version `1.0.0.1` (`versionCode 2`).
 
 ## Quick start
 
@@ -22,8 +22,8 @@ One command runs the whole pipeline after any change — no separate `npm instal
 | 1 | Toolchain | finds SDK / JDK / adb, exports `ANDROID_HOME`, `JAVA_HOME`, `PATH` |
 | 2 | Packages | `npm install --no-audit --no-fund` + the autolinking drive-root fix → `npm-install.log` |
 | 3 | Release | `scripts\build-apk.bat`: Gradle `assembleRelease` twice (universal, arm64-v8a) into `release\`, both checked for a fresh timestamp → `release-build.log` |
-| 4 | Device | reuses a running emulator or phone, else boots AVD `Medium_Phone_API_37.0` (max 5 min) |
-| 5 | Install | `adb install -r -d release\DietTracker-<version>-universal.apk` |
+| 4 | Device | reuses a running emulator or phone, else boots AVD `Medium_Phone_API_37.0` (max 5 min) — and only continues once `adb get-state` plus a real shell round trip answer twice (a quick-boot snapshot restores `sys.boot_completed` *before* adbd reconnects) |
+| 5 | Install | `adb install -r -d release\DietTracker-<version>-universal.apk` — a transport that drops right after the boot is waited for and the install is retried, the last attempt with `--no-streaming`. A PackageManager that never answers (the state a half-restored quick-boot snapshot brings back) is healed: `adb reboot`, and if that fails the AVD is stopped, its snapshot deleted and cold booted — the install then still happens |
 | 6 | Launch | `am start -n com.diettracker.app/.MainActivity` |
 
 * The **universal** APK runs on x86_64 emulators (an arm64 APK is refused with
@@ -261,8 +261,10 @@ Layout facts worth knowing:
 * **Templates** — compact cards with a “Meal preview” accordion and one
   full-width **Apply to date** button; a template carries no state or photos.
   Applying opens the **compact date sheet** (`PromptDialog`'s opt-in
-  `layout: 'template-date'`): a calendar badge, the real template name and meal
-  count, a “Date to apply” label with a **Today** shortcut (fills the field only),
+  `layout: 'template-date'`): the reference's header — a 40 pt pale-indigo
+  calendar tile, the bold **Apply template** title with the real template summary
+  (`30 October 2026 · 5 meals`) stacked under it, and the close X — then a
+  “Date to apply” label with a **Today** shortcut (fills the field only),
   a 48 pt outlined date field with its `YYYY-MM-DD` hint (replaced in place by the
   validation error), and a 1 : 1.8 **Cancel / Apply template** pair that stacks at
   full width below 350 dp or above a 1.15 font scale.
@@ -271,10 +273,27 @@ Layout facts worth knowing:
   selected day = accent fill.
 * **Statistics** — one primary measure plus an interactive breakdown; slot counts
   as glyph + bold number + label in three columns.
-* **Dashboard** — five permanent meal cards with the state rail on the top edge,
-  a three-colour SVG progress ring, an inline editor that replaces the action
-  strip (whose single divider sits one strip padding, 10 pt, from the ✕), up to
-  three 48 pt photos per meal and a full-screen viewer with paging/zoom.
+* **Dashboard** — a day header CARD (14 dp inset, 1 pt frame) holding: the date
+  navigation (44 pt arrows, 20 pt bold date, 11 pt neutral year), an **80 dp
+  ring with an 8 pt stroke at the LEFT** and, at its right, ONE tinted strip with
+  **Done | Missed | Pending as three equal columns** (16 pt glyph + 22 pt bold
+  value above a 12 pt label, two 1 × 32 pt rules, 64 dp minimum, 12 pt corners);
+  then two **44 pt outlined** bulk buttons (state glyph, neutral label, 10 dp
+  apart) and the conditional Save-all row. The current day is marked **without
+  any word**: a static 6 dp indigo dot, a pale-indigo date badge and indigo date
+  ink (year stays neutral) — every other day is plain and shows a 44 pt
+  icon-only return-to-current-day shortcut. Below 340 dp / above 1.4 font scale
+  the strip stacks into full-width rows; below 350 dp / above 1.2 the actions
+  stack. Then five permanent meal cards, one fixed entry per category: a compact
+  header (36 pt glyph tile, 16 pt category over a 12 pt time, an 11 pt badge whose
+  glyph is a clock / ✓ / ✕), the meal text on the LEFT with the SAME horizontal
+  strip of up to three **48 pt / 8 pt-corner / 4 pt-apart** thumbnails on the
+  RIGHT (the strip only drops below the text when the row would leave the text
+  under 120 pt, or above 1.4 font scale), one 1 pt rule inset 14 pt from both
+  edges, and a nearly-white toolbar of five **44 pt pressables holding 36 pt
+  outlined tiles**. An inline editor replaces the toolbar (whose single divider
+  sits one strip padding, 10 pt, from the ✕); up to three 48 pt photos per meal
+  and a full-screen viewer with paging/zoom.
 * **Tab bar** — **docked** (a normal sibling under the pages: full width, no side
   insets, no shadow, its surface covering the bottom safe area). `src/ui/tabBar.ts`
   is the one source of truth: `TAB_BAR_CONTENT_HEIGHT` (68 = 6 pt top air + 2 × 5
@@ -288,7 +307,7 @@ Layout facts worth knowing:
 
 ## Tests & status
 
-* `npm run check` is green: strict TypeScript + ESLint, **35 suites / 275
+* `npm run check` is green: strict TypeScript + ESLint, **37 suites / 308
   tests**. They cover the domain rules and validators, photo rules, DST-safe
   calendar stepping, sync frequency and backoff, payload/envelope round-trips,
   Drive addressing, the string table, the weekday bitmask, the sign-in and
@@ -320,5 +339,7 @@ Layout facts worth knowing:
 | Cold start shows the “Development Build” launcher | dev-client screen: `npm run dev` skips it, or tap **Diet Tracker** |
 | `Unable to open exp://…` | no dev server — run `npm start` |
 | `EADDRINUSE :::8081` | free the port (`Get-NetTCPConnection -LocalPort 8081 -State Listen \| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }` on Windows, `lsof -ti :8081 \| xargs kill -9` elsewhere) or `npm run dev -- --port 8082` |
+| `adb install … device offline` / `failed to run abb_exec` | the AVD restored a quick-boot snapshot and adbd reconnected in the middle of the install. The script now waits for two shell round trips before installing and retries (3rd try `--no-streaming`); if it still fails: `npm run emulator:stop`, then `npm run emulator:apk -- --cold` |
+| `the package manager … does not answer` (`pm path android` times out) | the quick-boot snapshot came back half-restored: `sys.boot_completed` says 1 while `pm` / `am` hang. The script reboots Android inside the emulator, and if that does not help it stops the AVD, deletes its broken snapshot and cold boots it, so the install still runs. Manual fix: `npm run emulator:stop`, then `npm run emulator:apk -- --cold`; if even that fails, **Wipe Data** in Device Manager once |
 | Blue screen “Base module not found” | historical `op-sqlite` error; the app now uses Expo-Go-safe modules only — restart Expo Go and rescan |
 

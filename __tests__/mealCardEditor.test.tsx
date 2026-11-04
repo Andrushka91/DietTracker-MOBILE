@@ -1,15 +1,17 @@
-// The meal card's editor is compact and bounded on purpose:
+// The meal card's inline editor is COMPACT and bounded on purpose:
 //
-//  * the title stops at the domain's own 120 characters and stays single-line,
-//  * the notes box starts at ONE row and opens up to two only when the text needs
-//    it (the same two-row limit as before - a third line is refused),
-//  * the planned time accepts a time and nothing else, five characters long and
-//    only as wide as "HH:MM",
-//  * every field is the 44 pt chip of the reference, which is also the minimum
-//    touch target, and the planned time shares one footer with Cancel / Save.
+//  * two SHALLOW single-line fields (Meal name, Description) whose 10 pt label
+//    and character counter ride the field's top border - the text scrolls
+//    horizontally inside a 44 pt box, so typing never grows the card,
+//  * the editor's own 40/80 character policy (see `mealEditorLimits`): an
+//    over-limit keystroke or paste is refused AS A WHOLE and never sliced, while
+//    an already-longer saved value opens intact and may be kept or shortened,
+//  * the planned time stays the masked HH:MM chip of the footer, beside the
+//    outlined Cancel and the indigo Save,
+//  * the header's duplicate time caption is hidden only while editing.
 //
-// Covered here: the pure mask, the props/styles the three inputs render with, and
-// the notes box's shallow-then-grown height.
+// The domain's own 120 / 2000 limits are untouched (see domain/validation.ts):
+// this suite only pins down what the PHONE editor accepts.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -18,13 +20,43 @@ import { StyleSheet, Text } from 'react-native';
 import { MealCategoryKey, MealStatus, SyncStatus } from '../src/domain/enums';
 import { MealCategory, MealEntry } from '../src/domain/models';
 import {
-  FIELD_HEIGHT,
+  EDITOR_FIELD_MIN_HEIGHT,
+  EDITOR_TIME_WIDTH,
   MealCard,
-  NOTES_HEIGHT,
   timeDraft,
 } from '../src/ui/components/MealCard';
+import {
+  EDITOR_DESCRIPTION_LIMIT,
+  EDITOR_TITLE_LIMIT,
+  canAcceptTextChange,
+  characterCount,
+  isDraftLengthAllowed,
+} from '../src/ui/components/mealEditorLimits';
 import { t } from '../src/ui/strings';
-import { lightColors, tintAlpha } from '../src/ui/theme';
+import { darkColors, lightColors } from '../src/ui/theme';
+
+/**
+ * The "device" the card renders on. Jest's own `Dimensions` default reports a
+ * font scale of 2, which would push every test into the editor's enlarged-text
+ * fallbacks; a normal phone is the honest default, and the large-text test below
+ * raises the scale explicitly. The mock exposes the SAME object every call so a
+ * test can change it and re-render.
+ */
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => {
+  const window = { width: 360, height: 780, scale: 3, fontScale: 1 };
+  return { __esModule: true, default: () => window, __window: window };
+});
+
+const deviceWindow = (
+  jest.requireMock('react-native/Libraries/Utilities/useWindowDimensions') as {
+    __window: { width: number; height: number; scale: number; fontScale: number };
+  }
+).__window;
+
+beforeEach(() => {
+  deviceWindow.width = 360;
+  deviceWindow.fontScale = 1;
+});
 
 const NOW = new Date('2026-11-01T12:00:00.000Z');
 
@@ -57,7 +89,7 @@ const MEAL: MealEntry = {
   contentHash: null,
 };
 
-/** The input rendered for one of the editor's persistent captions. */
+/** The input rendered for one of the editor's floating captions. */
 function field(renderer: TestRenderer.ReactTestRenderer, label: string) {
   const found = renderer.root
     .findAll(
@@ -73,61 +105,61 @@ function field(renderer: TestRenderer.ReactTestRenderer, label: string) {
   return found;
 }
 
+/**
+ * The flattened style of a node. `Pressable` receives a FUNCTION of the pressed
+ * state, so it is resolved for the resting state first.
+ */
 function styleOf(node: TestRenderer.ReactTestInstance): Record<string, unknown> {
-  return (StyleSheet.flatten(node.props.style) ?? {}) as Record<string, unknown>;
+  const raw = typeof node.props.style === 'function' ? node.props.style({ pressed: false }) : node.props.style;
+  return (StyleSheet.flatten(raw) ?? {}) as Record<string, unknown>;
 }
 
 /**
- * The `MeasuredInput` wrapper of a field: it owns both the input and the invisible
- * ruler beside it, so layout/text-layout events are found through it.
+ * Host elements only: React Native wraps `View`/`Pressable` in composite
+ * components that carry the SAME props, so a plain `findAll` would report every
+ * node twice.
  */
-function measured(
+function hosts(
   renderer: TestRenderer.ReactTestRenderer,
-  label: string,
-): TestRenderer.ReactTestInstance {
+  match: (style: Record<string, unknown>) => boolean,
+): TestRenderer.ReactTestInstance[] {
+  return renderer.root.findAll(
+    (node) => typeof node.type === 'string' && match(styleOf(node)),
+  );
+}
+
+/** Every string drawn inside the editor body (its own 12 pt top gap). */
+function editorTexts(renderer: TestRenderer.ReactTestRenderer): string[] {
+  const editor = renderer.root
+    .findAll((node) => styleOf(node).marginTop === 12 && styleOf(node).rowGap === undefined)
+    .pop();
+  if (editor === undefined) {
+    throw new Error('the editor is not open');
+  }
+  return (editor as TestRenderer.ReactTestInstance)
+    .findAllByType(Text)
+    .map((node) => node.props.children)
+    .filter((value): value is string => typeof value === 'string');
+}
+
+/** The pressable element rendered with a given accessibility label. */
+function pressable(renderer: TestRenderer.ReactTestRenderer, label: string) {
   const found = renderer.root
     .findAll(
       (node) =>
-        node.props?.accessibilityLabel === label && typeof node.props?.rows === 'number',
+        node.props?.accessibilityLabel === label && typeof node.props.onPress === 'function',
     )
     .pop();
   if (found === undefined) {
-    throw new Error(`no measured field labelled "${label}"`);
+    throw new Error(`no button labelled "${label}"`);
   }
   return found;
 }
 
-/** The invisible ruler that reports how many lines the current text needs. */
-function ruler(
-  renderer: TestRenderer.ReactTestRenderer,
-  label: string,
-): TestRenderer.ReactTestInstance {
-  const found = measured(renderer, label)
-    .findAll((node) => typeof node.props?.onTextLayout === 'function')
-    .pop();
-  if (found === undefined) {
-    throw new Error(`no ruler for "${label}"`);
-  }
-  return found;
-}
-
-/**
- * Drives the field's own layout. The ruler only exists once the field knows its
- * width, exactly as on a device.
- */
-function layout(renderer: TestRenderer.ReactTestRenderer, label: string): void {
-  const input = measured(renderer, label)
-    .findAll((node) => typeof node.props?.onLayout === 'function')
-    .pop();
-  if (input === undefined) {
-    throw new Error(`no input to lay out for "${label}"`);
-  }
-  act(() => {
-    input.props.onLayout({ nativeEvent: { layout: { width: 240, height: FIELD_HEIGHT } } });
-  });
-}
-
-async function renderEditor(meal: MealEntry = MEAL): Promise<TestRenderer.ReactTestRenderer> {
+async function renderEditor(
+  meal: MealEntry = MEAL,
+  onSave: (draft: MealEntry) => Promise<string | null> = async () => null,
+): Promise<TestRenderer.ReactTestRenderer> {
   let renderer: TestRenderer.ReactTestRenderer;
   await act(async () => {
     renderer = TestRenderer.create(
@@ -139,7 +171,7 @@ async function renderEditor(meal: MealEntry = MEAL): Promise<TestRenderer.ReactT
         now={NOW}
         isDark={false}
         forceEditing
-        onSave={async () => null}
+        onSave={onSave}
         onComplete={async () => undefined}
         onMissed={async () => undefined}
         onClear={() => undefined}
@@ -151,6 +183,63 @@ async function renderEditor(meal: MealEntry = MEAL): Promise<TestRenderer.ReactT
   });
   return renderer!;
 }
+
+/** Types one change into a field and lets React settle. */
+async function type(
+  renderer: TestRenderer.ReactTestRenderer,
+  label: string,
+  value: string,
+): Promise<void> {
+  await act(async () => {
+    field(renderer, label).props.onChangeText(value);
+  });
+}
+
+describe('the editor character policy', () => {
+  test('counts code points, not UTF-16 units', () => {
+    // The counter and the guards must agree on every character, so both use
+    // Array.from(): an emoji is ONE character even though it is two code units.
+    expect(characterCount('')).toBe(0);
+    expect(characterCount('Ciorbă')).toBe(6);
+    expect(characterCount('🍲')).toBe(1);
+    expect('🍲'.length).toBe(2);
+    // A base glyph plus a skin-tone modifier is two code points - and the limit
+    // counts them as two, exactly as the user sees two marks.
+    expect(characterCount('👍🏽')).toBe(2);
+    expect('👍🏽'.length).toBe(4);
+  });
+
+  test('accepts the exact 40 / 80 boundary and nothing beyond it', () => {
+    expect(EDITOR_TITLE_LIMIT).toBe(40);
+    expect(EDITOR_DESCRIPTION_LIMIT).toBe(80);
+    expect(canAcceptTextChange('', 'a'.repeat(40), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(canAcceptTextChange('', 'a'.repeat(41), EDITOR_TITLE_LIMIT)).toBe(false);
+    expect(canAcceptTextChange('', 'a'.repeat(80), EDITOR_DESCRIPTION_LIMIT)).toBe(true);
+    expect(canAcceptTextChange('', 'a'.repeat(81), EDITOR_DESCRIPTION_LIMIT)).toBe(false);
+    // Emoji count the same way here: 40 fit, 41 do not.
+    expect(canAcceptTextChange('', '🍲'.repeat(40), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(canAcceptTextChange('', '🍲'.repeat(41), EDITOR_TITLE_LIMIT)).toBe(false);
+  });
+
+  test('lets an existing longer value stay or shrink, never grow', () => {
+    const legacy = 'x'.repeat(60);
+    expect(canAcceptTextChange(legacy, legacy, EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(canAcceptTextChange(legacy, 'x'.repeat(39), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(canAcceptTextChange(legacy, 'x'.repeat(45), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(canAcceptTextChange(legacy, 'x'.repeat(61), EDITOR_TITLE_LIMIT)).toBe(false);
+  });
+
+  test('the save-side guard allows unchanged/shortened legacy text only', () => {
+    expect(isDraftLengthAllowed('', 'a'.repeat(40), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(isDraftLengthAllowed('', 'a'.repeat(41), EDITOR_TITLE_LIMIT)).toBe(false);
+    // A longer saved value may be saved as it is, or shortened...
+    expect(isDraftLengthAllowed('x'.repeat(60), 'x'.repeat(60), EDITOR_TITLE_LIMIT)).toBe(true);
+    expect(isDraftLengthAllowed('x'.repeat(60), 'x'.repeat(41), EDITOR_TITLE_LIMIT)).toBe(true);
+    // ...but never grown, and a short value can never jump over the limit.
+    expect(isDraftLengthAllowed('x'.repeat(60), 'x'.repeat(61), EDITOR_TITLE_LIMIT)).toBe(false);
+    expect(isDraftLengthAllowed('short', 'a'.repeat(41), EDITOR_TITLE_LIMIT)).toBe(false);
+  });
+});
 
 describe('the planned-time field', () => {
   test('keeps a time and drops everything else', () => {
@@ -169,157 +258,292 @@ describe('the planned-time field', () => {
     expect(timeDraft('12345')).toBe('12:34');
   });
 
-  test('is narrow, five characters long and time-only on the keyboard', async () => {
+  test('is a compact clock chip, five characters and time-only on the keyboard', async () => {
     const renderer = await renderEditor();
     const time = field(renderer, t('Rn_FieldPlannedTime'));
     expect(time.props.maxLength).toBe(5);
     expect(time.props.keyboardType).toBeDefined();
     expect(time.props.keyboardType).not.toBe('default');
-    // Only as wide as "HH:MM" needs, left in the row but CENTERED inside, so the
-    // chip is symmetrical around the time.
-    expect(styleOf(time).width).toBe(56);
-    expect(styleOf(time).alignSelf).toBe('flex-start');
-    expect(styleOf(time).textAlign).toBe('center');
+    // The chip is 92 pt at the default scale, 44 pt tall - a touch target.
+    expect(EDITOR_TIME_WIDTH).toBe(92);
+    expect(styleOf(time).minHeight).toBe(EDITOR_FIELD_MIN_HEIGHT);
+    expect(EDITOR_FIELD_MIN_HEIGHT).toBeGreaterThanOrEqual(44);
 
     // Typing digits produces the masked value.
-    await act(async () => {
-      field(renderer, t('Rn_FieldPlannedTime')).props.onChangeText('1230');
-    });
+    await type(renderer, t('Rn_FieldPlannedTime'), '1230');
     expect(field(renderer, t('Rn_FieldPlannedTime')).props.value).toBe('12:30');
+  });
+
+  test('is no longer a separate labelled row: the time is edited in the footer', async () => {
+    const renderer = await renderEditor();
+    // The caption survives as the input's ACCESSIBLE name only - the footer has
+    // no "Planned time" label of its own any more.
+    expect(field(renderer, t('Rn_FieldPlannedTime')).props.accessibilityLabel).toBe(
+      t('Rn_FieldPlannedTime'),
+    );
+    expect(editorTexts(renderer)).not.toContain(t('Rn_FieldPlannedTime'));
   });
 });
 
 describe('the title and description fields', () => {
-  test('the title is a single line with no character cap', async () => {
+  test('are single-line and carry no native character cap', async () => {
     const renderer = await renderEditor();
-    const title = field(renderer, t('Rn_FieldMealName'));
-    // No `multiline`: a long title never adds a row.
-    expect(title.props.multiline).toBeUndefined();
-    // No `maxLength` either: the fit is decided by the measured layout, not by a
-    // character count (see `MeasuredInput`).
-    expect(title.props.maxLength).toBeUndefined();
-  });
-
-  test('the description box starts shallow and grows to two rows when needed', async () => {
-    const renderer = await renderEditor({ ...MEAL, ingredients: '' });
-    const description = field(renderer, t('Rn_FieldDescription'));
-    expect(description.props.multiline).toBe(true);
-    // Shallow: ONE row on an empty draft - the compact field of the reference.
-    expect(description.props.numberOfLines).toBe(1);
-    expect(styleOf(description).height).toBe(FIELD_HEIGHT);
-    expect(FIELD_HEIGHT).toBe(44);
-    expect(styleOf(description).lineHeight).toBe(18);
-    expect(description.props.maxLength).toBeUndefined();
-
-    // The ruler reports two lines: the box opens up to the two-row height...
-    layout(renderer, t('Rn_FieldDescription'));
-    act(() => {
-      ruler(renderer, t('Rn_FieldDescription')).props.onTextLayout({
-        nativeEvent: { lines: [{}, {}] },
-      });
-    });
-    expect(styleOf(field(renderer, t('Rn_FieldDescription'))).height).toBe(NOTES_HEIGHT);
-    expect(NOTES_HEIGHT).toBe(52);
-
-    // ...and a third line never grows it: the LIMIT is the same two rows, and the
-    // fit guard is what refuses the text that would need them.
-    act(() => {
-      ruler(renderer, t('Rn_FieldDescription')).props.onTextLayout({
-        nativeEvent: { lines: [{}, {}, {}] },
-      });
-    });
-    expect(styleOf(field(renderer, t('Rn_FieldDescription'))).height).toBe(NOTES_HEIGHT);
-  });
-
-  test('every single-line field is the 44 pt chip', async () => {
-    const renderer = await renderEditor();
-    for (const label of [t('Rn_FieldMealName'), t('Rn_FieldPlannedTime')]) {
-      expect(styleOf(field(renderer, label)).height).toBe(FIELD_HEIGHT);
-    }
-    // The chip IS the app's minimum touch target.
-    expect(FIELD_HEIGHT).toBeGreaterThanOrEqual(44);
-  });
-
-  test('the fields wear a soft fill and a subtle border', async () => {
-    const renderer = await renderEditor();
-    for (const label of [
-      t('Rn_FieldMealName'),
-      t('Rn_FieldDescription'),
-      t('Rn_FieldPlannedTime'),
-    ]) {
-      const style = styleOf(field(renderer, label));
-      expect(style.borderWidth).toBe(1);
-      expect(style.borderColor).toBe(lightColors.border);
-      expect(style.backgroundColor).toBe(lightColors.surfaceVariant);
-      expect(style.borderRadius).toBe(10);
+    for (const label of [t('Rn_FieldMealName'), t('Rn_FieldDescription')]) {
+      const input = field(renderer, label);
+      // One line: the text scrolls horizontally instead of adding a row.
+      expect(input.props.multiline).toBe(false);
+      // No native maxLength: it counts UTF-16, would disagree with the code-point
+      // guard and could cut a paste before the guard ever sees it.
+      expect(input.props.maxLength).toBeUndefined();
+      // The 44 pt floor is the shallow chip and the minimum touch target at once.
+      expect(styleOf(input).minHeight).toBe(EDITOR_FIELD_MIN_HEIGHT);
     }
   });
 
-  test('the answers share the planned-time row, in a tinted footer', async () => {
+  test('float their label and counter on the top border', async () => {
     const renderer = await renderEditor();
-    const withStyle = (match: (style: Record<string, unknown>) => boolean) =>
-      renderer.root
-        .findAll((node) => {
-          const style = StyleSheet.flatten(node.props?.style) as Record<string, unknown> | undefined;
-          return style !== undefined && match(style);
-        })
-        .pop();
-
-    // The time field and the two answers share one row, bottoms aligned.
-    const foot = withStyle(
-      (style) =>
-        style.flexDirection === 'row' &&
-        style.alignItems === 'flex-end' &&
-        style.justifyContent === 'space-between',
+    const captions = hosts(
+      renderer,
+      (style) => style.top === -7 && style.position === 'absolute',
     );
-    expect(foot).toBeDefined();
-    // ...on a light band: 8 pt of padding, rounded, and a barely-there accent tint.
-    const footStyle = styleOf(foot!);
-    expect(footStyle.padding).toBe(8);
-    expect(footStyle.borderRadius).toBe(12);
-    expect(footStyle.backgroundColor).toBe(tintAlpha(lightColors.accent, '0D'));
-
-    // The editor is compact (8 pt between its field groups) and still tops the
-    // card's 6 pt bottom padding up to its 13 pt right padding.
-    const editor = withStyle((style) => style.paddingBottom === 7 && style.rowGap === 8);
-    expect(editor).toBeDefined();
+    // One floating caption row per field, 10 pt type, on the border.
+    expect(captions).toHaveLength(2);
+    for (const row of captions) {
+      const texts = row
+        .findAllByType(Text)
+        .map((node) => node.props.children)
+        .filter((value): value is string => typeof value === 'string');
+      expect(texts).toHaveLength(2);
+      // The counter is the ACTUAL value over the limit, in code points.
+      expect(texts[1]).toMatch(/^\d+\/(40|80)$/);
+      expect(styleOf(row.findAllByType(Text)[0]).fontSize).toBe(10);
+      // The caption wears the card's own fill, which is what lets it sit on the
+      // border without a second row of chrome.
+      expect(styleOf(row.findAllByType(Text)[0]).backgroundColor).toBe(lightColors.cardFill);
+    }
+    // 'Ciorbă' is 6 code points, 'legume' 6.
+    expect(editorTexts(renderer)).toEqual(
+      expect.arrayContaining([`6/${EDITOR_TITLE_LIMIT}`, `6/${EDITOR_DESCRIPTION_LIMIT}`]),
+    );
   });
 
-  test('the editor carries no heading of its own', async () => {
+  test('accept 40 / 80 characters and refuse the next one INTACT', async () => {
+    const renderer = await renderEditor({ ...MEAL, title: '', ingredients: '' });
+
+    await type(renderer, t('Rn_FieldMealName'), 'a'.repeat(40));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('a'.repeat(40));
+
+    // The 41st character is refused as a whole: the draft keeps its 40 and the
+    // concise reason is shown.
+    await type(renderer, t('Rn_FieldMealName'), 'a'.repeat(41));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('a'.repeat(40));
+    expect(editorTexts(renderer)).toContain(t('Rn_EditorTitleLimit'));
+
+    await type(renderer, t('Rn_FieldDescription'), 'b'.repeat(80));
+    expect(field(renderer, t('Rn_FieldDescription')).props.value).toBe('b'.repeat(80));
+    await type(renderer, t('Rn_FieldDescription'), 'b'.repeat(81));
+    expect(field(renderer, t('Rn_FieldDescription')).props.value).toBe('b'.repeat(80));
+    expect(editorTexts(renderer)).toContain(t('Rn_EditorDescriptionLimit'));
+
+    // An accepted change clears the note again.
+    await type(renderer, t('Rn_FieldMealName'), 'a'.repeat(12));
+    expect(editorTexts(renderer)).not.toContain(t('Rn_EditorTitleLimit'));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('a'.repeat(12));
+  });
+
+  test('count emoji as one character each, so 40 fit and 41 do not', async () => {
+    const renderer = await renderEditor({ ...MEAL, title: '' });
+    await type(renderer, t('Rn_FieldMealName'), '🍲'.repeat(40));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('🍲'.repeat(40));
+    // A 41st emoji is refused whole - no half of a surrogate pair is kept.
+    await type(renderer, t('Rn_FieldMealName'), '🍲'.repeat(41));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('🍲'.repeat(40));
+    expect(editorTexts(renderer)).toContain(`40/${EDITOR_TITLE_LIMIT}`);
+  });
+
+  test('open an existing longer value intact, with its real count', async () => {
+    const longTitle = 'T'.repeat(60);
+    const longDescription = 'd'.repeat(120);
+    const renderer = await renderEditor({
+      ...MEAL,
+      title: longTitle,
+      ingredients: longDescription,
+    });
+    // Nothing is cut on the way in: the saved text opens exactly as it was.
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe(longTitle);
+    expect(field(renderer, t('Rn_FieldDescription')).props.value).toBe(longDescription);
+    // The counters tell the truth about the over-limit value...
+    expect(editorTexts(renderer)).toEqual(
+      expect.arrayContaining([`60/${EDITOR_TITLE_LIMIT}`, `120/${EDITOR_DESCRIPTION_LIMIT}`]),
+    );
+    // ...and the quiet hint says it may be kept or shortened.
+    expect(editorTexts(renderer)).toContain(t('Rn_EditorLegacyHint'));
+
+    // It may not grow any further, and it may be shortened.
+    await type(renderer, t('Rn_FieldMealName'), 'T'.repeat(61));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe(longTitle);
+    await type(renderer, t('Rn_FieldMealName'), 'T'.repeat(39));
+    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('T'.repeat(39));
+    // The description is still longer than 80, so the hint stays until BOTH
+    // values are back inside the policy.
+    expect(editorTexts(renderer)).toContain(t('Rn_EditorLegacyHint'));
+    await type(renderer, t('Rn_FieldDescription'), 'd'.repeat(20));
+    expect(editorTexts(renderer)).not.toContain(t('Rn_EditorLegacyHint'));
+  });
+});
+
+describe('the editor layout', () => {
+  test('hides the duplicate header time only while editing', async () => {
     const renderer = await renderEditor();
-    const editor = renderer.root
-      .findAll((node) => {
-        const style = StyleSheet.flatten(node.props?.style) as Record<string, unknown> | undefined;
-        return style?.rowGap === 8 && style?.paddingBottom === 7;
-      })
-      .pop();
-    expect(editor).toBeDefined();
-    // Only the three persistent labels and the two answers: no "Edit meal" title,
-    // nothing to read twice (the card's own header already names the meal).
-    const texts = (editor as TestRenderer.ReactTestInstance)
-      .findAllByType(Text)
-      .map((node) => node.props.children)
-      .filter((value): value is string => typeof value === 'string');
-    expect(texts).toEqual([
+    const headerTexts = () =>
+      renderer.root
+        .findAllByType(Text)
+        .map((node) => node.props.children)
+        .filter((value): value is string => typeof value === 'string');
+    // The saved time (the category's 12:30 default) is not repeated in the header
+    // while the footer owns it.
+    expect(headerTexts()).not.toContain('12:30');
+
+    await act(async () => {
+      pressable(renderer, t('Common_Cancel')).props.onPress();
+    });
+    // Read mode keeps the caption, exactly as before this refinement.
+    expect(headerTexts()).toContain('12:30');
+  });
+
+  test('the card keeps its icon, name and status pill while editing', async () => {
+    const renderer = await renderEditor();
+    const glyphs = renderer.root
+      .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
+      .map((node) => node.props.accessibilityLabel as string);
+    expect(glyphs).toContain('material:silverware-fork-knife');
+    // The footer's clock: the time is still recognisably a time.
+    expect(glyphs).toContain('icon:time-outline');
+    const texts = renderer.root.findAllByType(Text).map((node) => node.props.children);
+    expect(texts).toContain(t('Status_Pending'));
+    expect(texts).toContain('Lunch');
+  });
+
+  test('the editor carries no heading and no separate label row', async () => {
+    const renderer = await renderEditor();
+    // Two floating captions with their counters, then the two answers - nothing
+    // to read twice (the card's header already names the meal).
+    expect(editorTexts(renderer)).toEqual([
       t('Rn_FieldMealName'),
+      `6/${EDITOR_TITLE_LIMIT}`,
       t('Rn_FieldDescription'),
-      t('Rn_FieldPlannedTime'),
+      `6/${EDITOR_DESCRIPTION_LIMIT}`,
       t('Common_Cancel'),
       t('Common_Save'),
     ]);
   });
 
-  test('the card keeps its icon, name and status pill while editing', async () => {
+  test('the footer sits on the card surface: time chip left, two answers right', async () => {
     const renderer = await renderEditor();
-    // The category's line icon (Lunch: fork and knife) is still in the header...
-    const glyphs = renderer.root
-      .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
-      .map((node) => node.props.accessibilityLabel as string);
-    expect(glyphs).toContain('material:silverware-fork-knife');
-    // ...the status pill still says Pending, and the meal's name is still there.
-    const texts = renderer.root.findAllByType(Text).map((node) => node.props.children);
-    expect(texts).toContain(t('Status_Pending'));
-    expect(texts).toContain('Lunch');
+    const footer = renderer.root
+      .findAll(
+        (node) => styleOf(node).marginTop === 10 && styleOf(node).justifyContent === 'space-between',
+      )
+      .pop();
+    expect(footer).toBeDefined();
+    const footerStyle = styleOf(footer as TestRenderer.ReactTestInstance);
+    // No tinted band: a row on the card's own surface.
+    expect(footerStyle.flexDirection).toBe('row');
+    expect(footerStyle.backgroundColor).toBeUndefined();
+    expect(footerStyle.borderRadius).toBeUndefined();
+
+    const cancel = styleOf(pressable(renderer, t('Common_Cancel')));
+    const save = styleOf(pressable(renderer, t('Common_Save')));
+    // Outlined Cancel and filled indigo Save, both 44 pt tall touch targets.
+    expect(cancel.minWidth).toBe(76);
+    expect(save.minWidth).toBe(64);
+    expect(cancel.minHeight).toBe(44);
+    expect(save.minHeight).toBe(44);
+    expect(cancel.backgroundColor).toBe('transparent');
+    expect(cancel.borderColor).toBe(lightColors.border);
+    expect(save.backgroundColor).toBe(lightColors.accentFill);
+  });
+
+  test('moves the floating captions into flow and stacks the footer at large text', async () => {
+    // Large accessibility text: the caption cannot sit on the border any more, so
+    // it becomes a normal row above the box, and the two answers drop under the
+    // time chip instead of squeezing it. Nothing is clipped or shrunk.
+    deviceWindow.fontScale = 2;
+    const renderer = await renderEditor();
+
+    const floating = hosts(renderer, (style) => style.top === -7);
+    expect(floating).toHaveLength(0);
+    // The caption row is in normal flow now (relative, with air below it).
+    const captions = hosts(
+      renderer,
+      (style) => style.position === 'relative' && style.marginBottom === 4,
+    );
+    expect(captions).toHaveLength(2);
+
+    // The footer stacks, and every target keeps its 44 pt floor.
+    const footer = renderer.root
+      .findAll(
+        (node) => styleOf(node).marginTop === 10 && styleOf(node).alignItems === 'stretch',
+      )
+      .pop();
+    expect(footer).toBeDefined();
+    expect(styleOf(footer as TestRenderer.ReactTestInstance).flexDirection).toBe('column');
+    for (const label of [t('Common_Cancel'), t('Common_Save')]) {
+      expect(styleOf(pressable(renderer, label)).minHeight).toBe(44);
+    }
+    // The field's floor grows with the text instead of clipping it.
+    expect(styleOf(field(renderer, t('Rn_FieldMealName'))).minHeight).toBeGreaterThan(44);
+  });
+
+  test('stacks the footer on a narrow card', async () => {
+    deviceWindow.width = 320;
+    const renderer = await renderEditor();
+    const footer = renderer.root
+      .findAll(
+        (node) => styleOf(node).marginTop === 10 && styleOf(node).alignItems === 'stretch',
+      )
+      .pop();
+    expect(footer).toBeDefined();
+    expect(styleOf(footer as TestRenderer.ReactTestInstance).flexDirection).toBe('column');
+  });
+
+  test('dark mode draws the same anatomy from the dark theme', async () => {
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <MealCard
+          meal={MEAL}
+          category={CATEGORY}
+          photos={[]}
+          use12HourClock={false}
+          now={NOW}
+          isDark
+          forceEditing
+          onSave={async () => null}
+          onComplete={async () => undefined}
+          onMissed={async () => undefined}
+          onClear={() => undefined}
+          onAddPhoto={() => undefined}
+          onRemovePhoto={() => undefined}
+          onOpenPhoto={() => undefined}
+        />,
+      );
+    });
+
+    // The field is the dark CARD's own surface inside the dark border, and the
+    // floating caption wears that same fill so it can sit on the border.
+    const outline = hosts(renderer!, (style) => style.borderRadius === 10 && style.minHeight === 44)[0];
+    expect(styleOf(outline).borderColor).toBe(darkColors.border);
+    expect(styleOf(outline).backgroundColor).toBe(darkColors.cardFill);
+    const label = renderer!.root
+      .findAllByType(Text)
+      .find((node) => node.props.children === t('Rn_FieldMealName'));
+    expect(styleOf(label as TestRenderer.ReactTestInstance).backgroundColor).toBe(
+      darkColors.cardFill,
+    );
+    // The primary answer keeps the dark accent fill with its own ink.
+    const save = styleOf(pressable(renderer!, t('Common_Save')));
+    expect(save.backgroundColor).toBe(darkColors.accentFill);
   });
 
   test('the action strip is hidden while the editor is open', async () => {
@@ -342,19 +566,5 @@ describe('the title and description fields', () => {
     ]) {
       expect(labels).not.toContain(label);
     }
-    const glyphs = renderer.root
-      .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
-      .map((node) => node.props.accessibilityLabel as string);
-    expect(glyphs).not.toContain('feather:trash-2');
-    expect(glyphs).not.toContain('feather:edit');
-  });
-
-  test('an existing long value is not truncated when the editor opens', async () => {
-    // A value saved by an older, wider editor opens exactly as it is: the fit
-    // guard only ever refuses GROWTH, so nothing stored can be cut.
-    const long = 'x'.repeat(500);
-    const renderer = await renderEditor({ ...MEAL, title: 'T'.repeat(80), ingredients: long });
-    expect(field(renderer, t('Rn_FieldDescription')).props.value).toBe(long);
-    expect(field(renderer, t('Rn_FieldMealName')).props.value).toBe('T'.repeat(80));
   });
 });

@@ -385,7 +385,9 @@ export function TemplatesScreen(): React.JSX.Element {
             // prompt - the template NAME prompt included - keeps the default
             // layout, because this variant is opt-in per call site.
             layout: 'template-date',
-            title: t('Template_ApplyTitle'),
+            // "Apply template" - the reference's headline, stacked over the
+            // real template summary (see `applyingSummary`).
+            title: t('Rn_TemplateApplyTitle'),
             // The input's accessible name and the fallback hint; the sheet shows
             // the template summary under the title and a visible field label.
             message: t('Rn_TemplateDatePrompt'),

@@ -1,15 +1,17 @@
-// The dashboard's day header, drawn the way the mockup draws it:
+// The dashboard's day header, drawn the way the r3 reference draws it:
 //
-//        ╭────────╮      ✓ 1  Done
-//        │  1/5   │      ✕ 1  Missed
-//        │  Done  │      ◷ 3  Pending
-//        ╰────────╯
+//    ╭────────╮   ┌───────────────────────────────────────┐
+//    │  1/5   │   │ ✓ 1  │ ✕ 1  │ ◷ 3                  │
+//    │  Done  │   │ Done  │Missed│ Pending              │
+//    ╰────────╯   └───────────────────────────────────────┘
 //
 // The ring is REAL vector geometry: one dashed `Circle` per state with a round
 // line cap, so the arcs are smooth, equally thick and rounded at both ends - not
 // a chain of dots or short strokes. These tests pin the geometry (each state's
 // exact share, equal gaps, one arc per state), the degenerate days (no slots, one
-// state) and the block around it (fraction inside, counts beside).
+// state), the three-column metrics strip with its rules, and the responsive
+// switch: one row on a phone, stacked rows on a narrow screen or at very large
+// text.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -19,7 +21,23 @@ import { Circle } from 'react-native-svg';
 import { DayProgress, DAY_RING_SIZE, DAY_RING_THICKNESS } from '../src/ui/components/DayProgress';
 import { RING_GAP_RATIO, ringArcs } from '../src/ui/components/ProgressRing';
 import { t } from '../src/ui/strings';
-import { darkColors, fonts, lightColors, type ThemeColors } from '../src/ui/theme';
+import { darkColors, fonts, lightColors, typeScale, type ThemeColors } from '../src/ui/theme';
+
+/**
+ * The strip's responsive thresholds are read from the window. RN's jest window
+ * reports fontScale 2, so a phone-sized window is set explicitly here.
+ */
+const mockWindow = { width: 390, height: 844, scale: 3, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
+
+/** Every test starts on a phone; the responsive cases move the window themselves. */
+beforeEach(() => {
+  mockWindow.width = 390;
+  mockWindow.fontScale = 1;
+});
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -173,17 +191,21 @@ describe('the day progress block', () => {
     expect(fraction).toBeDefined();
     const fractionStyle = styleOf(fraction!);
     expect(fractionStyle.fontFamily).toBe(fonts.bold);
-    expect(fractionStyle.fontSize).toBe(20);
+    // 22 pt bold: the reference's fraction, tabular so days do not jiggle.
+    expect(fractionStyle.fontSize).toBe(typeScale.title2);
     expect(fractionStyle.fontVariant).toEqual(['tabular-nums']);
+    // Chart text is the ONLY text capped, because it lives inside the circle.
+    expect(fraction!.props.maxFontSizeMultiplier).toBe(1.4);
 
     const caption = texts.find(
-      (node) => node.props.children === t('Dashboard_CountDone') && styleOf(node).fontSize === 13,
+      (node) => node.props.children === t('Dashboard_CountDone') && styleOf(node).fontSize === 11,
     );
     expect(caption).toBeDefined();
     expect(styleOf(caption!).color).toBe(lightColors.textMuted);
+    expect(caption!.props.maxFontSizeMultiplier).toBe(1.4);
   });
 
-  test('lists the three counts beside the ring: glyph, bold number, label', () => {
+  test('lists the three counts in the strip: glyph, bold number, label', () => {
     const renderer = render();
     const glyph = (label: string): unknown =>
       renderer.root.findAll((node) => node.props?.accessibilityLabel === label)[0]?.props.color;
@@ -196,12 +218,14 @@ describe('the day progress block', () => {
     expect(numbers.map((node) => node.props.children)).toEqual([1, 1, 3]);
     for (const number of numbers) {
       expect(styleOf(number).fontFamily).toBe(fonts.bold);
-      expect(styleOf(number).fontSize).toBe(17);
+      // 22 pt, the same weight as the fraction: full size, never capped.
+      expect(styleOf(number).fontSize).toBe(typeScale.title2);
       expect(styleOf(number).color).toBe(lightColors.text);
+      expect(number.props.maxFontSizeMultiplier).toBeUndefined();
     }
 
     const labels = texts.filter(
-      (node) => typeof node.props.children === 'string' && styleOf(node).fontSize === 15,
+      (node) => typeof node.props.children === 'string' && styleOf(node).fontSize === 12,
     );
     expect(labels.map((node) => node.props.children)).toEqual([
       t('Dashboard_CountDone'),
@@ -209,7 +233,7 @@ describe('the day progress block', () => {
       t('Dashboard_CountPending'),
     ]);
     for (const label of labels) {
-      expect(styleOf(label).color).toBe(lightColors.textSecondary);
+      expect(styleOf(label).color).toBe(lightColors.textMuted);
     }
   });
 
@@ -223,6 +247,163 @@ describe('the day progress block', () => {
     expect(
       renderer.root.findAllByType(Text).some((node) => node.props.children === '0/5'),
     ).toBe(true);
+  });
+});
+
+/**
+ * The r3 strip: an 80 pt ring at the LEFT and, at its right, ONE tinted panel
+ * with Done | Missed | Pending as three equal columns (icon + 22 pt value above a
+ * 12 pt label, 1 pt rules between them). Narrow screens and very large text turn
+ * the columns into full-width rows under a centred ring instead of shrinking.
+ */
+describe('the metrics strip layout', () => {
+  /** Host views only: composite wrappers would count every node twice. */
+  function hosts(renderer: Renderer): TestRenderer.ReactTestInstance[] {
+    return renderer.root.findAll((node) => typeof node.type === 'string');
+  }
+
+  /** The OUTLINED panel: 64 pt floor, 12 pt corners, the card's own surface. */
+  function stripOf(renderer: Renderer): TestRenderer.ReactTestInstance {
+    const strip = hosts(renderer)
+      .filter(
+        (node) =>
+          styleOf(node).minHeight === 64 && styleOf(node).borderRadius === 12,
+      )
+      .pop();
+    if (strip === undefined) {
+      throw new Error('no metrics strip');
+    }
+    return strip;
+  }
+
+  test('is an 80 pt ring with an 8 pt stroke, and the strip fills the rest', () => {
+    expect(DAY_RING_SIZE).toBe(80);
+    expect(DAY_RING_THICKNESS).toBe(8);
+    for (const arc of arcsOf(render(undefined, lightColors))) {
+      expect(arc.props.strokeWidth).toBe(8);
+      expect(arc.props.r).toBeCloseTo((80 - 8) / 2, 6);
+    }
+    const strip = styleOf(stripOf(render(undefined, lightColors)));
+    expect(strip.flex).toBe(1);
+    // The SAME surface as the card it sits on: not a grey/blue inner panel.
+    expect(strip.backgroundColor).toBe(lightColors.cardFill);
+    // ...and the thin neutral frame the day's bulk buttons wear.
+    expect(strip.borderWidth).toBe(1);
+    expect(strip.borderColor).toBe(lightColors.cardDivider);
+  });
+
+  test('holds THREE equal columns in ONE row, split by two 1 pt rules', () => {
+    const renderer = render();
+    const strip = stripOf(renderer);
+    expect(styleOf(strip).flexDirection).toBe('row');
+
+    // Three columns, each flexing equally, so the numbers share the width. (The
+    // strip itself is the fourth flexed node, hence the 4 pt column padding.)
+    const columns = strip.findAll(
+      (node) =>
+        typeof node.type === 'string' &&
+        styleOf(node).flex === 1 &&
+        styleOf(node).minWidth === 0 &&
+        styleOf(node).paddingHorizontal === 4,
+    );
+    expect(columns).toHaveLength(3);
+
+    // Two rules, 1 pt wide and 32 pt tall, in the card's border tone.
+    const rules = strip.findAll(
+      (node) =>
+        typeof node.type === 'string' &&
+        styleOf(node).width === 1 &&
+        styleOf(node).height === 32,
+    );
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) {
+      expect(styleOf(rule).backgroundColor).toBe(lightColors.border);
+    }
+  });
+
+  test('keeps icon + value on one line above each label', () => {
+    const renderer = render();
+    const strip = stripOf(renderer);
+    // The three icon/value rows: a row, 4 pt apart, centred.
+    const tops = strip.findAll(
+      (node) => typeof node.type === 'string' && styleOf(node).columnGap === 4,
+    );
+    expect(tops).toHaveLength(3);
+    for (const top of tops) {
+      expect(styleOf(top).flexDirection).toBe('row');
+      expect(styleOf(top).justifyContent).toBe('center');
+    }
+    // ...and each label sits beneath, centred in its column.
+    const labels = renderer.root.findAllByType(Text).filter(
+      (node) => typeof node.props.children === 'string' && styleOf(node).fontSize === 12,
+    );
+    for (const label of labels) {
+      expect(styleOf(label).textAlign).toBe('center');
+      expect(styleOf(label).marginTop).toBe(3);
+    }
+  });
+
+  test('stacks into full-width rows below 340 dp, under a centred ring', () => {
+    mockWindow.width = 320;
+    const renderer = render();
+    // The block itself stacks: ring above, strip below.
+    const block = hosts(renderer).find(
+      (node) => styleOf(node).columnGap === 12 && styleOf(node).marginTop === 8,
+    );
+    expect(block).toBeDefined();
+    expect(styleOf(block!).flexDirection).toBe('column');
+
+    const strip = stripOf(renderer);
+    expect(styleOf(strip).flexDirection).toBe('column');
+
+    // One 44 pt row per state: value and glyph lead, the label follows.
+    const rows = strip.findAll(
+      (node) =>
+        typeof node.type === 'string' &&
+        styleOf(node).minHeight === 44 &&
+        styleOf(node).flexDirection === 'row',
+    );
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(styleOf(row).justifyContent).toBe('flex-start');
+    }
+    // The rules turn horizontal: 1 pt tall, stretched across the strip.
+    const rules = strip.findAll(
+      (node) => typeof node.type === 'string' && styleOf(node).height === 1,
+    );
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) {
+      expect(styleOf(rule).alignSelf).toBe('stretch');
+    }
+  });
+
+  test('stacks above a 1.4 font scale, and stays side by side at 1.2', () => {
+    mockWindow.fontScale = 1.2;
+    expect(styleOf(stripOf(render())).flexDirection).toBe('row');
+
+    mockWindow.fontScale = 1.5;
+    expect(styleOf(stripOf(render())).flexDirection).toBe('column');
+  });
+
+  test('keeps the app state colours in both themes', () => {
+    for (const colors of [lightColors, darkColors]) {
+      const strip = styleOf(stripOf(render(undefined, colors)));
+      // The panel is an OUTLINE on the card's own surface in both themes - no
+      // wash, no hardcoded white, and the frame matches the bulk buttons.
+      expect(strip.backgroundColor).toBe(colors.cardFill);
+      expect(strip.borderWidth).toBe(1);
+      expect(strip.borderColor).toBe(colors.cardDivider);
+      const rules = render(undefined, colors).root.findAll(
+        (node) =>
+          typeof node.type === 'string' &&
+          styleOf(node).width === 1 &&
+          styleOf(node).height === 32,
+      );
+      expect(rules.length).toBe(2);
+      for (const rule of rules) {
+        expect(styleOf(rule).backgroundColor).toBe(colors.border);
+      }
+    }
   });
 });
 

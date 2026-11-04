@@ -44,7 +44,14 @@ import {
 } from '../theme';
 import { useApp } from '../appContext';
 import { t } from '../strings';
-import { Icon, FeatherIcon, type FeatherName, type IconName } from './icons';
+import {
+  Icon,
+  FeatherIcon,
+  MaterialIcon,
+  type FeatherName,
+  type IconName,
+  type MaterialName,
+} from './icons';
 
 
 /**
@@ -63,9 +70,10 @@ export function DialogSheet(props: {
   /**
    * Opt-in chrome. `default` is the shared question sheet every caller draws.
    * `template-date` is the compact Apply-template form: a narrower sheet with
-   * 24 pt corners, a leading badge in the header, a scrollable body and keyboard
-   * avoidance. It changes the PRESENTATION only - the form state, the mask, the
-   * validation and the answers are the caller's existing ones.
+   * 24 pt corners, the reference's header (a pale-indigo calendar tile, the bold
+   * title with the real template summary stacked under it) and a scrollable,
+   * keyboard-avoiding body. It changes the PRESENTATION only - the form state,
+   * the mask, the validation and the answers are the caller's existing ones.
    */
   variant?: 'default' | 'template-date';
   /** Leading badge of the header (the template-date form's calendar tile). */
@@ -91,16 +99,31 @@ export function DialogSheet(props: {
             accessible={false}
             style={[
               styles.headerBadge,
+              dateForm && styles.headerBadgeDate,
               { backgroundColor: tintAlpha(colors.accent, props.isDark ? '2E' : '1A') },
             ]}>
-            {'icon' in props.badge ? (
-              <Icon name={props.badge.icon} size={22} color={colors.accent} />
-            ) : (
-              <FeatherIcon name={props.badge.feather} size={22} color={colors.accent} />
-            )}
+            <DialogBadgeGlyph badge={props.badge} size={dateForm ? 23 : 22} color={colors.accent} />
           </View>
         )}
-        <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
+        {dateForm ? (
+          /* The reference stacks the real template summary UNDER the title and
+             aligned with it - not as a caption spanning the whole sheet - so the
+             badge and the two lines read as ONE header block. */
+          <View style={styles.headerTextDate}>
+            <Text style={[styles.titleDate, { color: colors.text }]} numberOfLines={2}>
+              {props.title}
+            </Text>
+            {props.caption !== undefined && props.caption !== '' && (
+              <Text
+                style={[styles.sheetCaptionDate, { color: colors.textMuted }]}
+                numberOfLines={1}>
+                {props.caption}
+              </Text>
+            )}
+          </View>
+        ) : (
+          <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('Common_Close')}
@@ -118,13 +141,10 @@ export function DialogSheet(props: {
           />
         </Pressable>
       </View>
-      {props.caption !== undefined && props.caption !== '' && (
-        <Text
-          style={[
-            styles.sheetCaption,
-            dateForm && styles.sheetCaptionDate,
-            { color: colors.textMuted },
-          ]}>
+      {/* The date form's summary lives INSIDE the header (under its title), so
+          this full-width caption line belongs to the shared question sheet only. */}
+      {!dateForm && props.caption !== undefined && props.caption !== '' && (
+        <Text style={[styles.sheetCaption, { color: colors.textMuted }]}>
           {props.caption}
         </Text>
       )}
@@ -202,11 +222,39 @@ function Sheet(props: {
  * stack two Modals reliably. `Card` below is the ordinary Modal-wrapped one.
  */
 /**
- * The badge glyph of the centered card: Ionicons, or Feather for the shapes only
- * it draws (the meal card's `trash-2` bin). The question then wears the SAME
- * glyph as the tool that opened it.
+ * The badge glyph of a dialog: Ionicons by default, Feather for the shapes only
+ * it draws (the meal card's `trash-2` bin) and MaterialCommunityIcons for the
+ * reference's calendar. The question then wears the SAME glyph as the tool that
+ * opened it, and the Apply-template sheet's tile wears the calendar of the page
+ * it comes from.
  */
-export type CardBadge = { icon: IconName } | { feather: FeatherName };
+export type CardBadge =
+  | { icon: IconName }
+  | { feather: FeatherName }
+  | { material: MaterialName };
+
+/**
+ * The badge's glyph in the face that actually draws it. MaterialCommunityIcons
+ * is used only for the reference's calendar (thin hangers, a header line and the
+ * text lines in the body - Ionicons' calendar is heavier and its body is empty).
+ */
+function DialogBadgeGlyph({
+  badge,
+  size,
+  color,
+}: {
+  badge: CardBadge;
+  size: number;
+  color: string;
+}): React.JSX.Element {
+  if ('feather' in badge) {
+    return <FeatherIcon name={badge.feather} size={size} color={color} />;
+  }
+  if ('material' in badge) {
+    return <MaterialIcon name={badge.material} size={size} color={color} />;
+  }
+  return <Icon name={badge.icon} size={size} color={color} />;
+}
 
 export function DialogCard(props: {
   /** `confirm-dialog`: scrim and card ids. */
@@ -261,11 +309,7 @@ export function DialogCard(props: {
                   : colors.surfaceVariant,
               },
             ]}>
-            {'icon' in props.badge ? (
-              <Icon name={props.badge.icon} size={26} color={badgeInk} />
-            ) : (
-              <FeatherIcon name={props.badge.feather} size={26} color={badgeInk} />
-            )}
+            <DialogBadgeGlyph badge={props.badge} size={26} color={badgeInk} />
           </View>
         )}
         <Text style={[styles.cardTitle, { color: colors.text }]}>{props.title}</Text>
@@ -863,8 +907,9 @@ export interface PromptDialogRequest {
   /**
    * Opt-in presentation of THIS form. `default` is the shared question sheet
    * (the template NAME prompt and every other caller keep it untouched).
-   * `template-date` is the compact Apply-template sheet: a leading calendar
-   * badge, the real template summary, a labelled date field with a Today
+   * `template-date` is the compact Apply-template sheet: the reference's header
+   * (a pale-indigo calendar tile, the bold "Apply template" title with the real
+   * template summary stacked under it), a labelled date field with a Today
    * shortcut, a format hint and side-by-side answers. It is the SAME value/error
    * state, mask, validation and callbacks - only the chrome differs.
    */
@@ -943,7 +988,7 @@ export function PromptDialog({
       <Sheet
         name="prompt-dialog"
         variant="template-date"
-        badge={{ icon: 'calendar-outline' }}
+        badge={{ material: 'calendar-text-outline' }}
         title={request.title}
         caption={request.contextLabel}
         isDark={isDark}
@@ -980,7 +1025,7 @@ export function PromptDialog({
                 borderColor: error !== null ? colors.error : colors.border,
               },
             ]}>
-            <Icon name="calendar-outline" size={22} color={colors.textMuted} />
+            <MaterialIcon name="calendar-text-outline" size={22} color={colors.textMuted} />
             <TextInput
               ref={field}
               accessibilityLabel={request.fieldLabel ?? request.message}
@@ -1162,9 +1207,11 @@ const styles = StyleSheet.create({
   /** The question's explanation, muted, under the title. */
   sheetCaption: { fontSize: 13, lineHeight: 19, paddingHorizontal: 16, marginTop: 2 },
   /**
-   * The compact Apply-template sheet (r3 reference): a 520 dp cap with 24 pt top
-   * corners, a 36 pt badge in the header, a 12 pt summary line, and a scrollable
-   * body so the answers stay reachable with the keyboard open.
+   * The compact Apply-template sheet (r3 reference): a 520 dp cap with 24 pt
+   * corners, the reference's header - a 40 pt pale-indigo calendar tile, the
+   * bold "Apply template" title with the real template summary (date · meals)
+   * stacked under it, and the close X - then a 12 pt body and a scrollable one
+   * so the answers stay reachable with the keyboard open.
    */
   sheetDate: {
     maxWidth: 520,
@@ -1172,7 +1219,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
   },
-  headerDate: { columnGap: 12, paddingLeft: 20, paddingRight: 10, marginTop: 10, minHeight: 44 },
+  headerDate: { columnGap: 12, paddingLeft: 20, paddingRight: 10, marginTop: 12, minHeight: 44 },
   headerBadge: {
     width: 36,
     height: 36,
@@ -1180,8 +1227,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** The reference's tile: 40 pt square, a 13 pt corner, the calendar at 23 pt. */
+  headerBadgeDate: { width: 40, height: 40, borderRadius: 13 },
+  /** The title + summary column, filling the row between the tile and the X. */
+  headerTextDate: { flex: 1, minWidth: 0 },
   closeDate: { width: 44, height: 44 },
-  sheetCaptionDate: { fontSize: 12, lineHeight: 17, paddingHorizontal: 20, marginTop: 3 },
+  /** The template summary under the title: slate ink, 15 pt, one line. */
+  sheetCaptionDate: { fontSize: typeScale.subheadline, lineHeight: 20, marginTop: 1 },
   sheetScroll: { flexShrink: 1 },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   /** The date form's body: label + Today, the field, then the hint/error line. */
@@ -1262,6 +1314,8 @@ const styles = StyleSheet.create({
   rowLabelStrong: { fontFamily: fonts.medium },
   /** The sheet's headline: bold, left aligned, with the close X beside it. */
   title: { flex: 1, minWidth: 0, fontSize: 20, fontFamily: fonts.bold, letterSpacing: -0.3 },
+  /** The date form's headline: one step larger - it names the whole form. */
+  titleDate: { fontSize: typeScale.title2, lineHeight: 27, fontFamily: fonts.bold, letterSpacing: -0.3 },
   /** Text prompt: the field and its optional "Today" shortcut share one row. */
   promptRow: {
     flexDirection: 'row',

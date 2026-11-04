@@ -70,8 +70,11 @@ export function FeatherIcon(props: {
 }
 
 /**
- * See `FeatherIcon` - the same idea, drawn by MaterialCommunityIcons. Only the
- * calendar tab uses it today; no action glyph needs this face.
+ * See `FeatherIcon` - the same idea, drawn by MaterialCommunityIcons. It draws
+ * the calendar face only: the Calendar TAB's glyph and the Apply-template
+ * sheet's tile (and its date field), because the mockup's calendar has thin
+ * hangers, a thin header line and text lines in the body, where Ionicons' is
+ * heavier and leaves the body empty.
  */
 export function MaterialIcon(props: {
   name: MaterialName;

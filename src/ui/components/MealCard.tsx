@@ -14,58 +14,78 @@
 //          that matches the meal's CURRENT status keeps a ring. The five glyphs
 //          are drawn at 20 pt on visible 40 pt tiles 6 pt apart, each with a 44 pt
 //          touch target.
-//  editor: no heading of its own - three labelled 44 pt fields (Meal name,
-//          Description, then Planned time in the tinted footer beside Cancel /
-//          Save). The Description box starts at ONE row and grows to two when the
-//          text needs it; validation failures land on the card error line and
-//          Cancel resets only this card's draft. The action strip is not drawn
-//          while the editor is open.
+//  editor: no heading of its own - two full-width shallow outlined fields
+//          (Meal name, Description) whose floating 10 pt label and character
+//          counter sit ON the top border, then one footer holding a compact
+//          clock + time chip on the left and Cancel / Save on the right. The
+//          fields are SINGLE-LINE: the text scrolls horizontally inside a 44 pt
+//          box instead of growing the card, and the editor's own 40/80 policy
+//          (see `mealEditorLimits.ts`) refuses an over-limit change as a whole
+//          rather than cutting it. Validation failures land on the card error
+//          line and Cancel resets only this card's draft. The action strip is
+//          not drawn while the editor is open.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type ViewStyle,
+} from 'react-native';
 
 import { MealStatus } from '../../domain/enums';
 import { MealCategory, MealEntry, MealPhoto } from '../../domain/models';
 import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
+import { MAX_PHOTOS_PER_MEAL } from '../../domain/rules/photoRules';
 import { validateMealEntry } from '../../domain/validation';
 import { formatTime, mealNameKey, t } from '../strings';
-import { argb, cardShadow, fonts, metrics, softPillColors, themeColors, tintAlpha } from '../theme';
-import { BarButton, localizedCode } from './buttons';
+import { argb, fonts, metrics, softPillColors, themeColors, tintAlpha } from '../theme';
+import { localizedCode } from './buttons';
 import { FeatherIcon, Icon, MaterialIcon, type IconName } from './icons';
 import { MEAL_GLYPH_SIZE, mealCategoryGlyph } from '../mealGlyphs';
-import { MeasuredInput } from './MeasuredInput';
-import { PhotoGallery } from './PhotoGallery';
+import {
+  EDITOR_DESCRIPTION_LIMIT,
+  EDITOR_TITLE_LIMIT,
+  canAcceptTextChange,
+  characterCount,
+  isDraftLengthAllowed,
+} from './mealEditorLimits';
+import { PHOTO_GAP, PHOTO_TILE, PhotoGallery } from './PhotoGallery';
 
 /**
- * The notes box starts SHALLOW - one row - and grows to two only when the text
- * needs the second line. `MeasuredInput` lays the current text out invisibly,
- * reports the real row count and refuses the change that would need a third row,
- * so the box never overflows and never reserves an empty second line: the limit is
- * the real width of the field, not an estimate.
+ * Geometry of the compact inline editor (dp / sp), scoped to this card so no
+ * other screen changes: 12 pt card inset, two 44 pt shallow fields 12 pt apart,
+ * then a 44 pt footer 10 pt below them.
  */
-const NOTES_ROWS = 2;
-
-/** The meal name lives on one row for the same reason. */
-const TITLE_ROWS = 1;
-
-/** Must match `styles.field.paddingHorizontal`: the ruler subtracts it. */
-const FIELD_PADDING = 10;
-
-/** Field typography, shared by the input and its invisible measuring copy. */
-const FIELD_TEXT = { fontSize: 14, lineHeight: 18 } as const;
-
-/** Vertical chrome of an editor field, above and below the text. */
-const FIELD_PADDING_V = 8;
-
-/**
- * Height of a single-line editor field: 44 pt, which is also the app's minimum
- * touch target - the compact chip the reference draws.
- */
-export const FIELD_HEIGHT = 44;
-
-/** Two rows of notes: exactly the text (2 x 18 pt) plus that padding (52 pt). */
-export const NOTES_HEIGHT = FIELD_TEXT.lineHeight * NOTES_ROWS + FIELD_PADDING_V * 2;
+const EDITOR_TOP_GAP = 12;
+const EDITOR_FIELD_GAP = 12;
+/** 44 pt: the shallow chip, and the app's minimum touch target. */
+export const EDITOR_FIELD_MIN_HEIGHT = 44;
+const EDITOR_FIELD_RADIUS = 10;
+const EDITOR_FIELD_PADDING = 10;
+const EDITOR_FIELD_TEXT_SIZE = 14;
+const EDITOR_FIELD_LINE_HEIGHT = 20;
+/** The floating label / counter: 10 pt on the field's top border. */
+const EDITOR_LABEL_SIZE = 10;
+const EDITOR_LABEL_TOP = -7;
+const EDITOR_FOOTER_GAP = 10;
+/** Normal width of the clock + time chip; it widens with the system text size. */
+export const EDITOR_TIME_WIDTH = 92;
+const EDITOR_TIME_TEXT_SIZE = 15;
+const EDITOR_CANCEL_MIN_WIDTH = 76;
+const EDITOR_SAVE_MIN_WIDTH = 64;
+const EDITOR_BUTTON_GAP = 8;
+const EDITOR_BUTTON_MIN_HEIGHT = 44;
+/** Above this system font scale the floating labels move into normal flow. */
+const EDITOR_LABEL_FLOW_SCALE = 1.2;
+/** Above this scale (or under this card width) the footer stacks. */
+const EDITOR_FOOTER_STACK_SCALE = 1.3;
+const EDITOR_FOOTER_STACK_WIDTH = 350;
 
 /** Longest accepted text in the planned-time field: "HH:MM". */
 const TIME_MAX_LENGTH = 5;
@@ -101,10 +121,11 @@ export function timeDraft(raw: string): string {
 }
 
 /**
- * The meal card's ACTION STRIP, measured off the reference card: the same five
- * tools (camera, edit, clear, missed, done) as 20 pt glyphs on VISIBLE 40 pt tiles
- * that sit 6 pt apart, each with a 2 pt hit slop - so the tile reads as a compact
- * button while the thumb still gets a 44 pt target.
+ * The meal card's ACTION TOOLBAR, measured off the reference card: the same five
+ * tools (camera, edit, clear, missed, done) as 20 pt glyphs on VISIBLE 36 pt
+ * outlined tiles, each inside a REAL 44 pt pressable - so the tile reads as a
+ * compact chip while the thumb gets the full target with no overlapping hit slop
+ * between two neighbours. Tiles sit 2 pt apart inside a group.
  *
  * Three of the five are Ionicons. The other two are the mockup's own shapes, both
  * from Feather - the one font that draws them:
@@ -120,21 +141,30 @@ export function timeDraft(raw: string): string {
  * The Ionicons bin stays for the photo viewer and the confirm sheets.
  */
 export const CARD_TOOL_GLYPH = 20;
-/**
- * One button of the action strip: a 40 pt visible tile with a 2 pt hit slop on
- * every side, so the TARGET is the 44 pt the guidelines ask for while five tiles
- * and their divider still fit a narrow card.
- */
-export const CARD_TOOL_SIZE = 40;
+/** The visible outlined tile: 36 pt with a 10 pt corner (the reference chip). */
+export const CARD_TOOL_SIZE = 36;
+/** The real, non-overlapping pressable around it - the 44 pt touch target. */
 export const CARD_TOOL_TOUCH = 44;
-export const CARD_TOOL_HIT_SLOP = (CARD_TOOL_TOUCH - CARD_TOOL_SIZE) / 2;
-export const CARD_TOOL_GAP = 6;
+/** Air between two tiles of one group (camera / edit / clear, missed / done). */
+export const CARD_TOOL_GAP = 2;
+/** Corner of the visible tile. */
+export const CARD_TOOL_RADIUS = 10;
 /**
- * The action strip's own side padding. The single divider keeps exactly this much
- * air on its right - the same air the strip keeps on its right edge - so the line
- * belongs to the "decide it" group instead of floating in the middle of the strip.
+ * The toolbar's own side padding: 10 pt on both edges, and exactly the air the
+ * single group separator keeps on either side (see `CARD_TOOLBAR_GAP`).
  */
 export const CARD_STRIP_PADDING = 10;
+/** Air around the short separator, before the status tools. */
+export const CARD_TOOLBAR_GAP = 8;
+/** Height of that separator: a short mark, not a full-height wall. */
+export const CARD_TOOLBAR_SEPARATOR_HEIGHT = 24;
+
+/** Text column floor before the photo strip drops below it (reference: 120 dp). */
+export const TEXT_MIN_WIDTH = 120;
+/** Air between the text column and the photo strip. */
+export const TEXT_GALLERY_GAP = 12;
+/** Above this system font scale the card uses its stacked fallback. */
+export const LARGE_TEXT_SCALE = 1.4;
 
 export interface MealCardProps {
   meal: MealEntry;
@@ -170,15 +200,38 @@ export interface MealCardProps {
 export function MealCard(props: MealCardProps): React.JSX.Element {
   const { meal, category, photos, use12HourClock, now, isDark } = props;
   const colors = themeColors(isDark);
+  const { width, fontScale } = useWindowDimensions();
+  /** Very large system text: the header and the content row stack (reference). */
+  const largeText = fontScale > LARGE_TEXT_SCALE;
+  /**
+   * Editor-only fallbacks. At enlarged text the floating label/counter would
+   * collide with the value, so they move into normal flow above the box; on a
+   * narrow card or at the largest sizes the footer stacks instead of squeezing
+   * the time chip against the two answers.
+   */
+  const editorLabelsInFlow = fontScale > EDITOR_LABEL_FLOW_SCALE;
+  /**
+   * The footer stacks only once the card's width is actually known (0 until the
+   * first layout pass, when the normal row is the honest default).
+   */
+  const editorFooterStacked =
+    (width > 0 && width < EDITOR_FOOTER_STACK_WIDTH) || fontScale > EDITOR_FOOTER_STACK_SCALE;
+  /**
+   * Measured width of the content row. It is 0 until the first layout pass, so
+   * the card draws the approved side-by-side layout and only falls back once it
+   * really knows the text would be squeezed.
+   */
+  const [contentWidth, setContentWidth] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(meal.title);
   const [draftIngredients, setDraftIngredients] = useState(meal.ingredients);
   const [draftTime, setDraftTime] = useState('');
   /**
-   * Rows the notes box currently shows: 1 when it opens, 2 as soon as the laid-out
-   * text needs the second line (never more - `NOTES_ROWS` is the limit).
+   * The concise reason an over-limit keystroke or paste was refused. It is local
+   * feedback for THIS editor - not a global status - and disappears with the next
+   * accepted change, Cancel or a successful save.
    */
-  const [notesRows, setNotesRows] = useState(1);
+  const [limitNotice, setLimitNotice] = useState<string | null>(null);
   const [errorLine, setErrorLine] = useState<string | null>(null);
   /** True while this card's save is in flight (the Save button is disabled). */
   const [saving, setSaving] = useState(false);
@@ -188,6 +241,17 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
    * this ref is already true for the second one.
    */
   const saveBusyRef = useRef(false);
+  /**
+   * The text this EDIT SESSION opened with - the baseline of the 40/80 save
+   * policy. It is captured once when the editor opens (button or `forceEditing`)
+   * and never re-read from the props while the session runs: a background
+   * refresh must neither reset the drafts nor move the goalposts under a save.
+   */
+  const editStartRef = useRef({ title: meal.title, ingredients: meal.ingredients });
+  /** The three editor inputs, so a tap on a field's frame focuses its input. */
+  const titleRef = useRef<React.ElementRef<typeof TextInput> | null>(null);
+  const descriptionRef = useRef<React.ElementRef<typeof TextInput> | null>(null);
+  const timeRef = useRef<React.ElementRef<typeof TextInput> | null>(null);
 
   const future = isFutureMeal(meal, now);
   /** Nothing at all: the Clear button is dead and the card is a placeholder. */
@@ -212,12 +276,17 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
         ? colors.missed
         : colors.pending;
   /**
-   * Redundant state cue next to the word: ✓ for done, ✕ for missed, and nothing
-   * for pending - the pill always spells the state out, so the colour is never
-   * the only signal.
+   * The state cue next to the word: ✓ done, ✕ missed, CLOCK pending - the pill
+   * always spells the state out, so the glyph repeats it and the colour is never
+   * the only signal. Pending used to draw a bare dot, which read as decoration
+   * rather than as "not decided yet".
    */
-  const statusIcon: IconName | null =
-    meal.status === MealStatus.Done ? 'checkmark' : meal.status === MealStatus.Missed ? 'close' : null;
+  const statusIcon: IconName =
+    meal.status === MealStatus.Done
+      ? 'checkmark'
+      : meal.status === MealStatus.Missed
+        ? 'close'
+        : 'time-outline';
   /** Fill + ink of the pill: the state colour on a wash of itself. */
   const pill = softPillColors(colors, meal.status);
   /**
@@ -229,43 +298,97 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   const doneSelected = meal.status === MealStatus.Done;
   const effectiveTime =
     meal.plannedTime ?? (category.defaultTime !== '' ? category.defaultTime : null);
+  /** The photo strip's real width: 48 pt tiles and 4 pt gaps (see `PhotoGallery`). */
+  const galleryWidth =
+    photos.length * PHOTO_TILE + Math.max(0, photos.length - 1) * PHOTO_GAP;
+  /**
+   * Side-by-side is the approved phone layout. Only a genuinely narrow content
+   * row - where the text column would drop under 120 pt - or very large text
+   * moves the SAME horizontal strip below the text; it never becomes a vertical
+   * stack, never hides the third photograph and never shrinks a target.
+   */
+  const stackGallery =
+    photos.length > 0 &&
+    (largeText ||
+      (contentWidth > 0 && contentWidth < TEXT_MIN_WIDTH + TEXT_GALLERY_GAP + galleryWidth));
 
   /**
-   * Chrome of the three editor fields: a soft fill on the card plus a subtle
-   * border, so each field reads as a field even where the wash is close to the
-   * card's own colour.
+   * Chrome of the two editor fields: the CARD's own surface inside one 1 pt
+   * outline, so the shallow box reads as a field on the white card (and on the
+   * dark one) without a second grey fill. The floating label and its counter wear
+   * the same fill, which is what lets them sit ON the border.
    */
   const fieldChrome = {
-    color: colors.text,
-    backgroundColor: colors.surfaceVariant,
     borderColor: colors.border,
+    backgroundColor: colors.cardFill,
   };
-  /** The editor's footer band: a barely-there tint of the accent, not a surface. */
-  const footerTint = tintAlpha(colors.accent, isDark ? '1A' : '0D');
+  /** Code-point counts - the same measure the guards use, never UTF-16. */
+  const titleCount = characterCount(draftTitle);
+  const descriptionCount = characterCount(draftIngredients);
+  /**
+   * The meal opened with text longer than this editor accepts (saved by Windows
+   * or an older build). It stays INTACT; the hint only explains that it may be
+   * kept or shortened, never that it must be rewritten to save a time change.
+   */
+  const overLimitText =
+    titleCount > EDITOR_TITLE_LIMIT || descriptionCount > EDITOR_DESCRIPTION_LIMIT;
 
-  const startEdit = (): void => {
+  /**
+   * One accepted edit of a text field. An over-limit change - a keystroke or a
+   * whole paste - is refused AS A WHOLE: the draft keeps its previous value and
+   * the concise reason is shown. A change that merely keeps an existing longer
+   * value, or shortens it, is accepted.
+   */
+  const changeText = (
+    previous: string,
+    next: string,
+    limit: number,
+    onChange: (value: string) => void,
+    limitMessage: string,
+  ): void => {
+    if (!canAcceptTextChange(previous, next, limit)) {
+      setLimitNotice(limitMessage);
+      return;
+    }
+    setLimitNotice(null);
+    onChange(next);
+  };
+
+  /**
+   * The toolbar's tint: the reference's "nearly white" band - the CARD's own fill
+   * with a whisper of the ink, far lighter than the control wash the old
+   * full-bleed strip used. Scoped to the card; global buttons are untouched.
+   */
+  const toolbarFill = tintAlpha(colors.text, isDark ? '06' : '04');
+  /**
+   * Fill of the three "change the meal" tiles: a raised chip - card white in
+   * light mode, the control wash on the dark card (where pure card fill would
+   * disappear into the toolbar).
+   */
+  const toolFill = isDark ? colors.surfaceVariant : colors.cardFill;
+
+  /**
+   * Opens the editor on a FRESH session: the drafts come from the saved meal and
+   * the 40/80 baseline snapshot is taken here - before a single keystroke - so a
+   * longer saved value can later be saved unchanged or shortened, and a save can
+   * always be judged against what the user actually opened.
+   */
+  const beginEdit = (): void => {
+    editStartRef.current = { title: meal.title, ingredients: meal.ingredients };
     setDraftTitle(meal.title);
     setDraftIngredients(meal.ingredients);
     setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
+    setLimitNotice(null);
     setErrorLine(null);
-    // A fresh editor always opens with the SHALLOW notes box; the measured layout
-    // opens it up again when the stored draft really needs two rows.
-    setNotesRows(1);
     setEditing(true);
     props.onEditingChange?.(meal.id, true);
   };
 
-// Opens the editor when the parent requests it (deep link from a
+  // Opens the editor when the parent requests it (deep link from a
   // notification or the empty-content DONE dialog's Edit button).
   useEffect(() => {
     if (props.forceEditing === true) {
-      setDraftTitle(meal.title);
-      setDraftIngredients(meal.ingredients);
-      setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
-      setErrorLine(null);
-      setNotesRows(1);
-      setEditing(true);
-      props.onEditingChange?.(meal.id, true);
+      beginEdit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.forceEditing]);
@@ -274,8 +397,8 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     setDraftTitle(meal.title);
     setDraftIngredients(meal.ingredients);
     setDraftTime(effectiveTime !== null ? effectiveTime.slice(0, 5) : '');
+    setLimitNotice(null);
     setErrorLine(null);
-    setNotesRows(1);
     setEditing(false);
     props.onEditingChange?.(meal.id, false);
   };
@@ -307,6 +430,23 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
         ingredients: draftIngredients,
         plannedTime,
       };
+      /**
+       * The editor's 40/80 policy, enforced HERE as well as in the inputs so a
+       * single Save and a dashboard "Save all" apply the same rule. It sits
+       * BEFORE the domain validation on purpose: the domain keeps its wide
+       * 120 / 2000 limits for imported and synced data, while this narrows only
+       * what the phone writes. Unchanged or shortened longer text passes, so a
+       * time-only edit never forces the user to rewrite a saved meal.
+       */
+      const opened = editStartRef.current;
+      if (!isDraftLengthAllowed(opened.title, draftTitle, EDITOR_TITLE_LIMIT)) {
+        setErrorLine(t('Rn_EditorTitleLimit'));
+        return false;
+      }
+      if (!isDraftLengthAllowed(opened.ingredients, draftIngredients, EDITOR_DESCRIPTION_LIMIT)) {
+        setErrorLine(t('Rn_EditorDescriptionLimit'));
+        return false;
+      }
       const validation = validateMealEntry(draft, true);
       if (!validation.isValid) {
         setErrorLine(localizedCode(validation.failures[0].code));
@@ -317,6 +457,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
         setErrorLine(saveError);
         return false;
       }
+      setLimitNotice(null);
       setErrorLine(null);
       setEditing(false);
       props.onEditingChange?.(meal.id, false);
@@ -362,7 +503,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     <View
       style={[
         styles.card,
-        cardShadow,
+        mealCardShadow,
         {
           backgroundColor: colors.cardFill,
           borderColor: colors.border,
@@ -379,34 +520,38 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       {meal.status !== MealStatus.Pending && (
         <View style={[styles.rail, { backgroundColor: statusColor }]} />
       )}
-      <View style={styles.cardContent}>
-      {/* header - no fill: the card keeps its surface and only the rail, the
-          pill and the counter dot carry the state */}
-      <View style={styles.header}>
-        <View style={[styles.iconTile, { backgroundColor: colors.surfaceVariant }]}>
-          {/* The mockup's line icon for this meal, in the theme's ink - never the
-              category's emoji, which every Android skin drew differently. */}
-          <MaterialIcon
-            name={mealCategoryGlyph(category.fixedCategoryKey)}
-            size={MEAL_GLYPH_SIZE}
-            color={colors.textSecondary}
-          />
+      <View style={styles.cardBody}>
+      {/* header - no fill: the card keeps its surface and only the rail and the
+          pill carry the state. Compact: a 36 pt glyph tile, the category at
+          16 pt over a 12 pt time, and an 11 pt badge on the trailing edge. */}
+      <View style={[styles.header, largeText && styles.headerStacked]}>
+        <View style={[styles.identity, largeText && styles.identityStacked]}>
+          <View style={[styles.iconTile, { backgroundColor: colors.surfaceVariant }]}>
+            {/* The mockup's line icon for this meal, in the theme's ink - never the
+                category's emoji, which every Android skin drew differently. */}
+            <MaterialIcon
+              name={mealCategoryGlyph(category.fixedCategoryKey)}
+              size={MEAL_GLYPH_SIZE}
+              color={colors.textSecondary}
+            />
+          </View>
+          <View style={styles.headerText}>
+            <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
+              {category.name !== '' ? category.name : t(mealNameKey(category.fixedCategoryKey))}
+            </Text>
+            {/* The planned time is the footer's job while the editor is open: the
+                duplicate caption is hidden only for the edit session, so read mode
+                keeps showing it and the header keeps its height. */}
+            {!editing && (
+              <Text style={[styles.headerTime, { color: colors.textMuted }]}>
+                {formatTime(effectiveTime, use12HourClock)}
+              </Text>
+            )}
+          </View>
         </View>
-        <View style={styles.headerText}>
-          <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
-            {category.name !== '' ? category.name : t(mealNameKey(category.fixedCategoryKey))}
-          </Text>
-          <Text style={[styles.headerTime, { color: colors.textMuted }]}>
-            {formatTime(effectiveTime, use12HourClock)}
-          </Text>
-        </View>
-        <View
-          style={[styles.pill, { backgroundColor: pill.fill }]}>
-          {statusIcon !== null ? (
-            <Icon name={statusIcon} size={11} color={pill.ink} />
-          ) : (
-            <View style={[styles.pillDot, { backgroundColor: pill.dot }]} />
-          )}
+        <View style={[styles.pill, largeText && styles.pillStacked, { backgroundColor: pill.fill }]}>
+          {/* The word is repeated by its glyph: clock pending, ✓ done, ✕ missed. */}
+          <Icon name={statusIcon} size={14} color={pill.ink} />
           <Text style={[styles.pillText, { color: pill.ink }]}>{statusLabel}</Text>
         </View>
       </View>
@@ -423,70 +568,173 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       {editing ? (
         <View style={styles.editor}>
           {/* Compact editor: no heading of its own (the card's header keeps the
-              category icon, the meal's name, the status pill and the rail), then
-              three labelled fields - the Description starting at ONE row - and one
-              lightly tinted footer holding the time and the two answers. The card's
-              action strip is NOT drawn while the editor is open. */}
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-              {t('Rn_FieldMealName')}
-            </Text>
-            <MeasuredInput
-              accessibilityLabel={t('Rn_FieldMealName')}
-              value={draftTitle}
-              onChangeText={setDraftTitle}
-              rows={TITLE_ROWS}
-              paddingHorizontal={FIELD_PADDING}
-              textStyle={FIELD_TEXT}
-              inputStyle={[styles.input, styles.field, fieldChrome]}
-              placeholder={t('Rn_FieldMealName')}
-              placeholderTextColor={colors.textMuted}
-              // The caret lives at the end of the row, so it keeps its own room.
-              caretRoom={2}
-            />
-          </View>
-          <View style={styles.fieldGroup}>
-            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-              {t('Rn_FieldDescription')}
-            </Text>
-            <MeasuredInput
-              accessibilityLabel={t('Rn_FieldDescription')}
-              value={draftIngredients}
-              onChangeText={setDraftIngredients}
-              rows={NOTES_ROWS}
-              // Shallow until the text needs the second line; the LIMIT stays
-              // `rows` (2), so the fit guard is exactly as strict as before.
-              onRows={(rows) => setNotesRows(Math.min(Math.max(1, rows), NOTES_ROWS))}
-              paddingHorizontal={FIELD_PADDING}
-              textStyle={FIELD_TEXT}
-              inputStyle={[
-                styles.input,
-                styles.field,
-                styles.textarea,
-                fieldChrome,
-                { height: notesRows > 1 ? NOTES_HEIGHT : FIELD_HEIGHT },
-              ]}
-              placeholder={t('Rn_FieldDescription')}
-              placeholderTextColor={colors.textMuted}
-              multiline
-              numberOfLines={notesRows}
-              textAlignVertical="top"
-            />
-          </View>
-          {/* One compact, lightly tinted footer: the planned time on the LEFT,
-              Cancel / Save together on the RIGHT, labels bottom-aligned with the
-              answers. */}
-          <View style={[styles.editorFoot, { backgroundColor: footerTint }]}>
+              category icon, the meal's name, the status pill and the rail - only
+              its duplicate time caption is hidden while editing, because the time
+              is edited in the footer), then two SHALLOW outlined fields whose
+              label and counter ride the top border, then one footer on the card
+              surface with the time chip and the two answers. The card's action
+              strip is NOT drawn while the editor is open. */}
+          <View style={styles.editorFields}>
             <View style={styles.fieldGroup}>
-              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-                {t('Rn_FieldPlannedTime')}
-              </Text>
+              {/* Floating caption: it sits ON the border, so the field needs no
+                  label row of its own at normal text sizes. */}
+              <View
+                pointerEvents="none"
+                style={[styles.fieldLabels, editorLabelsInFlow && styles.fieldLabelsInFlow]}>
+                <Text
+                  style={[
+                    styles.fieldLabel,
+                    { color: colors.textMuted, backgroundColor: colors.cardFill },
+                  ]}>
+                  {t('Rn_FieldMealName')}
+                </Text>
+                <Text
+                  style={[
+                    styles.fieldCounter,
+                    {
+                      color: titleCount > EDITOR_TITLE_LIMIT ? colors.warning : colors.textMuted,
+                      backgroundColor: colors.cardFill,
+                    },
+                  ]}>
+                  {`${titleCount}/${EDITOR_TITLE_LIMIT}`}
+                </Text>
+              </View>
+              <Pressable
+                accessible={false}
+                onPress={() => titleRef.current?.focus()}
+                style={[styles.fieldOutline, fieldChrome]}>
+                <TextInput
+                  ref={titleRef}
+                  accessibilityLabel={t('Rn_FieldMealName')}
+                  value={draftTitle}
+                  editable={!saving}
+                  onChangeText={(next) =>
+                    changeText(
+                      draftTitle,
+                      next,
+                      EDITOR_TITLE_LIMIT,
+                      setDraftTitle,
+                      t('Rn_EditorTitleLimit'),
+                    )
+                  }
+                  // ONE line, natively scrolling: the text slides inside the
+                  // shallow box instead of growing the card. There is deliberately
+                  // no native maxLength - it counts UTF-16, disagrees with the
+                  // code-point guard above and could cut a paste before the guard
+                  // ever sees it.
+                  multiline={false}
+                  autoCorrect
+                  returnKeyType="next"
+                  onSubmitEditing={() => descriptionRef.current?.focus()}
+                  placeholder={t('Rn_FieldMealName')}
+                  placeholderTextColor={colors.textMuted}
+                  style={[
+                    styles.fieldInput,
+                    { color: colors.text },
+                    { minHeight: Math.max(EDITOR_FIELD_MIN_HEIGHT, Math.ceil(32 * fontScale)) },
+                  ]}
+                />
+              </Pressable>
+            </View>
+            <View style={styles.fieldGroup}>
+              <View
+                pointerEvents="none"
+                style={[styles.fieldLabels, editorLabelsInFlow && styles.fieldLabelsInFlow]}>
+                <Text
+                  style={[
+                    styles.fieldLabel,
+                    { color: colors.textMuted, backgroundColor: colors.cardFill },
+                  ]}>
+                  {t('Rn_FieldDescription')}
+                </Text>
+                <Text
+                  style={[
+                    styles.fieldCounter,
+                    {
+                      color:
+                        descriptionCount > EDITOR_DESCRIPTION_LIMIT
+                          ? colors.warning
+                          : colors.textMuted,
+                      backgroundColor: colors.cardFill,
+                    },
+                  ]}>
+                  {`${descriptionCount}/${EDITOR_DESCRIPTION_LIMIT}`}
+                </Text>
+              </View>
+              <Pressable
+                accessible={false}
+                onPress={() => descriptionRef.current?.focus()}
+                style={[styles.fieldOutline, fieldChrome]}>
+                <TextInput
+                  ref={descriptionRef}
+                  accessibilityLabel={t('Rn_FieldDescription')}
+                  value={draftIngredients}
+                  editable={!saving}
+                  onChangeText={(next) =>
+                    changeText(
+                      draftIngredients,
+                      next,
+                      EDITOR_DESCRIPTION_LIMIT,
+                      setDraftIngredients,
+                      t('Rn_EditorDescriptionLimit'),
+                    )
+                  }
+                  multiline={false}
+                  autoCorrect
+                  returnKeyType="done"
+                  onSubmitEditing={() => timeRef.current?.focus()}
+                  placeholder={t('Rn_FieldDescription')}
+                  placeholderTextColor={colors.textMuted}
+                  style={[
+                    styles.fieldInput,
+                    { color: colors.text },
+                    { minHeight: Math.max(EDITOR_FIELD_MIN_HEIGHT, Math.ceil(32 * fontScale)) },
+                  ]}
+                />
+              </Pressable>
+            </View>
+          </View>
+          {/* The editor's own feedback: a refused change first, otherwise the
+              quiet note that an already-longer value is being preserved. Both are
+              one short line under the fields - never a second status flow. */}
+          {limitNotice !== null && (
+            <Text
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={[styles.editorHint, { color: colors.error }]}>
+              {limitNotice}
+            </Text>
+          )}
+          {limitNotice === null && overLimitText && (
+            <Text style={[styles.editorHint, { color: colors.warning }]}>
+              {t('Rn_EditorLegacyHint')}
+            </Text>
+          )}
+          {/* Footer on the CARD's own surface (no tinted band): a compact clock +
+              time chip on the LEFT, Cancel / Save on the RIGHT, 8 pt apart. The
+              chip keeps its 92 pt normal width and widens with the text scale; a
+              narrow card or the largest sizes stack the answers under it. */}
+          <View style={[styles.editorFoot, editorFooterStacked && styles.editorFootStacked]}>
+            <Pressable
+              accessible={false}
+              onPress={() => timeRef.current?.focus()}
+              style={[
+                styles.timeChip,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.cardFill,
+                  width: Math.max(EDITOR_TIME_WIDTH, Math.ceil(68 * fontScale)),
+                },
+              ]}>
+              <Icon name="time-outline" size={17} color={colors.textSecondary} />
               <TextInput
+                ref={timeRef}
                 accessibilityLabel={t('Rn_FieldPlannedTime')}
-                // Only as wide as "HH:MM" needs, so the field never stretches the
-                // row, and the mask below makes the value a time and nothing else.
-                style={[styles.input, styles.field, styles.timeInput, fieldChrome]}
+                // The mask below makes the value a time and nothing else; the chip
+                // is only as wide as "HH:MM" needs, so it never stretches the row.
+                style={[styles.timeInput, { color: colors.text }]}
                 value={draftTime}
+                editable={!saving}
                 onChangeText={(text) => setDraftTime(timeDraft(text))}
                 placeholder="HH:MM"
                 placeholderTextColor={colors.textMuted}
@@ -496,108 +744,152 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 maxLength={TIME_MAX_LENGTH}
                 autoCorrect={false}
               />
-            </View>
-            <View style={styles.editorRow}>
-              <BarButton
-                label={t('Common_Cancel')}
+            </Pressable>
+            <View style={[styles.editorActions, editorFooterStacked && styles.editorActionsStacked]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Common_Cancel')}
+                accessibilityState={{ disabled: saving }}
+                disabled={saving}
                 onPress={cancelEdit}
+                hitSlop={4}
+                style={({ pressed }) => [
+                  styles.answer,
+                  styles.answerCancel,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: 'transparent',
+                    opacity: saving ? 0.5 : pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <Text style={[styles.answerLabel, { color: colors.text }]} numberOfLines={1}>
+                  {t('Common_Cancel')}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Common_Save')}
+                accessibilityState={{ disabled: saving, busy: saving }}
                 disabled={saving}
-                colors={colors}
-              />
-              <BarButton
-                label={t('Common_Save')}
                 onPress={() => void saveEdit()}
-                disabled={saving}
-                colors={colors}
-                accent
-              />
+                hitSlop={4}
+                style={({ pressed }) => [
+                  styles.answer,
+                  styles.answerSave,
+                  {
+                    borderColor: colors.accentFill,
+                    backgroundColor: colors.accentFill,
+                    opacity: saving ? 0.5 : pressed ? 0.8 : 1,
+                  },
+                ]}>
+                <Text
+                  style={[styles.answerLabel, { color: colors.accentFillText }]}
+                  numberOfLines={1}>
+                  {t('Common_Save')}
+                </Text>
+              </Pressable>
             </View>
           </View>
         </View>
       ) : (
-        <>
-          <View style={styles.contentRow}>
-            <View style={styles.textColumn}>
-              {meal.title !== '' && (
-                <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
-                  {meal.title}
-                </Text>
-              )}
-              {meal.ingredients !== '' && (
-                <Text style={[styles.body, { color: colors.textMuted }]} numberOfLines={3}>
-                  {meal.ingredients}
-                </Text>
-              )}
-              {/* An untouched card still has five available actions; the quiet
-                  placeholder says why there is no text instead of leaving a hole. */}
-              {meal.title === '' && meal.ingredients === '' && (
-                <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-                  {t('Rn_MealEmpty')}
-                </Text>
-              )}
-            </View>
-            <PhotoGallery
-              photos={photos}
-              colors={colors}
-              uploading={props.uploadingPhoto === true}
-              onOpen={props.onOpenPhoto}
-            />
+        /* Read mode: the meal text on the LEFT and the SAME horizontal photo
+           strip on the RIGHT. The row measures itself, and only a genuinely
+           squeezed text column (or very large text) drops the strip below. */
+        <View
+          onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}
+          style={[styles.content, stackGallery && styles.contentStacked]}>
+          <View style={[styles.textColumn, stackGallery && styles.textColumnStacked]}>
+            {meal.title !== '' && (
+              <Text
+                style={[styles.title, { color: colors.text }]}
+                numberOfLines={largeText ? undefined : 2}>
+                {meal.title}
+              </Text>
+            )}
+            {meal.ingredients !== '' && (
+              <Text
+                style={[styles.description, { color: colors.textMuted }]}
+                numberOfLines={largeText ? undefined : 3}>
+                {meal.ingredients}
+              </Text>
+            )}
+            {/* Nothing typed yet: the quiet placeholder says why. A card that
+                already HAS photographs is not "empty", so it says so instead of
+                claiming no meal was recorded. */}
+            {meal.title === '' && meal.ingredients === '' && (
+              <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                {photos.length > 0 ? t('Rn_MealPhotoOnly') : t('Rn_MealEmpty')}
+              </Text>
+            )}
           </View>
-          <View style={styles.stripHost}>
-            {/* The action strip: a full-bleed tinted footer under ONE clearer line,
-                with the edit tools grouped on the left and the two state marks on
-                the right. The line is the strip's own top border, so nothing has
-                to be spaced around it. */}
-            <View
-              style={[
-                styles.toolStrip,
-                { backgroundColor: colors.surfaceVariant, borderTopColor: colors.cardDivider },
-              ]}>
-              <View style={styles.toolGroup}>
-                <CardTool
-                  label={t('Photo_Add')}
-                  onPress={() => props.onAddPhoto(meal)}
-                  disabled={photos.length >= 3 || props.uploadingPhoto === true}
-                  fill={colors.cardFill}>
-                  <Icon name="camera-outline" size={CARD_TOOL_GLYPH} color={colors.text} />
-                </CardTool>
-                <CardTool label={t('Common_Edit')} onPress={startEdit} fill={colors.cardFill}>
-                  <FeatherIcon name="edit" size={CARD_TOOL_GLYPH} color={colors.text} />
-                </CardTool>
-                <CardTool
-                  label={t('Meal_Clear')}
-                  onPress={() => props.onClear(meal)}
-                  disabled={empty}
-                  fill={colors.cardFill}>
-                  <FeatherIcon name="trash-2" size={CARD_TOOL_GLYPH} color={colors.text} />
-                </CardTool>
-              </View>
-              {/* The one divider of the strip: "change the meal" | "decide it" -
-                  pushed against the marks, one strip padding away from the ✕. */}
-              <View style={[styles.toolSeparator, { backgroundColor: colors.cardDivider }]} />
-              <View style={styles.markGroup}>
-                <CardTool
-                  label={t('Meal_MarkMissed')}
-                  onPress={() => void props.onMissed(meal)}
-                  disabled={future || missedSelected || !canConfirm}
-                  fill={stateWash(colors.missed, missedSelected, isDark)}
-                  ring={missedSelected ? colors.missed : undefined}>
-                  <Icon name="close" size={CARD_TOOL_GLYPH} color={colors.missed} />
-                </CardTool>
-                <CardTool
-                  label={t('Meal_MarkDone')}
-                  onPress={() => void props.onComplete(meal)}
-                  disabled={future || doneSelected || !canConfirm}
-                  fill={stateWash(colors.done, doneSelected, isDark)}
-                  ring={doneSelected ? colors.done : undefined}>
-                  <Icon name="checkmark" size={CARD_TOOL_GLYPH} color={colors.done} />
-                </CardTool>
-              </View>
-            </View>
-          </View>
-        </>
+          <PhotoGallery
+            photos={photos}
+            colors={colors}
+            uploading={props.uploadingPhoto === true}
+            onOpen={props.onOpenPhoto}
+          />
+        </View>
       )}
       </View>
+      {/* ONE 1 pt rule, inset 14 pt from both card edges, immediately before the
+          toolbar - never a full-bleed band and never a doubled line. */}
+      {!editing && (
+        <View style={[styles.divider, { backgroundColor: colors.cardDivider }]} />
+      )}
+      {/* The toolbar: the five tools on a nearly-white tint (lighter than the old
+          gray band), grouped camera / edit / clear | missed / done behind one
+          short separator. Every tool is a real 44 pt pressable. */}
+      {!editing && (
+        <View style={[styles.toolbar, { backgroundColor: toolbarFill }]}>
+          <View style={styles.toolGroup}>
+            <CardTool
+              label={t('Photo_Add')}
+              onPress={() => props.onAddPhoto(meal)}
+              disabled={photos.length >= MAX_PHOTOS_PER_MEAL || props.uploadingPhoto === true}
+              fill={toolFill}
+              borderColor={colors.cardDivider}>
+              <Icon name="camera-outline" size={CARD_TOOL_GLYPH} color={colors.text} />
+            </CardTool>
+            <CardTool
+              label={t('Common_Edit')}
+              onPress={beginEdit}
+              fill={toolFill}
+              borderColor={colors.cardDivider}>
+              <FeatherIcon name="edit" size={CARD_TOOL_GLYPH} color={colors.text} />
+            </CardTool>
+            <CardTool
+              label={t('Meal_Clear')}
+              onPress={() => props.onClear(meal)}
+              disabled={empty}
+              fill={toolFill}
+              borderColor={colors.cardDivider}>
+              <FeatherIcon name="trash-2" size={CARD_TOOL_GLYPH} color={colors.text} />
+            </CardTool>
+          </View>
+          {/* The short separator: "change the meal" | "decide it". */}
+          <View style={[styles.toolSeparator, { backgroundColor: colors.cardDivider }]} />
+          <View style={styles.markGroup}>
+            <CardTool
+              label={t('Meal_MarkMissed')}
+              onPress={() => void props.onMissed(meal)}
+              disabled={future || missedSelected || !canConfirm}
+              fill={stateWash(colors.missed, missedSelected, isDark)}
+              borderColor={colors.cardDivider}
+              ring={missedSelected ? colors.missed : undefined}>
+              <Icon name="close" size={CARD_TOOL_GLYPH} color={colors.missed} />
+            </CardTool>
+            <CardTool
+              label={t('Meal_MarkDone')}
+              onPress={() => void props.onComplete(meal)}
+              disabled={future || doneSelected || !canConfirm}
+              fill={stateWash(colors.done, doneSelected, isDark)}
+              borderColor={colors.cardDivider}
+              ring={doneSelected ? colors.done : undefined}>
+              <Icon name="checkmark" size={CARD_TOOL_GLYPH} color={colors.done} />
+            </CardTool>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -615,18 +907,21 @@ function stateWash(color: string, selected: boolean, isDark: boolean): string {
 }
 
 /**
- * One button of the card's action strip: a visible 40 pt tile carrying a 20 pt
- * glyph, with a hit slop that brings the touch target to 44 pt. The edit tools sit
- * on the raised card fill (they change the meal); the two state marks sit on a wash
- * of their own colour (they decide it), and the one that matches the meal's current
- * state keeps a ring - see `stateWash`.
+ * One button of the card's toolbar: a REAL 44 pt pressable holding a 36 pt
+ * outlined tile with a 20 pt glyph. The pressable is the touch target itself, so
+ * two neighbouring tools can sit 2 pt apart without their hit slops overlapping.
+ * The three "change the meal" tools sit on a raised chip; the two state marks sit
+ * on a wash of their own colour, and the one matching the meal's current state
+ * keeps a ring - see `stateWash`.
  */
 function CardTool(props: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  /** Background of the tile. */
+  /** Background of the visible tile. */
   fill: string;
+  /** 1 pt frame of the visible tile (the state colour overrides it). */
+  borderColor: string;
   /** 1 pt ring marking the meal's CURRENT state; undefined draws no ring. */
   ring?: string;
   children: React.ReactNode;
@@ -639,22 +934,43 @@ function CardTool(props: {
       accessibilityState={{ disabled, selected: props.ring !== undefined }}
       disabled={disabled}
       onPress={props.onPress}
-      hitSlop={CARD_TOOL_HIT_SLOP}
       style={({ pressed }) => [
-        styles.tool,
+        styles.toolTouch,
         {
-          backgroundColor: props.fill,
-          borderColor: props.ring ?? 'transparent',
           // A disabled tool fades - unless it is the meal's own state, which is an
           // answer rather than a dead control.
-          opacity: disabled && props.ring === undefined ? 0.45 : 1,
+          opacity: disabled && props.ring === undefined ? 0.45 : pressed ? 0.65 : 1,
         },
-        pressed && styles.toolPressed,
       ]}>
-      {props.children}
+      <View
+        style={[
+          styles.toolTile,
+          {
+            backgroundColor: props.fill,
+            borderColor: props.ring ?? props.borderColor,
+          },
+        ]}>
+        {props.children}
+      </View>
     </Pressable>
   );
 }
+
+/**
+ * Card elevation for meal cards only: the reference's SOFTER lift (a 2 pt drop
+ * with a 6 pt blur) instead of the app-wide `cardShadow` (6 pt / 16 pt), which
+ * made five stacked cards read as five heavy tiles. Other pages keep their own.
+ */
+const mealCardShadow: ViewStyle = (Platform.select({
+  ios: {
+    shadowColor: '#0B1220',
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  android: { elevation: 1 },
+  default: {},
+}) ?? {}) as ViewStyle;
 
 const styles = StyleSheet.create({
   card: {
@@ -663,8 +979,6 @@ const styles = StyleSheet.create({
     borderWidth: metrics.cardBorder,
     flexGrow: 1,
     flexBasis: '100%',
-    // White card on the tinted page: the shadow carries the elevation.
-    ...cardShadow,
   },
   /** Leading state strip, inset so it follows the rounded corners visually. */
   rail: {
@@ -677,18 +991,21 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: metrics.statusRail,
   },
   /**
-   * Compact card body: roomier than the old 12 pt frame padding, because the
-   * card no longer draws a coloured stroke - the air is what groups it now.
-   * `paddingBottom` equals the tool row's `rowGap`, so the air between the line
-   * and the glyphs is the same as between the glyphs and the card's bottom
-   * border.
+   * The card's padded body: the reference's 14 pt inset on every side, with the
+   * same 12 pt of air below the content before the rule. It grows, so two cards
+   * side by side keep their toolbars level at the bottom edge.
    */
-  cardContent: { paddingLeft: 15, paddingRight: 13, paddingTop: 12, paddingBottom: 6, flexGrow: 1 },
+  cardBody: { padding: 14, paddingBottom: 12, flexGrow: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 10,
   },
+  /** Very large text: the badge drops under the identity instead of squeezing it. */
+  headerStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  /** Icon tile + category/time: the piece that stays one row. */
+  identity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', columnGap: 10 },
+  identityStacked: { flex: 0 },
   /** Emoji sit on a soft tile so they align with the text block, not beside it. */
   iconTile: {
     width: 36,
@@ -697,130 +1014,191 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: { flexShrink: 1 },
-  headerTitle: { fontSize: 14, fontFamily: fonts.medium, lineHeight: 19 },
-  headerTime: { fontSize: 11, lineHeight: 15 },
-  /** Capsule pill: the same shape and inset in every card, always top-right. */
+  headerText: { flex: 1, minWidth: 0 },
+  headerTitle: { fontSize: 16, fontFamily: fonts.medium, lineHeight: 21 },
+  headerTime: { fontSize: 12, lineHeight: 16, marginTop: 2 },
+  /** Compact 11 pt capsule badge, always on the trailing edge. */
   pill: {
-    marginLeft: 'auto',
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 4,
-    borderRadius: metrics.radiusPill,
+    borderRadius: 20,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    flexShrink: 0,
   },
-  pillDot: { width: 6, height: 6, borderRadius: 3 },
+  /** Stacked: aligned under the category text, not under the glyph tile. */
+  pillStacked: { alignSelf: 'flex-start', marginLeft: 36 + 10 },
   pillText: { fontSize: 11, fontFamily: fonts.medium },
   error: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, marginTop: 8 },
   errorText: { color: argb('#FFFFFFFF'), fontSize: 12 },
-  title: { fontSize: 16, lineHeight: 22, fontFamily: fonts.medium, marginTop: 10 },
-  body: { fontSize: 13, marginTop: 3, lineHeight: 19 },
-  emptyText: { fontSize: 12, marginTop: 12, paddingBottom: 2 },
   /**
-   * Photo strip and action row, stacked: the pictures take the full card width
-   * (so three thumbnails always sit side by side instead of wrapping), and the
-   * five action buttons keep their own line under a hairline.
+   * Read-mode content: text (flexible left) beside the SAME horizontal photo
+   * strip (right), 12 pt apart, 12 pt below the header.
    */
-  /** Text (flexible left) beside the photo strip (right, 12 pt apart). */
-  contentRow: { flexDirection: 'row', alignItems: 'flex-start', columnGap: 12 },
+  content: { flexDirection: 'row', alignItems: 'flex-start', columnGap: TEXT_GALLERY_GAP, marginTop: 12 },
+  /** Narrow content row or very large text: the strip moves below the text. */
+  contentStacked: { flexDirection: 'column', alignItems: 'stretch' },
   textColumn: { flex: 1, minWidth: 0 },
+  textColumnStacked: { flex: 0, width: '100%' },
+  title: { fontSize: 16, lineHeight: 22, fontFamily: fonts.medium },
+  description: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  emptyText: { fontSize: 12 },
+  /** ONE 1 pt rule, inset 14 pt from both card edges, right above the toolbar. */
+  divider: { height: 1, marginHorizontal: 14 },
   /**
-   * The strip's host: it pushes the tools to the card's bottom edge (so two cards
-   * in one row keep their strips level) and owns the 12 pt of air above the line -
-   * no separate divider element, no gap to tune around it.
+   * The toolbar: the five tools on a nearly-white tint (lighter than the old gray
+   * band), 10 pt side padding, 4 pt vertical padding, and the bottom corners
+   * following the card. The two groups sit 2 pt apart internally; the short
+   * separator keeps `CARD_TOOLBAR_GAP` on both sides.
    */
-  stripHost: { marginTop: 'auto', paddingTop: 12 },
-  /**
-   * The action strip itself: full-bleed (the negative margins cancel the card's
-   * content padding), on a tint of the card so it reads as the card's own toolbar,
-   * closed by ONE 1 pt line in `cardDivider` and rounded to the card's corners.
-   * Its side padding is also the divider's gap, so the line and the card's right
-   * edge carry the same air.
-   */
-  toolStrip: {
+  toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: CARD_STRIP_PADDING,
-    marginLeft: -15,
-    marginRight: -13,
-    marginBottom: -6,
-    paddingVertical: 6,
+    columnGap: CARD_TOOLBAR_GAP,
     paddingHorizontal: CARD_STRIP_PADDING,
-    borderTopWidth: 1,
+    paddingVertical: 4,
     borderBottomLeftRadius: metrics.radius - 1,
     borderBottomRightRadius: metrics.radius - 1,
   },
   /** Left group: change the meal (photo, edit, clear). */
   toolGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
   /**
-   * The single divider between "change the meal" and "decide it". The auto left
-   * margin takes all the free space, so the line sits one `CARD_STRIP_PADDING`
-   * from the ✕ - right next to the marks it separates them from.
+   * The short separator between "change the meal" and "decide it". The auto left
+   * margin takes all the free space, so the line sits against the marks it
+   * separates them from.
    */
-  toolSeparator: { width: 1, alignSelf: 'stretch', marginVertical: 7, marginLeft: 'auto' },
+  toolSeparator: {
+    width: 1,
+    height: CARD_TOOLBAR_SEPARATOR_HEIGHT,
+    marginLeft: 'auto',
+  },
   /** Right group: decide the meal (missed, done). */
   markGroup: { flexDirection: 'row', alignItems: 'center', columnGap: CARD_TOOL_GAP },
-  /**
-   * One tool: a compact, VISIBLE tile (40 pt) with its glyph at 20 pt, and a 44 pt
-   * touch target from the hit slop - see `CardTool`.
-   */
-  tool: {
+  /** The real, non-overlapping 44 pt touch target around each visible tile. */
+  toolTouch: {
+    width: CARD_TOOL_TOUCH,
+    height: CARD_TOOL_TOUCH,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The visible tile: 36 pt, 10 pt corner, 1 pt frame - see `CardTool`. */
+  toolTile: {
     width: CARD_TOOL_SIZE,
     height: CARD_TOOL_SIZE,
-    borderRadius: 12,
+    borderRadius: CARD_TOOL_RADIUS,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolPressed: { opacity: 0.6 },
   /**
-   * The editor's own bottom padding tops up `cardContent.paddingBottom` (6) to
-   * the card's right padding (13), so the answers sit in the corner with the same
-   * air on the right and below them.
+   * The compact editor's own body: 12 pt above the first field, and the card's
+   * existing 14 / 12 pt inset around it - no extra floor, so the open editor
+   * stays close to the height of the card it replaces.
    */
-  editor: { marginTop: 6, rowGap: 8, paddingBottom: 7 },
-  /** Last editor row: planned time left, Cancel / Save right, on a light band. */
-  editorFoot: {
+  editor: { marginTop: EDITOR_TOP_GAP },
+  /** Two shallow fields, 12 pt apart. */
+  editorFields: { rowGap: EDITOR_FIELD_GAP },
+  /**
+   * One field: the floating caption row is absolutely placed ON the top border,
+   * so the field itself needs no label row at normal text sizes.
+   */
+  fieldGroup: { position: 'relative' },
+  fieldLabels: {
+    position: 'absolute',
+    top: EDITOR_LABEL_TOP,
+    left: 8,
+    right: 8,
+    zIndex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end',
     justifyContent: 'space-between',
     columnGap: 8,
-    marginTop: 2,
-    padding: 8,
-    borderRadius: 12,
   },
-  /** One labelled editor field: a persistent caption above its input. */
-  fieldGroup: { rowGap: 4 },
-  fieldLabel: { fontSize: 11, lineHeight: 15, fontFamily: fonts.medium, letterSpacing: 0.2 },
-  field: {
-    ...FIELD_TEXT,
-    borderRadius: 10,
+  /** Enlarged text: the caption and the counter move into normal flow. */
+  fieldLabelsInFlow: { position: 'relative', top: 0, left: 0, right: 0, marginBottom: 4 },
+  fieldLabel: {
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_LABEL_SIZE,
+    lineHeight: 14,
+    paddingHorizontal: 4,
+    flexShrink: 1,
+  },
+  /** The live counter (code points, see `mealEditorLimits`). */
+  fieldCounter: {
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_LABEL_SIZE,
+    lineHeight: 14,
+    paddingHorizontal: 4,
+    fontVariant: ['tabular-nums'],
+  },
+  /** The 1 pt outline of a shallow field: 44 pt minimum, 10 pt corner. */
+  fieldOutline: {
+    minHeight: EDITOR_FIELD_MIN_HEIGHT,
     borderWidth: 1,
-    paddingHorizontal: FIELD_PADDING,
-    paddingVertical: FIELD_PADDING_V,
-    // 44 pt: a compact chip that is also the app's minimum touch target.
-    height: FIELD_HEIGHT,
-    // Single-line fields centre their text in the taller box; the description
-    // overrides this with 'top' so a shallow box starts at its first line.
-    textAlignVertical: 'center',
+    borderRadius: EDITOR_FIELD_RADIUS,
+    justifyContent: 'center',
   },
-  /** Description: one row until the text needs two (the height is set per draft). */
-  textarea: { textAlignVertical: 'top' },
   /**
-   * Planned time: only as wide as "HH:MM" needs - five characters (≈35 pt at
-   * 14 pt) plus 2 × 10 pt padding. The text is CENTERED, so whatever slack the
-   * proportional digits leave is split evenly: the field reads as a symmetrical
-   * chip instead of a left-aligned value with a gap on the right. `alignSelf`
-   * keeps it at the left edge of the row instead of stretching.
+   * The single-line input inside that outline. It scrolls horizontally, so the
+   * box never grows while the user types; the height floor rises with the system
+   * text size instead of clipping a larger font.
    */
-  timeInput: {
-    width: 56,
-    paddingHorizontal: 8,
-    alignSelf: 'flex-start',
-    textAlign: 'center',
+  fieldInput: {
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_FIELD_TEXT_SIZE,
+    lineHeight: EDITOR_FIELD_LINE_HEIGHT,
+    paddingHorizontal: EDITOR_FIELD_PADDING,
+    paddingTop: 10,
+    paddingBottom: 8,
   },
-  input: { width: '100%' },
-  editorRow: { flexDirection: 'row', justifyContent: 'flex-end', columnGap: metrics.controlGap },
+  /** The editor's one-line feedback: refused change, or the legacy note. */
+  editorHint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 16, marginTop: 6 },
+  /** Time chip left, Cancel / Save right, on the card surface (no tinted band). */
+  editorFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: EDITOR_BUTTON_GAP,
+    marginTop: EDITOR_FOOTER_GAP,
+  },
+  /** Narrow card or the largest text sizes: the answers drop under the time. */
+  editorFootStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  /** Clock + time: 44 pt tall, 10 pt corner, 92 pt wide at the default scale. */
+  timeChip: {
+    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
+    borderWidth: 1,
+    borderRadius: EDITOR_FIELD_RADIUS,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 6,
+    paddingHorizontal: 8,
+  },
+  timeInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_TIME_TEXT_SIZE,
+    fontVariant: ['tabular-nums'],
+  },
+  editorActions: { flexDirection: 'row', alignItems: 'center', columnGap: EDITOR_BUTTON_GAP },
+  editorActionsStacked: { justifyContent: 'flex-end' },
+  /** The two answers: 44 pt tall, 10 pt corner - the app's control family. */
+  answer: {
+    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
+    borderWidth: 1,
+    borderRadius: EDITOR_FIELD_RADIUS,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  /** Outlined Cancel - 76 pt, never narrower than its label needs. */
+  answerCancel: { minWidth: EDITOR_CANCEL_MIN_WIDTH },
+  /** Filled indigo Save - 64 pt. */
+  answerSave: { minWidth: EDITOR_SAVE_MIN_WIDTH },
+  answerLabel: { fontFamily: fonts.regular, fontSize: 14 },
 });

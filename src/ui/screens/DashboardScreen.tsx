@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import {
   View,
 } from 'react-native';
 
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 
 import { EntityType, MealStatus } from '../../domain/enums';
@@ -44,20 +45,29 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { journalDelete } from '../../cloud/journal';
 import { ChoiceDialog, ConfirmDialog, PromptDialog, type ConfirmRequest } from '../components/dialogs';
 import { MealCard } from '../components/MealCard';
-import { BarButton, IconButton, localizedCode } from '../components/buttons';
+import { IconButton, localizedCode } from '../components/buttons';
 import { DayProgress } from '../components/DayProgress';
 import { SaveAllRow } from '../components/SaveAllRow';
 import { PhotoViewer } from '../components/PhotoViewer';
-/** Short alias used throughout the JSX below. */
-const Bar = BarButton;
 
 import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../strings';
 import { clearMealRequest } from '../clearMealPrompt';
-import { dateHandoff, readDateHandoff } from '../dates';
+import { readDateHandoff } from '../dates';
 import { TEMPLATE_NAME_START, templateNameProblem } from '../templateName';
-import { cardShadow, fonts, metrics, themeColors } from '../theme';
-import { Icon } from '../components/icons';
+import { cardShadow, fonts, metrics, themeColors, type ThemeColors } from '../theme';
+import { Icon, type IconName } from '../components/icons';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
+
+/**
+ * The r3 reference's responsive thresholds for the day header:
+ *
+ *   - actions stack at full width below 350 dp or above a 1.2 font scale, so a
+ *     two-word label is never squeezed into half a phone;
+ *   - the ring's metrics strip stacks under the ring below 340 dp or above 1.4
+ *     (that decision lives in `DayProgress`).
+ */
+const STACK_ACTIONS_WIDTH = 350;
+const STACK_ACTIONS_FONT_SCALE = 1.2;
 
 export function DashboardScreen({
   route,
@@ -65,9 +75,16 @@ export function DashboardScreen({
   route: { params?: { date?: string; mealKey?: number; requestId?: number } };
 }): React.JSX.Element {
   const app = useApp();
-  const navigation = useNavigation();
   const colors = themeColors(app.isDark);
-  const [date, setDate] = useState(route.params?.date ?? formatDate(new Date()));
+  /**
+   * The device's LOCAL current date - the day the diary OPENS on. It is re-read
+   * when the tab comes to the front, when the app resumes and at every local
+   * midnight (never a UTC string slice), so a diary left open overnight starts
+   * the next launch on the right day. Re-reading it never changes the day
+   * already being browsed.
+   */
+  const [todayDate, setTodayDate] = useState(() => formatDate(new Date()));
+  const [date, setDate] = useState(route.params?.date ?? todayDate);
   const [meals, setMeals] = useState<MealEntry[] | null>(null);
   const [photoCounts, setPhotoCounts] = useState<Map<string, number>>(new Map());
   const [photosByMeal, setPhotosByMeal] = useState<Record<string, MealPhoto[]>>({});
@@ -103,15 +120,11 @@ export function DashboardScreen({
   const batchRef = useRef({ remaining: 0, saved: 0, total: 0 });
   /** Guards the single photograph pipeline (picker + save) against re-entry. */
   const photoBusyRef = useRef(false);
-  const { width } = useWindowDimensions();
-  /** The tab navigator is untyped here, so the Calendar destination is named once. */
-  const openCalendar = navigation as unknown as {
-    navigate: (name: string, params?: object) => void;
-  };
+  const { width, fontScale } = useWindowDimensions();
+  /** Narrow screen or large text: the two bulk actions stack at full width. */
+  const stackActions = width < STACK_ACTIONS_WIDTH || fontScale > STACK_ACTIONS_FONT_SCALE;
   const now = new Date();
-  /** The diary's own "today", computed once per render. */
-  const todayDate = formatDate(now);
-  /** "Sun 1 Nov" + "2026": the compact two-line date control. */
+  /** "Sun 1 Nov" + "2026": the compact two-line date heading. */
   const compactDate = formatCompactDate(date);
   // Two cards per row once the screen is wide enough (tablet / landscape),
   // otherwise one card per row - order is always preserved (spec 8.2).
@@ -133,13 +146,57 @@ export function DashboardScreen({
     setPhotosByMeal(byMeal);
   }, [app.profile, date]);
 
+  /** Re-reads the device-local date; a no-op on the same day (no extra renders). */
+  const refreshToday = useCallback((): void => {
+    const next = formatDate(new Date());
+    setTodayDate((current) => (current === next ? current : next));
+  }, []);
+
   // The day is reloaded whenever the tab comes to the front (and on mount, and
   // when the date changes), so a background cycle's imports are already there.
+  // The same moment re-reads "today": a diary left open across midnight must not
+  // keep marking yesterday as the current day.
   useFocusEffect(
     useCallback(() => {
+      refreshToday();
       void reload();
-    }, [reload]),
+    }, [reload, refreshToday]),
   );
+
+  // Resuming from the background can cross midnight too: compare again as soon
+  // as the app is the active one.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        refreshToday();
+      }
+    });
+    return () => subscription.remove();
+  }, [refreshToday]);
+
+  // ...and while the app stays open, re-check just after each local midnight and
+  // re-arm for the next one. The timeout is cancelled when the screen unmounts.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = (): void => {
+      const nowMs = Date.now();
+      const midnight = new Date(nowMs);
+      // `setHours(24, …)` lands on the NEXT local midnight, DST included.
+      midnight.setHours(24, 0, 0, 0);
+      // Half a second of slack: the callback can never run a hair before the day
+      // has actually changed.
+      timer = setTimeout(() => {
+        refreshToday();
+        arm();
+      }, Math.max(1000, midnight.getTime() - nowMs + 500));
+    };
+    arm();
+    return () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    };
+  }, [refreshToday]);
 
   // A background cycle that imported the other device's records refreshes the
   // visible day, so a card never keeps a stale snapshot that a later save would
@@ -534,66 +591,56 @@ export function DashboardScreen({
         // keeps the page out of the bar's own height.
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
-      {/* The day header: a CARD (the mockup) holding the date navigation, the
-          progress ring with its three counts, and the two day-wide actions. It
-          used to be part of the page with a linear bar; the ring says how much of
-          the day is done, missed and still open in one shape (spec 8.2). */}
-      <View style={[styles.header, cardShadow, { backgroundColor: colors.cardFill }]}>
+      {/* The day header: a CARD holding the date navigation, the progress ring
+          with its outlined three-column metrics strip and the two day-wide
+          actions (spec 8.2, r3 reference). */}
+      <View
+        style={[
+          styles.header,
+          cardShadow,
+          { backgroundColor: colors.cardFill, borderColor: colors.border },
+        ]}>
         {/* Compact day navigation: previous day, the date centred between the
-            arrows, next day. Tapping the date opens the Calendar tab to choose
-            a day - there is deliberately no ellipsis and no extra chevron next
-            to the date, so the header has exactly one job per control. */}
+            arrows, next day. The date is a plain HEADING, not a control - it
+            never opens the Calendar, carries no marker and no pill - so the two
+            44 pt arrows are the header's only date navigation. */}
         <View style={styles.navRow}>
           <IconButton
             label={t('Dashboard_PreviousDay')}
             icon="chevron-back"
             onPress={() => setDate(addDays(date, -1))}
             size={22}
+            tint={colors.textMuted}
             colors={colors}
           />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={formatLongDate(date)}
-            accessibilityHint={t('Common_ChooseDate')}
-            onPress={() =>
-              // The day AND the request id travel with the tap: the Calendar
-              // opens on this exact date in its exact month, and asking for the
-              // same date twice still re-fires after it was browsed elsewhere.
-              openCalendar.navigate('CalendarTab', dateHandoff(date))
-            }
-            style={styles.dateButton}>
-            <Text style={[styles.datePrimary, { color: colors.text }]} numberOfLines={1}>
+          {/* The same typography on EVERY day: regular-weight neutral ink and a
+              muted year beneath. Nothing is highlighted, badged or tappable, so
+              the heading reads as plain text and never as a button. */}
+          <View style={styles.dateHeading}>
+            <Text
+              accessibilityRole="header"
+              accessibilityLabel={formatLongDate(date)}
+              style={[styles.datePrimary, { color: colors.text }]}
+              numberOfLines={1}>
               {compactDate.primary}
             </Text>
             {compactDate.year !== '' && (
-              <Text style={[styles.dateYear, { color: colors.textMuted }]}>
+              <Text
+                accessible={false}
+                style={[styles.dateYear, { color: colors.textMuted }]}>
                 {compactDate.year}
               </Text>
             )}
-          </Pressable>
+          </View>
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
             onPress={() => setDate(addDays(date, 1))}
             size={22}
+            tint={colors.textMuted}
             colors={colors}
           />
         </View>
-        {/* The only shortcut that leaves the day. It rides UNDER the date, centred,
-            so the two arrows stay symmetric around the date the way the mockup
-            draws them; on today it would do nothing, so it is not drawn at all. */}
-        {date !== todayDate && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('Rn_GoToToday')}
-            onPress={() => setDate(todayDate)}
-            hitSlop={8}
-            style={({ pressed }) => [styles.todayChip, { opacity: pressed ? 0.6 : 1 }]}>
-            <Text style={[styles.todayChipText, { color: colors.accent }]}>
-              {t('Calendar_Today')}
-            </Text>
-          </Pressable>
-        )}
         {progress !== null && (
           <DayProgress
             completed={progress.completed}
@@ -603,26 +650,27 @@ export function DashboardScreen({
             colors={colors}
           />
         )}
-        {/* Day-wide actions: two equal-width pills under the ring, each wearing
-            the state glyph in its state colour - the mockup's quiet answers. */}
-        <View style={styles.dayActions}>
-          <Bar
+        {/* Day-wide actions: two equal-width OUTLINED buttons, each wearing the
+            state glyph in its state colour and a neutral label - never a solid
+            red/green slab. They stack at full width on narrow screens. */}
+        <View style={[styles.dayActions, stackActions && styles.dayActionsStacked]}>
+          <BulkButton
             icon="close"
             iconColor={colors.missed}
             label={t('Rn_MarkAllMissed')}
             onPress={() => void handleMarkAllMissed()}
             disabled={!canMarkMissed}
             colors={colors}
-            style={styles.bulkButton}
+            stacked={stackActions}
           />
-          <Bar
+          <BulkButton
             icon="checkmark"
             iconColor={colors.done}
             label={t('Rn_MarkAllDone')}
             onPress={() => void handleMarkAllDone()}
             disabled={!canMarkDone}
             colors={colors}
-            style={styles.bulkButton}
+            stacked={stackActions}
           />
         </View>
         {/* The save row (spec 8.2): only rendered while an editor is open - the
@@ -780,6 +828,49 @@ export function DashboardScreen({
   );
 }
 
+/**
+ * One day-wide action: an OUTLINED neutral button - card fill, 1 pt frame, the
+ * state glyph in its own colour, a neutral label - so neither "all done" nor
+ * "all missed" paints a solid red/green slab over the header. Disabled is a
+ * truthful dimmed control (the whole button fades), never a washed primary.
+ *
+ * The two share one equal-width row and stack at full width when the screen is
+ * narrow or the text large, so a two-word label is never squeezed.
+ */
+function BulkButton(props: {
+  label: string;
+  icon: IconName;
+  iconColor: string;
+  disabled: boolean;
+  onPress: () => void;
+  colors: ThemeColors;
+  stacked: boolean;
+}): React.JSX.Element {
+  const { colors } = props;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled }}
+      disabled={props.disabled}
+      onPress={props.onPress}
+      hitSlop={4}
+      style={({ pressed }) => [
+        styles.bulkButton,
+        props.stacked ? styles.bulkButtonStacked : styles.bulkButtonWide,
+        {
+          borderColor: colors.cardDivider,
+          backgroundColor:
+            pressed && !props.disabled ? colors.surfaceVariant : colors.cardFill,
+          opacity: props.disabled ? 0.45 : 1,
+        },
+      ]}>
+      <Icon name={props.icon} size={18} color={props.iconColor} />
+      <Text style={[styles.bulkLabel, { color: colors.text }]}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   /**
@@ -791,45 +882,59 @@ const styles = StyleSheet.create({
     paddingTop: 6,
   },
   /**
-   * The day header is a CARD (the mockup): the same fill and lift as a meal card,
-   * so the day reads as one panel above the list instead of loose page chrome.
+   * The day header is a CARD (the r3 reference): the same fill, 1 pt frame and
+   * lift as a content card, with the reference's 14 pt inset - tight enough that
+   * an 80 pt ring and its metrics strip share one row on a phone.
    */
   header: {
     borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingTop: 6,
-    paddingBottom: 12,
+    borderWidth: 1,
+    padding: 14,
   },
   /**
-   * The date is a two-line control, not the page title: a 18 pt weekday line and
-   * an 11 pt year caption. Both fit between two 44 pt arrows on a 360 pt phone
-   * and neither can wrap.
+   * The date is a plain HEADING between two 44 pt arrows: 20 pt regular neutral
+   * ink with an 11 pt muted year under it. It is not a control, so it carries no
+   * press state, badge, dot or highlight - and its words are the same on every
+   * day, so the header keeps one height whatever day is open.
    */
-  datePrimary: { fontSize: 18, fontFamily: fonts.medium, letterSpacing: -0.3, lineHeight: 24 },
-  dateYear: { fontSize: 11, lineHeight: 15 },
+  datePrimary: {
+    fontSize: 20,
+    fontFamily: fonts.regular,
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+  dateYear: { fontSize: 11, fontFamily: fonts.regular, textAlign: 'center', marginTop: 1 },
   /** Previous / date / next on one row; the date fills the centre. */
-  navRow: { flexDirection: 'row', alignItems: 'center', columnGap: metrics.controlGap },
-  dateButton: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  /**
-   * "Today" rides UNDER the date while another day is open: a quiet accent label
-   * with a full 44 pt touch target, centred so the arrows stay symmetric.
-   */
-  todayChip: {
-    alignSelf: 'center',
-    minHeight: 36,
-    minWidth: 44,
-    paddingHorizontal: 6,
+  navRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
+  dateHeading: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  todayChipText: { fontSize: 12, fontFamily: fonts.medium },
-  /** The two bulk actions share one equal-width row of quiet pills. */
+  /** The two bulk actions share one equal-width row (or stack at full width). */
   dayActions: {
     flexDirection: 'row',
-    columnGap: 10,
-    marginTop: 14,
+    gap: 10,
+    marginTop: 12,
   },
-  bulkButton: { flex: 1, justifyContent: 'center', minHeight: 44 },
+  dayActionsStacked: { flexDirection: 'column' },
+  /** Outlined neutral button: 44 pt floor, 12 pt corners, card fill. */
+  bulkButton: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 7,
+  },
+  bulkButtonWide: { flex: 1, minWidth: 0 },
+  bulkButtonStacked: { width: '100%' },
+  bulkLabel: { fontFamily: fonts.regular, fontSize: 14, flexShrink: 1, textAlign: 'center' },
   /** Day-level template action under the list: centred accent text, no chrome. */
   templateRow: { alignItems: 'center', marginTop: 12 },
   templateButton: {

@@ -20,6 +20,12 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_Meals: 'Meals',
   /** Placeholder on a meal card that has neither a title nor a description. */
   Rn_MealEmpty: 'No meal recorded yet',
+  /**
+   * Placeholder when the entry has PHOTOGRAPHS but no typed text: the slot is
+   * not empty, so the card must not claim that no meal was recorded - it just
+   * has nothing written down yet.
+   */
+  Rn_MealPhotoOnly: 'No meal details yet',
   /** Short labels for the day-wide confirmations (accessible names stay verbose). */
   Rn_MarkAllDone: 'All done',
   Rn_MarkAllMissed: 'All missed',
@@ -35,8 +41,6 @@ export const RN_STRINGS: Record<string, string> = {
    * ("3/5"), plus the two day-wide action labels under the counts.
    */
   Rn_DayDoneOfTotal: '{0}/{1}',
-  /** Day shortcut shown only while the diary is showing another date. */
-  Rn_GoToToday: 'Go to today',
   /**
    * Labelled template action under the meal list. The generated Windows key
    * ("Save as template") reads like a per-meal action, so the phone spells out
@@ -162,8 +166,24 @@ export const RN_STRINGS: Record<string, string> = {
    */
   Rn_FieldDescription: 'Description',
   Rn_FieldPlannedTime: 'Planned time',
+  /**
+   * The inline editor's character policy (see `mealEditorLimits.ts`). These are
+   * PHONE-ONLY ceilings: the domain keeps 120 / 2000 so imported and synced
+   * meals stay valid. The first two are the concise answers to an over-limit
+   * keystroke or paste; the third explains a value that is ALREADY longer, which
+   * opens intact and may be kept or shortened - never cut by the editor.
+   */
+  Rn_EditorTitleLimit: 'Meal name: maximum 40 characters.',
+  Rn_EditorDescriptionLimit: 'Description: maximum 80 characters.',
+  Rn_EditorLegacyHint: 'Longer text is kept. Leave it as it is or shorten it.',
   /** Template target-date prompt: its wording, validation and Today shortcut. */
   Rn_TemplateDatePrompt: 'Enter the target date (yyyy-MM-dd)',
+  /**
+   * The sheet's own headline (the r3 reference). Shorter than the Windows
+   * `Template_ApplyTitle` ("Apply the template"), and the same two words as the
+   * answer that performs the write, so the header and the button agree.
+   */
+  Rn_TemplateApplyTitle: 'Apply template',
   Rn_TemplateApplyConfirm: 'Apply template',
   Rn_TemplateDateRequired: 'Enter a date first.',
   Rn_TemplateDateFormat: 'Use the format yyyy-MM-dd, for example 2026-11-02.',

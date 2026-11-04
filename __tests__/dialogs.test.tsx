@@ -13,7 +13,7 @@ import { ActivityIndicator, Modal, StyleSheet, Text, TextInput } from 'react-nat
 import { ChoiceDialog, ConfirmDialog, LoadingSheet, PromptDialog } from '../src/ui/components/dialogs';
 import { dateDraft, dateInputProblem, DATE_INPUT_LENGTH } from '../src/ui/dates';
 import { t } from '../src/ui/strings';
-import { fonts, lightColors, typeScale } from '../src/ui/theme';
+import { fonts, lightColors, tintAlpha, typeScale } from '../src/ui/theme';
 
 /**
  * The compact Apply-template sheet stacks its two answers at full width below
@@ -756,6 +756,14 @@ describe('the compact Apply-template sheet', () => {
       .filter((value): value is string => typeof value === 'string');
   }
 
+  function textOf(renderer: Renderer, value: string) {
+    const found = renderer.root.findAllByType(Text).find((node) => node.props.children === value);
+    if (found === undefined) {
+      throw new Error(`no text "${value}"`);
+    }
+    return found;
+  }
+
   const dateError = (value: string): string | null =>
     dateInputProblem(value) === null ? null : t('Rn_TemplateDateRequired');
 
@@ -767,7 +775,7 @@ describe('the compact Apply-template sheet', () => {
         isDark={false}
         request={{
           layout: 'template-date',
-          title: t('Template_ApplyTitle'),
+          title: t('Rn_TemplateApplyTitle'),
           message: t('Rn_TemplateDatePrompt'),
           contextLabel: 'Full day · 5 meals',
           fieldLabel: t('Rn_TemplateDateLabel'),
@@ -793,12 +801,54 @@ describe('the compact Apply-template sheet', () => {
     const printed = texts(renderer);
 
     // Title, the REAL template summary, the field label, Today and the hint.
-    expect(printed).toContain(t('Template_ApplyTitle'));
+    expect(printed).toContain(t('Rn_TemplateApplyTitle'));
+    expect(t('Rn_TemplateApplyTitle')).toBe('Apply template');
     expect(printed).toContain('Full day · 5 meals');
     expect(printed).toContain(t('Rn_TemplateDateLabel'));
     expect(printed).toContain(t('Calendar_Today'));
     expect(printed).toContain(t('Rn_TemplateDateFormatHint'));
     expect(printed).not.toContain(t('Rn_TemplateDatePrompt'));
+    // The longer Windows headline ("Apply the template") is not this header.
+    expect(printed).not.toContain(t('Template_ApplyTitle'));
+
+    // The reference's header: a 40 pt pale-indigo calendar tile, then the bold
+    // title with the real summary stacked UNDER it - all in ONE row, not a
+    // full-width caption below the header.
+    const title = textOf(renderer, t('Rn_TemplateApplyTitle'));
+    const summary = textOf(renderer, 'Full day · 5 meals');
+    expect(styleOf(title).fontSize).toBe(typeScale.title2);
+    expect(styleOf(summary).fontSize).toBe(typeScale.subheadline);
+    // Both lines share one column...
+    expect(summary.parent).toBe(title.parent);
+    // ...and that column is INSIDE the header row, beside the tile.
+    const tile = renderer.root
+      .findAll(
+        (node) =>
+          typeof node.type === 'string' &&
+          styleOf(node).width === 40 &&
+          styleOf(node).borderRadius === 13,
+      )
+      .pop();
+    expect(tile).toBeDefined();
+    expect(styleOf(tile!).height).toBe(40);
+    expect(styleOf(tile!).backgroundColor).toBe(tintAlpha(lightColors.accent, '1A'));
+    // The nearest row above the tile is the header (RN wraps both in a host
+    // component, so the walk skips the wrappers).
+    let headerRow = tile!.parent!;
+    while (headerRow.parent !== null && styleOf(headerRow).flexDirection !== 'row') {
+      headerRow = headerRow.parent;
+    }
+    expect(styleOf(headerRow).flexDirection).toBe('row');
+    const headerLines = headerRow.findAllByType(Text).map((node) => node.props.children);
+    expect(headerLines).toContain(t('Rn_TemplateApplyTitle'));
+    expect(headerLines).toContain('Full day · 5 meals');
+    // The tile wears the reference's calendar face (thin hangers + text lines).
+    const tileGlyphs = new Set(
+      tile!
+        .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
+        .map((node) => node.props.accessibilityLabel as string),
+    );
+    expect(tileGlyphs).toContain('material:calendar-text-outline');
 
     // The compact sheet: 520 dp cap, 24 pt corners.
     const card = styleOf(

@@ -1,8 +1,15 @@
-  // Calendar (spec 8.5) - one compact month card: a left-aligned month label, a
-  // pale-indigo "Today" button with a calendar icon, the seven equal columns
+  // Calendar (spec 8.5) - one FLAT month board: a left-aligned month label with
+  // two white, hairline-outlined arrow controls, the seven equal columns
   // Monday-first, the day cells, then the Done / Missed / Pending key in a single
-  // compact row with "5 dots = 5 meals", the selected-day row (a bold compact date,
-  // its counts and "Open day") and the grouped agenda of that date.
+  // compact row with "5 dots = 5 meals", the selected-day heading with an
+  // outlined "Open day" action, its status/photo summary on a FULL-WIDTH row of
+  // its own, and the grouped agenda of that date.
+  //
+  // The presentation is deliberately quiet (see calendar.tokens): the month card
+  // and the agenda are 16 dp surfaces with a 1 dp neutral frame and NO elevation,
+  // and every control on the page - "Today", the month arrows, "Open day" - is a
+  // white outlined chip instead of a filled block, so the only saturated things
+  // left are the selected day and the real status marks.
   //
   // Day markers: the SELECTED day is the filled indigo circle with white text, and
   // TODAY is a thin outline drawn in EVERY state - when another date is selected the
@@ -24,11 +31,19 @@
   // The agenda lists the five slots of the selected date with the SAME line icon the
   // meal card wears, an aligned time, the meal's title over its category (or the
   // CATEGORY alone when the slot has no title - never five "No meal recorded"
-  // lines), its photograph count and a small status pill. Photos and navigation are
-  // untouched: this page still only reads.
+  // lines), its photograph count and a small status pill. Its FOUR 1 dp rules are
+  // inset to the row gutters, so they never touch the card's frame. Photos and
+  // navigation are untouched: this page still only reads.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { DayProgress, addDays, formatDate, forDay } from '../../domain/analytics';
@@ -40,17 +55,9 @@ import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { monthGrid } from '../calendarGrid';
 import { isCalendarDate } from '../dates';
-import { Icon, MaterialIcon } from '../components/icons';
+import { Icon, MaterialIcon, type IconName } from '../components/icons';
 import { mealCategoryGlyph } from '../mealGlyphs';
-import {
-  cardShadow,
-  fonts,
-  metrics,
-  pageTitleStyle,
-  softPillColors,
-  themeColors,
-  tintAlpha,
-} from '../theme';
+import { fonts, metrics, pageTitleStyle, softPillColors, themeColors } from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import {
   formatCompactDayMonth,
@@ -65,6 +72,39 @@ import {
 /** The agenda row's category glyph: the same line icon the meal card wears. */
 const AGENDA_GLYPH_SIZE = 18;
 
+/**
+ * Geometry of the page (dp / sp) - the calendar reference tokens, scoped to this
+ * screen. Nothing here changes date arithmetic, data or navigation.
+ */
+const CAL = {
+  cardRadius: 16,
+  cardPadding: 10,
+  monthSize: 20,
+  controlGap: 8,
+  weekdaySize: 11,
+  cellMinHeight: 44,
+  dayBadgeSize: 32,
+  dotSize: 5,
+  dotGap: 2,
+  legendSize: 11,
+  selectedTopGap: 14,
+  selectedTitleSize: 19,
+  summarySize: 12,
+  summaryGap: 12,
+  agendaTopGap: 10,
+  agendaRowMinHeight: 56,
+  agendaInset: 14,
+  agendaRowGap: 10,
+  timeColumn: 44,
+  timeSize: 12,
+  categoryTile: 30,
+  categoryRadius: 8,
+  primarySize: 15,
+  secondarySize: 11,
+  statusSize: 11,
+} as const;
+
+
 export function CalendarScreen(props: {
   onOpenDay: (date: string) => void;
   /** Date the page should show on arrival (Statistics sends a period start). */
@@ -78,6 +118,9 @@ export function CalendarScreen(props: {
 }): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  /** The system text scale: the only thing that may grow this board. */
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
   /**
    * The current date is STATE, not a constant read once at mount: the calendar
    * tab stays alive while the app sits in the background, so a fixed value would
@@ -190,6 +233,17 @@ export function CalendarScreen(props: {
   }
   // Weekday captions come from the resource file ("Mo Tu We ..."), Monday first.
   const weekdays = t('Calendar_Weekdays').split(/\s+/).filter((name) => name !== '');
+  /**
+   * Day-mark geometry. The badge keeps its 32 dp circles at the default scale and
+   * grows with the system text (capped at 1.4, the same cap the day number wears),
+   * and the cell keeps at least the 44 dp touch target - so a larger font makes the
+   * board taller instead of clipping a date. No date arithmetic is involved.
+   */
+  const badgeSize = Math.max(
+    CAL.dayBadgeSize,
+    Math.ceil(CAL.dayBadgeSize * Math.min(fontScale, 1.4)),
+  );
+  const cellHeight = Math.max(CAL.cellMinHeight, badgeSize + CAL.dotSize + 6);
 
 
   /**
@@ -210,9 +264,49 @@ export function CalendarScreen(props: {
   const selectedPhotos =
     selectedProgress?.slots.reduce((total, slot) => total + slot.photoCount, 0) ?? 0;
   /**
-   * The selected-day line always shows the same three counts in the same order
-   * ("0 done · 0 missed · 5 pending"), so an untouched day reads as plainly as a
-   * busy one, and appends the photograph total only when the day holds photos.
+   * The selected-day summary is THREE real counts in a fixed order (done, missed,
+   * pending) that keep their zeros visible, plus the actual photograph total when
+   * the day holds photos - the same facts the old one-line sentence carried, now
+   * as items that wrap instead of truncating. Localized with the existing status
+   * words and photo-count string; nothing here is computed for the design.
+   */
+  const summaryItems: Array<{
+    id: string;
+    icon: IconName;
+    text: string;
+    tone: 'done' | 'missed' | 'pending' | 'neutral';
+  }> = [
+    {
+      id: 'done',
+      icon: 'checkmark-circle-outline',
+      text: `${selectedProgress?.completed ?? 0} ${t('Status_Done')}`,
+      tone: 'done',
+    },
+    {
+      id: 'missed',
+      icon: 'close-circle-outline',
+      text: `${selectedProgress?.missed ?? 0} ${t('Status_Missed')}`,
+      tone: 'missed',
+    },
+    {
+      id: 'pending',
+      icon: 'time-outline',
+      text: `${selectedProgress?.pending ?? 0} ${t('Status_Pending')}`,
+      tone: 'pending',
+    },
+  ];
+  if (selectedPhotos > 0) {
+    summaryItems.push({
+      id: 'photos',
+      icon: 'camera-outline',
+      text: tFmt('Rn_CalendarPhotoCount', selectedPhotos),
+      tone: 'neutral',
+    });
+  }
+  /**
+   * The spoken version of that row: the SAME sentence the page has always read out
+   * ("1 done · 1 missed · 3 pending · 2 photos"), so the change is visual only for
+   * a screen reader.
    */
   const selectedSummary = `${tFmt(
     'Rn_CalendarDaySummary',
@@ -220,6 +314,7 @@ export function CalendarScreen(props: {
     selectedProgress?.missed ?? 0,
     selectedProgress?.pending ?? 0,
   )}${selectedPhotos > 0 ? ` · ${tFmt('Rn_CalendarPhotoCount', selectedPhotos)}` : ''}`;
+
 
   return (
     <ScrollView
@@ -230,41 +325,40 @@ export function CalendarScreen(props: {
         // never ends flush against it.
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
-      <View style={styles.pageHead}>
+      <View style={[styles.pageHead, largeText && styles.headStacked]}>
         <Text style={[styles.pageTitle, { color: colors.text }]} numberOfLines={1}>
           {t('Nav_Calendar')}
         </Text>
+        {/* A WHITE outlined control instead of the filled accent wash: on this
+            calmer board the only saturated things left are the selected day and
+            the real status marks. 44 pt tall, so it needs no hit slop. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('Calendar_Today')}
           onPress={goToToday}
-          hitSlop={4}
           style={({ pressed }) => [
-            styles.todayButton,
-            // A pale wash of the ONE accent, so the button follows the theme in
-            // both modes instead of pinning a hex that only works in light mode.
-            { backgroundColor: tintAlpha(colors.accent, app.isDark ? '2E' : '1A') },
-            pressed && { opacity: 0.85 },
+            styles.outlineAction,
+            {
+              borderColor: colors.border,
+              backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+            },
           ]}>
-          <MaterialIcon name="calendar-month-outline" size={16} color={colors.accent} />
-          <Text style={[styles.todayButtonText, { color: colors.accent }]}>
+          <MaterialIcon name="calendar-month-outline" size={17} color={colors.accent} />
+          <Text style={[styles.actionText, { color: colors.accent }]} numberOfLines={1}>
             {t('Calendar_Today')}
           </Text>
         </Pressable>
       </View>
 
-      {/* Month navigation, weekday grid and the mark key read as ONE compact
-          surface: the arrows sit on the card's edges so the month label is exactly
-          centred, whatever its length. */}
-      <View
-        style={[
-          styles.board,
-          cardShadow,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}>
-        {/* Month navigation: label on the left, grouped arrows on the right. */}
-        <View style={styles.monthRow}>
-          <Text style={[styles.monthLabel, { color: colors.text }]} numberOfLines={1}>
+      {/* The month board: one FLAT 16 dp surface - a single hairline frame, no
+          elevation - holding the month row, the seven weekday columns, the whole
+          weeks of the real grid and the mark key. */}
+      <View style={[styles.board, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        {/* Month navigation: the label on the left, two outlined arrows right. */}
+        <View style={[styles.monthRow, largeText && styles.headStacked]}>
+          <Text
+            style={[styles.monthLabel, { color: colors.text }]}
+            numberOfLines={largeText ? undefined : 1}>
             {formatMonthLabel(month)}
           </Text>
           <View style={styles.monthNav}>
@@ -272,32 +366,34 @@ export function CalendarScreen(props: {
               accessibilityRole="button"
               accessibilityLabel={t('Calendar_PreviousMonth')}
               onPress={() => shiftMonth(-1)}
-              hitSlop={2}
               style={({ pressed }) => [
                 styles.monthArrow,
-                { backgroundColor: colors.surfaceVariant },
-                pressed && { opacity: 0.7 },
+                {
+                  borderColor: colors.border,
+                  backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+                },
               ]}>
-              <Icon name="chevron-back" size={20} color={colors.textSecondary} />
+              <Icon name="chevron-back" size={21} color={colors.textSecondary} />
             </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t('Calendar_NextMonth')}
               onPress={() => shiftMonth(1)}
-              hitSlop={2}
               style={({ pressed }) => [
                 styles.monthArrow,
-                { backgroundColor: colors.surfaceVariant },
-                pressed && { opacity: 0.7 },
+                {
+                  borderColor: colors.border,
+                  backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+                },
               ]}>
-              <Icon name="chevron-forward" size={20} color={colors.textSecondary} />
+              <Icon name="chevron-forward" size={21} color={colors.textSecondary} />
             </Pressable>
           </View>
         </View>
 
         <View style={styles.weekHeader}>
           {weekdays.map((weekday) => (
-            <Text key={weekday} style={[styles.weekday, { color: colors.textMuted }]}>
+            <Text key={weekday} style={[styles.weekday, { color: colors.textSecondary }]}>
               {weekday}
             </Text>
           ))}
@@ -337,7 +433,7 @@ export function CalendarScreen(props: {
                       setSelected(cell.date);
                     }}
                     onLongPress={() => props.onOpenDay(cell.date)}
-                    style={styles.cell}>
+                    style={[styles.cell, { minHeight: cellHeight }]}>
                     {/* SELECTED = the filled indigo circle, white number.
                         TODAY = the thin outline, drawn in EVERY state - including
                         when another date is selected, and inside the filled circle
@@ -352,7 +448,8 @@ export function CalendarScreen(props: {
                         SQUARE and the outlined day into a SQUARE ring the moment the
                         month changed. A freshly mounted child always draws round
                         (see `dayBadgeFill` / `dayBadgeRing`). */}
-                    <View style={styles.dayBadge}>
+                    <View
+                      style={[styles.dayBadge, { width: badgeSize, height: badgeSize }]}>
                       {isSelected && (
                         <View
                           pointerEvents="none"
@@ -408,11 +505,12 @@ export function CalendarScreen(props: {
           ))}
         </View>
 
-        {/* One matching rule above the key: 16 dp from the card's outer edge,
-            with ~12 dp of air before the legend. */}
+        {/* One matching rule above the key, inset from BOTH card edges (10 dp of
+            card padding + a 4 dp margin + the 1 dp frame), with ~10 dp of air
+            before the legend. */}
         <View style={[styles.boardDivider, { backgroundColor: colors.cardDivider }]} />
         {/* A single compact key row: done / missed / pending with their dots,
-            a separator, then "5 dots = 5 meals". */}
+            a separator, then "5 dots = 5 meals". It wraps at large text. */}
         <View style={styles.keyRow}>
           <View style={styles.keyItem}>
             <View style={[styles.keyDot, { backgroundColor: colors.done }]} />
@@ -434,48 +532,70 @@ export function CalendarScreen(props: {
           </View>
           <View style={styles.keyCaption}>
             <View style={[styles.keySeparator, { backgroundColor: colors.cardDivider }]} />
-            <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
+            <Text style={[styles.footText, { color: colors.textSecondary }]} numberOfLines={1}>
               {t('Rn_CalendarDots')}
             </Text>
           </View>
         </View>
       </View>
 
-
-      {/* Selected day: a bold compact date, its counts and an "Open day" action. */}
-      <View style={styles.selectedRow}>
-        <View style={styles.copy}>
-          <Text style={[styles.selectedTitle, { color: colors.text }]} numberOfLines={1}>
+      {/* Selected day: the heading and an outlined "Open day" action share ONE row,
+          and the status/photo summary sits UNDER it on a full-width row of its own,
+          so the counts never squeeze against the button. */}
+      <View style={styles.selectedSection}>
+        <View style={[styles.selectedHead, largeText && styles.headStacked]}>
+          <Text
+            style={[styles.selectedTitle, { color: colors.text }]}
+            numberOfLines={largeText ? undefined : 1}>
             {formatCompactDayMonth(selected)}
           </Text>
-          <Text style={[styles.selectedDetail, { color: colors.textMuted }]} numberOfLines={1}>
-            {selectedSummary}
-          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('Calendar_OpenDay')}
+            onPress={() => props.onOpenDay(selected)}
+            style={({ pressed }) => [
+              styles.outlineAction,
+              {
+                borderColor: colors.border,
+                backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
+              },
+            ]}>
+            <Text style={[styles.actionText, { color: colors.accent }]} numberOfLines={1}>
+              {t('Calendar_OpenDay')}
+            </Text>
+            <Icon name="chevron-forward" size={16} color={colors.accent} />
+          </Pressable>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('Calendar_OpenDay')}
-          onPress={() => props.onOpenDay(selected)}
-          hitSlop={4}
-          style={({ pressed }) => [
-            styles.openDay,
-            { backgroundColor: colors.accentFill },
-            pressed && { opacity: 0.85 },
-          ]}>
-          <Text style={[styles.openDayText, { color: colors.accentFillText }]} numberOfLines={1}>
-            {t('Calendar_OpenDay')}
-          </Text>
-        </Pressable>
+        {/* The rows read as ONE sentence to a screen reader (the same sentence the
+            page has always spoken); visually they are real, wrapping items. */}
+        <View style={styles.summary} accessible accessibilityLabel={selectedSummary}>
+          {summaryItems.map((item) => (
+            <View key={item.id} style={styles.summaryItem}>
+              <Icon
+                name={item.icon}
+                size={14}
+                color={
+                  item.tone === 'neutral'
+                    ? colors.textSecondary
+                    : item.tone === 'done'
+                      ? colors.done
+                      : item.tone === 'missed'
+                        ? colors.missed
+                        : colors.pending
+                }
+              />
+              <Text style={[styles.summaryText, { color: colors.textSecondary }]}>
+                {item.text}
+              </Text>
+            </View>
+          ))}
+        </View>
       </View>
 
-      {/* Grouped agenda of the selected date: category icon, aligned time, the
-          meal's title over its category, its photographs and a small status pill. */}
-      <View
-        style={[
-          styles.agenda,
-          cardShadow,
-          { backgroundColor: colors.surface, borderColor: colors.border },
-        ]}>
+      {/* Grouped agenda of the selected date: time | category icon | real
+          title/detail | actual status, on a flat 16 dp surface. Its rules are inset
+          to the row gutters and every row keeps a 56 dp floor and grows. */}
+      <View style={[styles.agenda, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         {(selectedProgress?.slots ?? []).map((slot, index) => {
           const category = categories.find((c) => c.fixedCategoryKey === slot.mealCategoryKey);
           const pill = softPillColors(colors, slot.status);
@@ -510,47 +630,69 @@ export function CalendarScreen(props: {
               {index > 0 && (
                 <View style={[styles.agendaDivider, { backgroundColor: colors.cardDivider }]} />
               )}
-              <View style={styles.agendaRow}>
-                {/* Time: aligned column on the left. */}
-                <Text style={[styles.agendaTime, { color: colors.textMuted }]} numberOfLines={1}>
-                  {time}
-                </Text>
-                {/* Icon tile: the same line icon the meal card wears, in a pale rounded tile. */}
-                <View style={[styles.agendaIcon, { backgroundColor: colors.surfaceVariant }]}>
-                  <MaterialIcon
-                    name={mealCategoryGlyph(slot.mealCategoryKey)}
-                    size={AGENDA_GLYPH_SIZE}
-                    color={colors.textSecondary}
-                  />
-                </View>
-                {/* Text: title over category + photo count (or category alone). */}
-                <View style={styles.copy}>
-                  <Text style={[styles.agendaTitle, { color: colors.text }]} numberOfLines={1}>
-                    {primary}
+              <View style={[styles.agendaRow, largeText && styles.agendaRowStacked]}>
+                <View style={[styles.agendaMain, largeText && styles.agendaMainStacked]}>
+                  {/* Time: aligned column on the left, widening with the text. */}
+                  <Text
+                    style={[
+                      styles.agendaTime,
+                      {
+                        color: colors.textSecondary,
+                        width: CAL.timeColumn * Math.max(1, fontScale),
+                      },
+                    ]}
+                    numberOfLines={1}>
+                    {time}
                   </Text>
-                  {hasDetail && (
-                    <View style={styles.agendaDetailRow}>
-                      {secondary !== '' && (
-                        <Text
-                          style={[styles.agendaDetail, { color: colors.textMuted }]}
-                          numberOfLines={1}>
-                          {secondary}
-                        </Text>
-                      )}
-                      {slot.photoCount > 0 && (
-                        <View style={styles.agendaPhotos}>
-                          <Icon name="camera-outline" size={12} color={colors.textMuted} />
-                          <Text style={[styles.agendaDetail, { color: colors.textMuted }]}>
-                            {slot.photoCount}
+                  {/* Icon tile: the same line icon the meal card wears. */}
+                  <View style={[styles.agendaIcon, { backgroundColor: colors.surfaceVariant }]}>
+                    <MaterialIcon
+                      name={mealCategoryGlyph(slot.mealCategoryKey)}
+                      size={AGENDA_GLYPH_SIZE}
+                      color={colors.textSecondary}
+                    />
+                  </View>
+                  {/* Text: title over category + photo count (or category alone).
+                      Two lines normally, unlimited at large text - the row grows. */}
+                  <View style={styles.copy}>
+                    <Text
+                      style={[styles.agendaTitle, { color: colors.text }]}
+                      numberOfLines={largeText ? undefined : 2}>
+                      {primary}
+                    </Text>
+                    {hasDetail && (
+                      <View style={styles.agendaDetailRow}>
+                        {secondary !== '' && (
+                          <Text
+                            style={[styles.agendaDetail, { color: colors.textSecondary }]}
+                            numberOfLines={largeText ? undefined : 1}>
+                            {secondary}
                           </Text>
-                        </View>
-                      )}
-                    </View>
-                  )}
+                        )}
+                        {slot.photoCount > 0 && (
+                          <View style={styles.agendaPhotos}>
+                            <Icon
+                              name="camera-outline"
+                              size={12}
+                              color={colors.textSecondary}
+                            />
+                            <Text style={[styles.agendaDetail, { color: colors.textSecondary }]}>
+                              {slot.photoCount}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
                 </View>
-                {/* Status badge: a soft pill on the right. */}
-                <View style={[styles.agendaPill, { backgroundColor: pill.fill }]}>
-                  <Text style={[styles.agendaPillText, { color: pill.ink }]}>
+                {/* Status badge: the real status, as a soft pill on the right. */}
+                <View
+                  style={[
+                    styles.agendaPill,
+                    largeText && styles.agendaPillStacked,
+                    { backgroundColor: pill.fill },
+                  ]}>
+                  <Text style={[styles.agendaPillText, { color: pill.ink }]} numberOfLines={1}>
                     {statusLabel(slot.status)}
                   </Text>
                 </View>
@@ -577,119 +719,89 @@ function statusLabel(status: MealStatus): string {
 
 const styles = StyleSheet.create({
   /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 6 },
-  pageHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  pageTitle: { ...pageTitleStyle },
+  content: { paddingHorizontal: metrics.pagePadding, paddingTop: 8 },
+  pageHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: 12,
+  },
+  pageTitle: { ...pageTitleStyle, flexShrink: 1 },
+  /** Large text: the head's two halves become two rows instead of colliding. */
+  headStacked: { flexDirection: 'column', alignItems: 'flex-start', rowGap: 8 },
   /**
-   * "Today" is a pale-indigo button with a calendar icon. Its corners are the
-   * SAME `radiusSmall` (10 pt) as the "Open day" chip below the grid, so the two
-   * accent actions on this page share one silhouette - the capsule it wore before
-   * was the only pill-shaped control on the page.
+   * The ONE control silhouette of this page: a WHITE chip with a 1 dp neutral
+   * frame, a 10 dp corner and a real 44 dp height - "Today" and "Open day" share
+   * it, so neither needs a filled accent block or a hit-slop trick.
    */
-  todayButton: {
+  outlineAction: {
+    minHeight: metrics.minTouch,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    // 36 + 4 pt hitSlop on every side = a 44 pt target without a taller chip.
-    minHeight: 36,
+    paddingVertical: 8,
     borderRadius: metrics.radiusSmall,
-  },
-  todayButtonText: {
-    fontSize: 13,
-    fontFamily: fonts.medium,
-  },
-  /** Month navigation + weekday grid + key form one compact surface. */
-  board: {
-    marginTop: 10,
-    borderRadius: 15,
     borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingTop: 2,
-    paddingBottom: 6,
   },
-  /** Month navigation: label on the left, arrows grouped on the right. */
+  actionText: { fontFamily: fonts.regular, fontSize: 14 },
+  /**
+   * The month board: a flat 16 dp surface - one hairline frame, NO elevation, and
+   * 10 dp of padding all round (the reference's card padding).
+   */
+  board: {
+    marginTop: 12,
+    borderRadius: CAL.cardRadius,
+    borderWidth: 1,
+    padding: CAL.cardPadding,
+  },
+  /** Month navigation: label on the left, two outlined arrows on the right. */
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 44,
+    columnGap: CAL.controlGap,
+    marginBottom: 4,
   },
   monthLabel: {
-    flex: 1,
-    minWidth: 0,
-    textAlign: 'left',
-    fontSize: 19,
-    fontFamily: fonts.bold,
-    letterSpacing: -0.4,
-  },
-  monthNav: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  /** 40 pt chip + 2 pt hitSlop = the 44 pt minimum target. */
-  monthArrow: {
-    width: 40,
-    height: 40,
-    borderRadius: metrics.radiusSmall,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /**
-   * The chip is a 36 pt capsule, not a 44 pt block: at the old `minTouch` height
-   * it read as a thick slab next to the two-line date. The touch target is kept
-   * by the 4 pt `hitSlop` on the Pressable (36 + 4 + 4 = 44), the same trade the
-   * "Today" chip above makes, so the button only LOOKS lighter than it feels.
-   */
-  openDay: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: metrics.radiusSmall,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 36,
-  },
-  openDayText: {
+    flexShrink: 1,
+    fontSize: CAL.monthSize,
     fontFamily: fonts.medium,
-    fontSize: 15,
+  },
+  monthNav: { flexDirection: 'row', columnGap: CAL.controlGap },
+  /** 44 x 44 outlined arrow: the real target, no hit slop needed. */
+  monthArrow: {
+    width: metrics.minTouch,
+    height: metrics.minTouch,
+    borderRadius: metrics.radiusSmall,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   weekHeader: { flexDirection: 'row' },
-  weekday: { flex: 1, textAlign: 'center', fontSize: 11, paddingVertical: 4 },
+  weekday: { flex: 1, textAlign: 'center', fontSize: CAL.weekdaySize, paddingVertical: 5 },
   /** Whole weeks of seven equal cells (no percentage drift). */
   grid: { rowGap: 1 },
   gridRow: { flexDirection: 'row' },
-  /** Cell = the day badge plus its five marks. 46 pt keeps a 44 pt+ target. */
-  cell: { flex: 1, minHeight: 46, alignItems: 'center', justifyContent: 'center', rowGap: 2 },
+  /** A cell is at least 44 dp tall (set per row); the width follows the seven columns. */
+  cell: { flex: 1, alignItems: 'center', justifyContent: 'center', rowGap: 3, paddingVertical: 1 },
   /**
-   * The day badge is a CIRCLE: a 32 pt round chip. Today RINGS it in the accent
-   * (the ordinary day ink inside), the selected day FILLS it - the same
-   * silhouette either way, and it stays round on every selection. Only the badge
-   * rounds; the cells keep their square grid so the columns stay aligned.
+   * The day badge is a CIRCLE whose size is set per render (32 dp at the default
+   * scale, larger with the system text). Today RINGS it in the accent (the
+   * ordinary day ink inside), the selected day FILLS it - the same silhouette
+   * either way, and it stays round on every selection.
    */
-  dayBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  dayBadge: { alignItems: 'center', justifyContent: 'center' },
   /**
    * The selected day's fill: one absolutely filled circle INSIDE the badge, so it
    * is mounted fresh when the day appears. A background painted on an already
    * mounted badge loses its corner radius on Android and the day showed as a
    * square after a month change; this child cannot, because it never survives a
-   * re-used cell (see the cell comment). The radius matches `dayBadge`.
+   * re-used cell (see the cell comment). Radius 100 keeps it a circle at any
+   * badge size.
    */
-  dayBadgeFill: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: 16,
-  },
+  dayBadgeFill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, borderRadius: 100 },
   /**
    * Today's ring: the same trick, one mounted outline instead of a `borderWidth`
    * that appears on a re-used cell (that is what used to square the outline off).
@@ -700,114 +812,143 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    borderRadius: 16,
+    borderRadius: 100,
     borderWidth: 1.5,
   },
-  dayNumber: { fontSize: 15, fontFamily: fonts.medium, fontVariant: ['tabular-nums'] },
-  /** Five slot marks in meal order: 5 x 5 pt dots, 2 pt apart (33 pt wide). */
-  marks: { flexDirection: 'row', alignItems: 'center', columnGap: 2, height: 5, maxWidth: '100%' },
-  mark: { width: 5, height: 5, borderRadius: 2.5 },
+  dayNumber: {
+    fontSize: 15,
+    fontFamily: fonts.medium,
+    fontVariant: ['tabular-nums'],
+  },
+  /** Five slot marks in meal order: 5 x 5 pt dots, 2 pt apart. */
+  marks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: CAL.dotGap,
+    height: CAL.dotSize,
+    maxWidth: '100%',
+  },
+  mark: { width: CAL.dotSize, height: CAL.dotSize, borderRadius: CAL.dotSize / 2 },
   /**
-   * Rule above the key: the board carries 8 dp horizontal padding and a 1 dp
-   * frame, so a 7 dp margin lands it exactly 16 dp in from the card's edge -
-   * the same inset as the meal dividers, in the same separator colour.
+   * Rule above the key: the board carries 10 dp of padding and a 1 dp frame, so a
+   * 4 dp margin lands it ~15 dp in from the card's edge - inset from BOTH edges,
+   * never a full-bleed line.
    */
-  boardDivider: { height: 1, marginHorizontal: 7 },
+  boardDivider: { height: 1, marginHorizontal: 4, marginTop: 8 },
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    // 12 dp of air under the rule; the key still sits close to the card floor.
-    paddingTop: 12,
-    paddingBottom: 8,
-    /**
-     * The legend starts where the first DATE COLUMN starts, not at the card's
-     * padding: the board carries 8 dp of padding and a 7-column grid, so the
-     * 32 pt day chip of the first column is centred ~10 dp into its cell
-     * ((51.7 - 32) / 2 on a 411 dp phone). 8 + 10 = 18 dp puts the first dot's
-     * left edge exactly under that chip - without the inset the key hung 6 dp
-     * to the left of every date above it (measured on the r6 screenshot).
-     */
-    paddingLeft: 10,
-    paddingRight: 4,
+    columnGap: 10,
+    rowGap: 4,
+    // 10 dp of air under the rule; the legend still sits close to the card floor.
+    paddingTop: 10,
+    paddingHorizontal: 4,
+    paddingBottom: 2,
     flexWrap: 'wrap',
   },
-  keyItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  keyDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  keyText: { fontSize: 13 },
+  keyItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  keyDot: { width: 6, height: 6, borderRadius: 3 },
+  keyText: { fontSize: CAL.legendSize },
   /** Separator + caption travel together, so a wrapped key never strands the rule. */
-  keyCaption: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' },
-  keySeparator: {
-    width: 1,
-    /**
-     * 16 pt instead of 12: at 12 the rule was shorter than the capital height of
-     * the "5 dots = 5 meals" caption beside it, so it read as a stray tick. At 16
-     * it spans the caption's line box and separates the two halves of the row.
-     */
-    height: 16,
-    marginRight: 6,
-    flexShrink: 0,
-  },
-  /** "5 dots = 5 meals" caption, pinned to the card's right edge like the mockup. */
-  footText: { fontSize: 12 },
-  /** Selected date + its counts, with the explicit Open day action. */
-  selectedRow: {
+  keyCaption: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 8 },
+  keySeparator: { width: 1, height: 16, flexShrink: 0 },
+  /** "5 dots = 5 meals" caption, pinned to the card's right edge. */
+  footText: { fontSize: CAL.legendSize },
+  /** Selected day: the heading row, then the full-width status/photo summary. */
+  selectedSection: { marginTop: CAL.selectedTopGap },
+  selectedHead: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     columnGap: 10,
-    marginTop: 12,
-    marginBottom: 6,
   },
+  /** The shared text column of an agenda row. */
   copy: { flex: 1, minWidth: 0 },
-  selectedTitle: { fontSize: 19, fontFamily: fonts.bold, lineHeight: 24 },
-  selectedDetail: { fontSize: 13, lineHeight: 17, marginTop: 2 },
-  /** Grouped agenda: time | icon | text | status badge. */
-  agenda: { borderRadius: 14, borderWidth: 1, overflow: 'hidden' },
+  selectedTitle: {
+    fontSize: CAL.selectedTitleSize,
+    fontFamily: fonts.medium,
+    flexShrink: 1,
+  },
+  summary: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: CAL.summaryGap,
+    rowGap: 6,
+    marginTop: 6,
+  },
+  summaryItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  summaryText: { fontFamily: fonts.regular, fontSize: CAL.summarySize },
+  /** Grouped agenda: time | icon | text | status badge, on a flat 16 dp surface. */
+  agenda: {
+    marginTop: CAL.agendaTopGap,
+    borderRadius: CAL.cardRadius,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
   /**
-   * The rule between two rows: a full 1 dp line in the card's separator token
-   * (cardDivider is one deliberate step stronger than `border`, so it stays
-   * visible on white and on the dark card). Full-bleed: no horizontal margin,
-   * so it spans the card from frame to frame without doubling the frame.
+   * The rule between two rows: a lighter 1 dp line in the card's separator token,
+   * INSET to the row gutters (14 dp) so it never touches the card's frame.
    */
-  agendaDivider: { height: 1 },
+  agendaDivider: { height: 1, marginHorizontal: CAL.agendaInset },
   agendaRow: {
+    minHeight: CAL.agendaRowMinHeight,
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 10,
-    minHeight: 58,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    columnGap: CAL.agendaRowGap,
+    paddingHorizontal: CAL.agendaInset,
+    paddingVertical: 10,
   },
+  /** Large text: the status pill drops under the row instead of squeezing it. */
+  agendaRowStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: 8 },
+  agendaMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: CAL.agendaRowGap,
+  },
+  agendaMainStacked: { flex: 0, width: '100%' },
   /** The meal slot's own icon, in the same tile shape as a meal card. */
   agendaIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
+    width: CAL.categoryTile,
+    height: CAL.categoryTile,
+    borderRadius: CAL.categoryRadius,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  agendaTime: { fontSize: 13, width: 44, fontVariant: ['tabular-nums'] },
-  agendaTitle: { fontSize: 15, fontFamily: fonts.medium, lineHeight: 20 },
-  /** Detail line: category text + optional photo count, on one row. */
-  agendaDetailRow: { flexDirection: 'row', alignItems: 'center', columnGap: 4, minWidth: 0 },
-  agendaDetail: { fontSize: 12, lineHeight: 16, flexShrink: 1 },
+  /** 44 dp column at the default scale; it widens with the system text. */
+  agendaTime: {
+    fontSize: CAL.timeSize,
+    fontVariant: ['tabular-nums'],
+    flexShrink: 0,
+  },
+  agendaTitle: {
+    fontSize: CAL.primarySize,
+    fontFamily: fonts.medium,
+    lineHeight: 20,
+  },
+  /** Detail line: category text + optional photo count, on one wrapping row. */
+  agendaDetailRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 4,
+    marginTop: 2,
+    minWidth: 0,
+  },
+  agendaDetail: { fontSize: CAL.secondarySize, lineHeight: 15, flexShrink: 1 },
   /** Camera glyph plus the photograph count, inline with the category. */
   agendaPhotos: { flexDirection: 'row', alignItems: 'center', columnGap: 3, flexShrink: 0 },
   /** Status badge: a soft pill on the right. */
   agendaPill: {
+    alignSelf: 'center',
     borderRadius: metrics.radiusPill,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 5,
     flexShrink: 0,
   },
-  agendaPillText: { fontSize: 12, fontFamily: fonts.medium },
+  agendaPillStacked: { alignSelf: 'flex-end' },
+  agendaPillText: { fontSize: CAL.statusSize, fontFamily: fonts.medium },
 });
 

@@ -17,15 +17,19 @@ import { t } from '../strings';
 import { type ThemeColors } from '../theme';
 
 /**
- * Tile edge in points. The strip has its own row above the action buttons, so
- * even the third picture keeps a comfortable size: three tiles + two gaps stay
- * well inside the narrowest phone card (a 360 pt screen leaves ~322 pt).
+ * Tile edge in points (the reference's 48 pt thumbnail). Exported so the CARD can
+ * measure the strip before deciding whether the text still has 120 pt beside it;
+ * three tiles and two 4 pt gaps are exactly 152 pt.
  */
-const TILE = 48;
+export const PHOTO_TILE = 48;
+
+/** Air between two thumbnails: 4 pt, the reference's tight strip. */
+export const PHOTO_GAP = 4;
 
 /**
  * Horizontal strip of thumbnails. The whole thumbnail is the single touch target
- * that opens the viewer; removal lives in the viewer, so no overlapping badges.
+ * that opens the viewer at THAT photo's index; removal lives in the viewer, so no
+ * overlapping badges, no "+N" tile and no extra upload tile exist here.
  */
 export function PhotoGallery(props: {
   photos: MealPhoto[];
@@ -67,12 +71,12 @@ export function PhotoGallery(props: {
 
 const styles = StyleSheet.create({
   host: { flexShrink: 0 },
-  /** One horizontal row, 6 pt between photographs, never wrapping. */
-  row: { flexDirection: 'row', columnGap: 6 },
+  /** One horizontal row, 4 pt between photographs, never wrapping or stacking. */
+  row: { flexDirection: 'row', columnGap: PHOTO_GAP },
   tileHost: {
-    width: TILE,
-    height: TILE,
-    borderRadius: 9,
+    width: PHOTO_TILE,
+    height: PHOTO_TILE,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
