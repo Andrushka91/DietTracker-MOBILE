@@ -408,6 +408,9 @@ export function CalendarScreen(props: {
           ))}
         </View>
 
+        {/* One matching rule above the key: 16 dp from the card's outer edge,
+            with ~12 dp of air before the legend. */}
+        <View style={[styles.boardDivider, { backgroundColor: colors.cardDivider }]} />
         {/* A single compact key row: done / missed / pending with their dots,
             a separator, then "5 dots = 5 meals". */}
         <View style={styles.keyRow}>
@@ -430,7 +433,7 @@ export function CalendarScreen(props: {
             </Text>
           </View>
           <View style={styles.keyCaption}>
-            <View style={[styles.keySeparator, { backgroundColor: colors.hairline }]} />
+            <View style={[styles.keySeparator, { backgroundColor: colors.cardDivider }]} />
             <Text style={[styles.footText, { color: colors.textMuted }]} numberOfLines={1}>
               {t('Rn_CalendarDots')}
             </Text>
@@ -693,11 +696,19 @@ const styles = StyleSheet.create({
   /** Five slot marks in meal order: 5 x 5 pt dots, 2 pt apart (33 pt wide). */
   marks: { flexDirection: 'row', alignItems: 'center', columnGap: 2, height: 5, maxWidth: '100%' },
   mark: { width: 5, height: 5, borderRadius: 2.5 },
+  /**
+   * Rule above the key: the board carries 8 dp horizontal padding and a 1 dp
+   * frame, so a 7 dp margin lands it exactly 16 dp in from the card's edge -
+   * the same inset as the meal dividers, in the same separator colour.
+   */
+  boardDivider: { height: 1, marginHorizontal: 7 },
   keyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 8,
+    // 12 dp of air under the rule; the key still sits close to the card floor.
+    paddingTop: 12,
+    paddingBottom: 8,
     paddingHorizontal: 4,
     flexWrap: 'wrap',
   },
@@ -733,10 +744,10 @@ const styles = StyleSheet.create({
   /**
    * The rule between two rows: a full 1 dp line in the card's separator token
    * (cardDivider is one deliberate step stronger than `border`, so it stays
-   * visible on white and on the dark card). Inset to the row gutters, so it
-   * lines up with the content and never doubles the card's own frame.
+   * visible on white and on the dark card). 15 dp margin + the 1 dp card frame
+   * = an identical 16 dp inset on both sides, so it never doubles the frame.
    */
-  agendaDivider: { height: 1, marginHorizontal: 14 },
+  agendaDivider: { height: 1, marginHorizontal: 15 },
   agendaRow: {
     flexDirection: 'row',
     alignItems: 'center',

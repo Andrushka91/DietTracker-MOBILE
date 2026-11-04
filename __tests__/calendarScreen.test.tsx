@@ -367,7 +367,12 @@ describe('the agenda of the selected day', () => {
 
   test('separates every pair of rows with one inset 1 dp divider', async () => {
     const { renderer } = await renderScreen(OTHER);
-    const dividers = renderer.root
+    const agenda = renderer.root.findAllByType(View).find((node) => {
+      const style = styleOf(node);
+      return style.borderRadius === 14 && style.borderWidth === 1;
+    });
+    expect(agenda).toBeDefined();
+    const dividers = agenda!
       .findAllByType(View)
       .map((node) => styleOf(node))
       .filter(
@@ -376,9 +381,24 @@ describe('the agenda of the selected day', () => {
     // Five rows -> four rules, none before the first row or after the last.
     expect(dividers).toHaveLength(4);
     for (const divider of dividers) {
-      // Inset to the row gutters on both sides: no double border at the card edge.
-      expect(divider.marginHorizontal).toBe(14);
+      // 15 dp margin + the 1 dp card frame = 16 dp from the card's edge.
+      expect(divider.marginHorizontal).toBe(15);
     }
+  });
+
+  test('draws one matching rule above the legend', async () => {
+    const { renderer } = await renderScreen(OTHER);
+    const rules = renderer.root
+      .findAllByType(View)
+      .map((node) => styleOf(node))
+      .filter(
+        (style) => style.height === 1 && style.backgroundColor === lightColors.cardDivider,
+      );
+    // Four between the meal rows + one above the key, all in the same colour.
+    expect(rules).toHaveLength(5);
+    expect(rules.filter((rule) => rule.marginHorizontal === 15)).toHaveLength(4);
+    // The board's 8 dp padding + 7 dp margin + 1 dp frame = the same 16 dp inset.
+    expect(rules.filter((rule) => rule.marginHorizontal === 7)).toHaveLength(1);
   });
 });
 
