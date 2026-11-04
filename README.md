@@ -875,6 +875,25 @@ npm start
     no longer carries a text field at all. Pinned by
     `__tests__/templateNamePrompt.test.tsx`, including the dashboard's wiring
     (no `inputDefaultValue`, no date fallback, max 100 characters).
+  * The **Templates page** follows the r3 mockup: the "Templates" heading keeps a
+    one-line subtitle ("Reuse a saved meal plan.") and the italic warning about
+    completion state and photographs became ONE quiet info strip
+    (`Rn_TemplateInfo` - a wash of the accent with the info glyph), because that
+    fact is context for the list, not an error about it. Each template is a
+    compact white card with a hairline frame and the shared card shadow: the
+    calendar glyph (or the meal's own category glyph for a single-meal template)
+    in a 40 pt tile, the real name over its update time, the kind badge, the REAL
+    meal count ("5 meals", counted from the stored payload), then a full-width
+    **Meal preview** accordion (label left, chevron right, thin dividers inset to
+    the 16 dp gutter above and below it) and ONE full-width **Apply to date**
+    button at the card's floor in both states - 44 pt tall, 12 pt corners, accent
+    fill, calendar glyph, semibold label. An expanded row reads time -> the
+    meal's own glyph -> the stored name over "category · description"; a slot
+    without a stored time shows the CATEGORY's planned time, which is what the
+    diary shows after applying, and no placeholder text is ever invented. The
+    page never stretches a card to fill the screen, and it never draws a status
+    pill, a counter or a photo chip: a template carries neither state nor
+    photographs (`__tests__/templatesScreen.test.tsx`).
   * The card state bar sits on the **top** edge of the card: the Windows card draws the
     same 4 px bar along its bottom border (`BorderThickness="1,1,1,4"`). On the phone the
     state colour is the card's **top border** (`borderTopWidth: metrics.stateBar` in

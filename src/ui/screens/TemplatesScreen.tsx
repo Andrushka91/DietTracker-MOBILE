@@ -1,8 +1,20 @@
-// Templates (spec 8.7) - list sorted by UpdatedAt desc; each row: name,
-// kind label (Meal / Day), summary, updated timestamp, "Apply to date"
-// button (defaults to today) -> status "Applied for {date}". Empty state
-// text + the notice caption. Applying merges into the target date as
-// PENDING entries. No destructive template management (parity with Windows).
+// Templates (spec 8.7) - the r3 mockup: a prominent "Templates" heading with a
+// one-line subtitle, ONE quiet info strip ("meal details only"), then one
+// compact white card per template.
+//
+// A card is the template and nothing else: the calendar (or meal) glyph, the
+// real name and its update time, the kind badge, the real number of meals, a
+// full-width "Meal preview" accordion and ONE full-width "Apply to date" button
+// that keeps the card's floor in both accordion states. The accordion is
+// read-only - it lists the STORED contents in the order the applier uses them
+// (time, the meal's own glyph, the category, then the stored title and
+// description when they exist) - and a template never carries completion state
+// or photographs, so no status pill, no done/missed counter and no photo chip
+// can ever appear on this page.
+//
+// Behaviour is untouched: the list is sorted by UpdatedAt desc, applying opens
+// the same validated yyyy-MM-dd prompt (today pre-filled) and merges the
+// template into the target date as PENDING entries.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -14,13 +26,22 @@ import { getTemplates } from '../../data/repositories';
 import { applyTemplate, ensureCategories } from '../../services/mealTracking';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
-import { BarButton } from '../components/buttons';
 import { PromptDialog } from '../components/dialogs';
-import { Icon } from '../components/icons';
-import { fonts, metrics, pageTitleStyle, cardShadow, themeColors } from '../theme';
+import { Icon, MaterialIcon } from '../components/icons';
+import { mealCategoryGlyph } from '../mealGlyphs';
+import {
+  cardShadow,
+  fonts,
+  metrics,
+  pageTitleStyle,
+  themeColors,
+  tintAlpha,
+  typeScale,
+} from '../theme';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
 import { dateDraft, dateInputProblem, isCalendarDate, DATE_INPUT_LENGTH } from '../dates';
+
 
 /**
  * Date prompt for "Apply to date" (spec 8.7). The Windows app shows a
@@ -126,10 +147,32 @@ export function TemplatesScreen(): React.JSX.Element {
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       <Text style={[styles.pageTitle, { color: colors.text }]}>{t('Nav_Templates')}</Text>
-      <Text style={[styles.notice, { color: colors.textMuted }]}>{t('Template_Notice')}</Text>
+      <Text style={[styles.subtitle, { color: colors.textMuted }]} numberOfLines={2}>
+        {t('Rn_TemplateSubtitle')}
+      </Text>
+
+      {/* ONE quiet strip where the italic warning used to be: the same fact
+          ("no state, no photos") as a pale wash of the one accent, so it reads
+          as context for the list instead of as an error about it. */}
+      <View
+        style={[
+          styles.infoStrip,
+          { backgroundColor: tintAlpha(colors.accent, app.isDark ? '2E' : '14') },
+        ]}>
+        <Icon name="information-circle-outline" size={18} color={colors.textSecondary} />
+        <Text style={[styles.infoText, { color: colors.textSecondary }]} numberOfLines={2}>
+          {t('Rn_TemplateInfo')}
+        </Text>
+      </View>
 
       {templates.length === 0 && (
-        <View style={[styles.panel, styles.emptyPanel, cardShadow, { backgroundColor: colors.cardFill }]}>
+        <View
+          style={[
+            styles.card,
+            styles.emptyPanel,
+            cardShadow,
+            { backgroundColor: colors.cardFill, borderColor: colors.border },
+          ]}>
           <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceVariant }]}>
             <Icon name="layers-outline" size={24} color={colors.textMuted} />
           </View>
@@ -140,60 +183,92 @@ export function TemplatesScreen(): React.JSX.Element {
       {templates.map((template) => {
         const open = expanded.includes(template.id);
         const contents = templateContents(template);
+        /** Single-meal templates wear their own category's glyph in the tile. */
+        const slotKey =
+          template.templateMealSlot ?? template.templateMeal?.mealCategoryKey ?? null;
         return (
         <View
           key={template.id}
-          style={[styles.panel, cardShadow, { backgroundColor: colors.cardFill, borderColor: colors.border }]}>
-          <View style={styles.row}>
+          style={[
+            styles.card,
+            cardShadow,
+            { backgroundColor: colors.cardFill, borderColor: colors.border },
+          ]}>
+          {/* Header: the kind's glyph, the real name over its update time, and
+              the kind badge pinned to the right. */}
+          <View style={styles.header}>
             <View style={[styles.tile, { backgroundColor: colors.surfaceVariant }]}>
-              <Icon
-                name={template.isFullDay ? 'calendar-outline' : 'restaurant-outline'}
-                size={20}
-                color={colors.textSecondary}
-              />
+              {template.isFullDay ? (
+                <MaterialIcon
+                  name="calendar-month-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+              ) : slotKey === null ? (
+                <Icon name="restaurant-outline" size={20} color={colors.textSecondary} />
+              ) : (
+                <MaterialIcon
+                  name={mealCategoryGlyph(slotKey)}
+                  size={20}
+                  color={colors.textSecondary}
+                />
+              )}
             </View>
-            <View style={styles.heading}>
-              <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+            <View style={styles.headerText}>
+              {/* Two lines: at large text sizes the date must WRAP, not be cut
+                  to "30 October 20…" by the badge beside it. */}
+              <Text style={[styles.name, { color: colors.text }]} numberOfLines={2}>
                 {isCalendarDate(template.name) ? formatMediumDate(template.name) : template.name}
               </Text>
               <Text style={[styles.updated, { color: colors.textMuted }]} numberOfLines={1}>
                 {formatUpdated(template.updatedAt, isCalendarDate(template.name))}
               </Text>
             </View>
-            <View style={[styles.kind, { backgroundColor: colors.surfaceVariant }]}>
-              <Text style={{ color: colors.textSecondary, fontSize: 11, fontFamily: fonts.medium }}>
+            <View style={[styles.badge, { backgroundColor: colors.surfaceVariant }]}>
+              <Text style={[styles.badgeText, { color: colors.textSecondary }]} numberOfLines={1}>
                 {template.isFullDay ? t('Template_KindDay') : t('Template_KindMeal')}
               </Text>
             </View>
           </View>
-          <Text style={[styles.summary, { color: colors.textSecondary }]} numberOfLines={2}>
-            {template.isFullDay
-              ? tFmt('Template_DaySummary', template.templateDay.length)
-              : (template.templateMeal?.title ?? '')}
+
+          {/* The real number of stored meals, counted from the payload. */}
+          <Text style={[styles.count, { color: colors.textMuted }]} numberOfLines={1}>
+            {contents.length === 1
+              ? t('Rn_TemplateMealCountOne')
+              : tFmt('Rn_TemplateMealCount', contents.length)}
           </Text>
           {/* Read-only contents, so the day's meals can be inspected before
               anything is written into the diary. The rows come from the stored
-              template payload, not from a prototype. */}
+              template payload, not from a prototype.
+
+              Dividers: one above the accordion, one under it (which becomes the
+              first meal row's top rule when the panel is open), and one between
+              every pair of rows - all inset to the card's 16 dp gutter. */}
           {contents.length > 0 && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('Rn_TemplatePreview')}
-              accessibilityState={{ expanded: open }}
-              onPress={() => togglePreview(template.id)}
-              style={[styles.previewToggle, { borderTopColor: colors.hairline }]}>
-              <Text style={[styles.previewToggleText, { color: colors.accent }]}>
-                {open ? t('Rn_TemplatePreviewHide') : t('Rn_TemplatePreview')}
-              </Text>
-              <Icon
-                name={open ? 'chevron-up' : 'chevron-down'}
-                size={14}
-                color={colors.accent}
-              />
-            </Pressable>
+            <>
+              <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Rn_TemplateMealPreview')}
+                accessibilityState={{ expanded: open }}
+                onPress={() => togglePreview(template.id)}
+                style={({ pressed }) => [
+                  styles.previewToggle,
+                  pressed && { backgroundColor: colors.surfaceVariant },
+                ]}>
+                <Text style={[styles.previewToggleText, { color: colors.text }]} numberOfLines={1}>
+                  {t('Rn_TemplateMealPreview')}
+                </Text>
+                <Icon
+                  name={open ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </Pressable>
+            </>
           )}
-          {open && (
-            <View style={styles.preview}>
-              {contents.map((content) => {
+          {open
+            ? contents.map((content) => {
                 const category = categories.find(
                   (candidate) => candidate.fixedCategoryKey === content.mealCategoryKey,
                 );
@@ -201,41 +276,86 @@ export function TemplatesScreen(): React.JSX.Element {
                   category !== undefined && category.name !== ''
                     ? category.name
                     : t(mealNameKey(content.mealCategoryKey));
-                const time = formatTime(content.plannedTime, app.use12HourClock);
+                /**
+                 * The EFFECTIVE planned time, exactly as the calendar's agenda
+                 * resolves it: the template's own stored time, else the
+                 * category's planned time (which is what the diary shows for a
+                 * slot without one). Only a slot whose category is unknown falls
+                 * back to the "no time" caption.
+                 */
+                const time = formatTime(
+                  content.plannedTime ?? (category !== undefined ? category.defaultTime : null),
+                  app.use12HourClock,
+                );
+                /**
+                 * Hierarchy: the meal's own NAME leads when it has one, with the
+                 * category and the stored description on the meta line under it
+                 * ("Breakfast · with berries"); a slot without a name leads with
+                 * its CATEGORY and shows the description underneath. The category
+                 * is always printed (it is never blank), so a row can never read
+                 * as an anonymous glyph, and nothing is invented.
+                 */
+                const hasTitle = content.title !== '';
+                const primary = hasTitle ? content.title : categoryName;
+                const details = hasTitle
+                  ? content.ingredients === ''
+                    ? categoryName
+                    : `${categoryName} · ${content.ingredients}`
+                  : content.ingredients;
                 return (
-                  <View
-                    key={content.mealCategoryKey}
-                    style={[styles.previewRow, { borderTopColor: colors.hairline }]}>
-                    <View style={styles.previewCopy}>
-                      <Text style={[styles.previewCategory, { color: colors.textMuted }]}>
-                        {categoryName}
+                  <View key={content.mealCategoryKey}>
+                    <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
+                    <View style={styles.previewRow}>
+                      <Text style={[styles.previewTime, { color: colors.textMuted }]} numberOfLines={1}>
+                        {time === '' ? t('Rn_TemplateNoTime') : time}
                       </Text>
-                      <Text
-                        style={[styles.previewTitle, { color: colors.text }]}
-                        numberOfLines={1}>
-                        {content.title !== ''
-                          ? content.title
-                          : content.ingredients !== ''
-                            ? content.ingredients
-                            : t('Rn_TemplateNoTitle')}
-                      </Text>
+                      <View style={[styles.previewIcon, { backgroundColor: colors.surfaceVariant }]}>
+                        <MaterialIcon
+                          name={mealCategoryGlyph(content.mealCategoryKey)}
+                          size={18}
+                          color={colors.textSecondary}
+                        />
+                      </View>
+                      <View style={styles.previewCopy}>
+                        <Text style={[styles.previewTitle, { color: colors.text }]} numberOfLines={1}>
+                          {primary}
+                        </Text>
+                        {details !== '' && (
+                          <Text
+                            style={[styles.previewDetail, { color: colors.textMuted }]}
+                            numberOfLines={1}>
+                            {details}
+                          </Text>
+                        )}
+                      </View>
                     </View>
-                    <Text style={[styles.previewTime, { color: colors.textMuted }]}>
-                      {time === '' ? t('Rn_TemplateNoTime') : time}
-                    </Text>
                   </View>
                 );
-              })}
-            </View>
-          )}
+              })
+            : contents.length > 0 && (
+                <View style={[styles.divider, { backgroundColor: colors.hairline }]} />
+              )}
+          {/* ONE full-width action at the card's floor, in both states. */}
           <View style={styles.actions}>
-            <BarButton
-              compact
-              label={t('Template_Apply')}
-              accent
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('Template_Apply')}
               onPress={() => requestApply(template)}
-              colors={colors}
-            />
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.apply,
+                { backgroundColor: colors.accentFill },
+                pressed && { opacity: 0.85 },
+              ]}>
+              <MaterialIcon
+                name="calendar-month-outline"
+                size={18}
+                color={colors.accentFillText}
+              />
+              <Text style={[styles.applyText, { color: colors.accentFillText }]} numberOfLines={1}>
+                {t('Template_Apply')}
+              </Text>
+            </Pressable>
           </View>
         </View>
         );
@@ -280,13 +400,40 @@ export function TemplatesScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: metrics.pagePadding, rowGap: metrics.gridGap },
+  /** Page frame; the bottom padding is computed at render time (tab bar). */
+  content: { padding: metrics.pagePadding },
   pageTitle: { ...pageTitleStyle },
-  notice: { fontSize: 12, fontStyle: 'italic', lineHeight: 17 },
-  panel: {
+  /**
+   * One quiet line under the heading - the page's only explanation. It keeps the
+   * italic the mockup draws (the same slant the notice used to wear) but not its
+   * warning tone.
+   */
+  subtitle: { fontSize: typeScale.subheadline, lineHeight: 20, marginTop: 2, fontStyle: 'italic' },
+  /**
+   * The info strip: a wash of the one accent (tinted at render time, so it
+   * follows light/dark), the info glyph and one wrapping line. No border - the
+   * wash alone separates it from the page.
+   */
+  infoStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 8,
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: metrics.radiusSmall,
+  },
+  infoText: { flex: 1, minWidth: 0, fontSize: typeScale.footnote, lineHeight: 18 },
+  /**
+   * ONE template: a white card with a hairline frame and a soft shadow. It has
+   * NO padding of its own - every section below carries the 16 dp gutter, so the
+   * dividers can sit 16 dp in from the frame while the card's own top and bottom
+   * stay tight.
+   */
+  card: {
+    marginTop: 14,
     borderRadius: metrics.radius,
     borderWidth: metrics.cardBorder,
-    padding: 16,
     ...cardShadow,
   },
   /** Empty state: an icon in a soft tile, then the sentence, centred together. */
@@ -299,45 +446,91 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   empty: { fontSize: 14, textAlign: 'center', lineHeight: 19 },
-  row: { flexDirection: 'row', alignItems: 'center', columnGap: 10 },
-  /** Soft tile behind the template kind glyph - same treatment as a meal icon. */
+  /** Header: glyph tile | name over update time | kind badge. */
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  /** Soft tile behind the kind glyph - the same treatment as a meal icon. */
   tile: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: metrics.radiusSmall,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heading: { flex: 1 },
-  name: { fontSize: 16, fontFamily: fonts.medium, letterSpacing: -0.1 },
-  kind: { borderRadius: metrics.radiusPill, paddingHorizontal: 9, paddingVertical: 4 },
-  summary: { fontSize: 14, lineHeight: 19, marginTop: 10 },
-  /** "Preview contents" disclosure: a quiet accent row above the apply button. */
+  headerText: { flex: 1, minWidth: 0 },
+  name: { fontSize: typeScale.headline, fontFamily: fonts.medium, letterSpacing: -0.2 },
+  updated: { fontSize: typeScale.footnote, lineHeight: 17, marginTop: 1 },
+  badge: {
+    borderRadius: metrics.radiusPill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexShrink: 0,
+  },
+  badgeText: { fontSize: typeScale.caption, fontFamily: fonts.medium },
+  /** The real meal count: one quiet line, 8 dp under the header, 12 dp of air. */
+  count: { fontSize: 14, lineHeight: 19, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  /** A hairline inset to the card's 16 dp gutter (never the frame itself). */
+  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 16 },
+  /** "Meal preview": a full-width 44 pt row, label left, chevron right. */
   previewToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 4,
-    minHeight: 44,
-    marginTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 4,
+    columnGap: 8,
+    minHeight: metrics.minTouch,
+    paddingHorizontal: 16,
   },
-  previewToggleText: { fontSize: 12, fontFamily: fonts.medium },
-  preview: { marginTop: 2 },
-  /** One read-only meal: category over its title, planned time on the right. */
+  previewToggleText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: typeScale.subheadline,
+    fontFamily: fonts.medium,
+  },
+  /** One read-only meal: time | glyph tile | category over its stored detail. */
   previewRow: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 10,
-    minHeight: 40,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 6,
+    minHeight: metrics.minTouch,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  previewTime: {
+    fontSize: typeScale.footnote,
+    fontVariant: ['tabular-nums'],
+    minWidth: 44,
+    flexShrink: 0,
+  },
+  previewIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   previewCopy: { flex: 1, minWidth: 0 },
-  previewCategory: { fontSize: 11, lineHeight: 15 },
-  previewTitle: { fontSize: 13, lineHeight: 18, fontFamily: fonts.medium },
-  previewTime: { fontSize: 12, fontVariant: ['tabular-nums'], flexShrink: 0 },
-  updated: { fontSize: 12, marginTop: 2 },
-  actions: { flexDirection: 'row', marginTop: 12 },
-  status: { fontSize: 13, fontFamily: fonts.medium },
+  previewTitle: { fontSize: typeScale.subheadline, lineHeight: 20 },
+  previewDetail: { fontSize: typeScale.caption, lineHeight: 16, marginTop: 1 },
+  /** The action block: 12 dp of air above, the 16 dp gutter, 16 dp below. */
+  actions: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
+  /**
+   * The ONE primary action, full width in both accordion states: 44 pt tall, the
+   * accent fill and a 12 pt corner (the mockup's button radius - deliberately
+   * rounder than `radiusSmall`, so it reads as the page's primary control).
+   */
+  apply: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    columnGap: 8,
+    minHeight: metrics.minTouch,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+  },
+  applyText: { fontSize: typeScale.subheadline, fontFamily: fonts.medium },
+  status: { fontSize: typeScale.footnote, fontFamily: fonts.medium, marginTop: 12 },
 });

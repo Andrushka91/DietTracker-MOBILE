@@ -174,10 +174,17 @@ export const RN_STRINGS: Record<string, string> = {
    */
   Rn_ClearMealBody: "This clears the meal's details and status, and deletes all attached photos.",
   Rn_ClearMealWarning: "This can't be undone.",
-  /** Read-only template contents, inspected before anything is applied. */
-  Rn_TemplatePreview: 'Preview contents',
-  Rn_TemplatePreviewHide: 'Hide contents',
-  Rn_TemplateNoTitle: 'No meal name',
+  /**
+   * Templates page (the r3 mockup): the subtitle under the heading, the quiet
+   * info strip that replaced the italic warning, the accordion label and the
+   * REAL meal count ("5 meals"). A template is read-only, so the only fallback
+   * left is a slot whose stored time is blank.
+   */
+  Rn_TemplateSubtitle: 'Reuse a saved meal plan.',
+  Rn_TemplateInfo: 'Meal details only — no status or photos',
+  Rn_TemplateMealPreview: 'Meal preview',
+  Rn_TemplateMealCount: '{0} meals',
+  Rn_TemplateMealCountOne: '1 meal',
   Rn_TemplateNoTime: 'No time',
   /** Statistics: shown instead of another period's totals while one settles. */
   Rn_StatLoading: 'Loading statistics…',
