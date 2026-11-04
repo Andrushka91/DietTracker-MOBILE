@@ -11,9 +11,20 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput } from 'react-native';
 
 import { ChoiceDialog, ConfirmDialog, LoadingSheet, PromptDialog } from '../src/ui/components/dialogs';
-import { dateDraft, DATE_INPUT_LENGTH } from '../src/ui/dates';
+import { dateDraft, dateInputProblem, DATE_INPUT_LENGTH } from '../src/ui/dates';
 import { t } from '../src/ui/strings';
 import { fonts, lightColors, typeScale } from '../src/ui/theme';
+
+/**
+ * The compact Apply-template sheet stacks its two answers at full width below
+ * 350 dp or above a 1.15 font scale. RN's jest window reports fontScale 2, so
+ * the width-dependent cases set it explicitly here.
+ */
+const mockWindow = { width: 390, height: 844, scale: 3, fontScale: 1 };
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => mockWindow,
+}));
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -715,6 +726,196 @@ describe('the account sync sheet', () => {
     );
     expect(renderer.root.findAllByType(ActivityIndicator)).toHaveLength(1);
     expect(styleOf(textOf(renderer, 'Synchronizing your data…')).fontSize).toBe(15);
+  });
+});
+
+/**
+ * The compact Apply-template sheet (`layout: 'template-date'`) - the r3 reference
+ * form, used ONLY by Templates. It is the SAME value/error state, mask, validator
+ * and callbacks as the default prompt; only the chrome differs. These tests pin
+ * that chrome (badge, real summary, labelled field, Today, hint, answers) and
+ * re-check the semantics that must never regress: an invalid date keeps the sheet
+ * open and applies nothing, Today only fills, and every dismissal applies nothing.
+ */
+describe('the compact Apply-template sheet', () => {
+  beforeEach(() => {
+    mockWindow.width = 390;
+    mockWindow.fontScale = 1;
+  });
+
+  function styleOf(node: TestRenderer.ReactTestInstance): Record<string, unknown> {
+    const style = node.props.style;
+    const resolved = typeof style === 'function' ? style({ pressed: false }) : style;
+    return (StyleSheet.flatten(resolved) ?? {}) as Record<string, unknown>;
+  }
+
+  function texts(renderer: Renderer): string[] {
+    return renderer.root
+      .findAllByType(Text)
+      .map((node) => node.props.children)
+      .filter((value): value is string => typeof value === 'string');
+  }
+
+  const dateError = (value: string): string | null =>
+    dateInputProblem(value) === null ? null : t('Rn_TemplateDateRequired');
+
+  function renderSheet(initialValue = '2026-11-02') {
+    const onCancel = jest.fn();
+    const onConfirm = jest.fn();
+    const renderer = render(
+      <PromptDialog
+        isDark={false}
+        request={{
+          layout: 'template-date',
+          title: t('Template_ApplyTitle'),
+          message: t('Rn_TemplateDatePrompt'),
+          contextLabel: 'Full day · 5 meals',
+          fieldLabel: t('Rn_TemplateDateLabel'),
+          formatHint: t('Rn_TemplateDateFormatHint'),
+          initialValue,
+          cancelText: t('Common_Cancel'),
+          confirmText: t('Rn_TemplateApplyConfirm'),
+          today: { label: t('Calendar_Today'), value: '2026-11-04' },
+          keyboardType: 'number-pad',
+          sanitize: dateDraft,
+          maxLength: DATE_INPUT_LENGTH,
+          validate: dateError,
+          onCancel,
+          onConfirm,
+        }}
+      />,
+    );
+    return { renderer, onCancel, onConfirm };
+  }
+
+  test('draws the badge, the real summary, the labelled field and the answers', () => {
+    const { renderer } = renderSheet();
+    const printed = texts(renderer);
+
+    // Title, the REAL template summary, the field label, Today and the hint.
+    expect(printed).toContain(t('Template_ApplyTitle'));
+    expect(printed).toContain('Full day · 5 meals');
+    expect(printed).toContain(t('Rn_TemplateDateLabel'));
+    expect(printed).toContain(t('Calendar_Today'));
+    expect(printed).toContain(t('Rn_TemplateDateFormatHint'));
+    expect(printed).not.toContain(t('Rn_TemplateDatePrompt'));
+
+    // The compact sheet: 520 dp cap, 24 pt corners.
+    const card = styleOf(
+      renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-card').pop()!,
+    );
+    expect(card.maxWidth).toBe(520);
+    expect(card.borderTopLeftRadius).toBe(24);
+
+    // The date field: 48 pt tall, 12 pt corners, a 1 pt frame with the calendar
+    // glyph and the editable ISO value inside it.
+    const input = renderer.root.findByType(TextInput);
+    const field = styleOf(input.parent!);
+    expect(field.minHeight).toBe(48);
+    expect(field.borderRadius).toBe(12);
+    expect(field.borderWidth).toBe(1);
+    expect(field.borderColor).toBe(lightColors.border);
+    expect(styleOf(input).fontSize).toBe(17);
+    expect(input.props.keyboardType).toBe('number-pad');
+    expect(input.props.maxLength).toBe(DATE_INPUT_LENGTH);
+
+    // Cancel is outlined on the left, Apply is filled and wider (1 : 1.8).
+    const cancel = styleOf(pressable(renderer, t('Common_Cancel')));
+    const apply = styleOf(pressable(renderer, t('Rn_TemplateApplyConfirm')));
+    expect(cancel.minHeight).toBe(48);
+    expect(cancel.borderRadius).toBe(12);
+    expect(cancel.borderWidth).toBe(1);
+    expect(cancel.borderColor).toBe(lightColors.border);
+    expect(cancel.backgroundColor).toBe(lightColors.surface);
+    expect(apply.minHeight).toBe(48);
+    expect(apply.backgroundColor).toBe(lightColors.accentFill);
+    expect(cancel.width).toBe(121.43);
+    expect(apply.width).toBe(218.57);
+    expect((cancel.width as number) + (apply.width as number)).toBeCloseTo(340, 5);
+  });
+
+  test('an invalid date keeps the sheet open, explains why and applies nothing', () => {
+    const { renderer, onCancel, onConfirm } = renderSheet('');
+    act(() => pressable(renderer, t('Rn_TemplateApplyConfirm')).props.onPress());
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    // The form is still there, with the reason beside the field.
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(1);
+    expect(
+      renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-error').length,
+    ).toBeGreaterThan(0);
+    expect(texts(renderer)).toContain(t('Rn_TemplateDateRequired'));
+    // ...and the hint gives way to the error, so only one line is shown.
+    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateFormatHint'));
+  });
+
+
+
+  test('Today only fills the field; the user still applies it', () => {
+    const { renderer, onConfirm } = renderSheet('');
+    act(() => pressable(renderer, t('Calendar_Today')).props.onPress());
+    expect(renderer.root.findByType(TextInput).props.value).toBe('2026-11-04');
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    act(() => pressable(renderer, t('Rn_TemplateApplyConfirm')).props.onPress());
+    expect(onConfirm).toHaveBeenCalledWith('2026-11-04');
+  });
+
+  test('Cancel and the close X dismiss without applying', () => {
+    const { renderer, onCancel, onConfirm } = renderSheet();
+    act(() => pressable(renderer, t('Common_Cancel')).props.onPress());
+    act(() => pressable(renderer, t('Common_Close')).props.onPress());
+    act(() => renderer.root.findByType(Modal).props.onRequestClose());
+
+    expect(onCancel).toHaveBeenCalledTimes(3);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  test('stacks both answers at full width on a narrow screen or large text', () => {
+    mockWindow.width = 320;
+    const narrow = renderSheet();
+    expect(styleOf(pressable(narrow.renderer, t('Common_Cancel'))).width).toBe('100%');
+    expect(styleOf(pressable(narrow.renderer, t('Rn_TemplateApplyConfirm'))).width).toBe('100%');
+
+    mockWindow.width = 390;
+    mockWindow.fontScale = 1.5;
+    const large = renderSheet();
+    expect(styleOf(pressable(large.renderer, t('Common_Cancel'))).width).toBe('100%');
+
+    // Back at a phone width with normal text, they sit side by side again and
+    // share the row as the reference's 1 : 1.8.
+    mockWindow.fontScale = 1;
+    const wide = renderSheet();
+    const wideCancel = styleOf(pressable(wide.renderer, t('Common_Cancel'))).width as number;
+    const wideApply = styleOf(pressable(wide.renderer, t('Rn_TemplateApplyConfirm'))).width as number;
+    expect(wideCancel).toBe(121.43);
+    expect(wideApply).toBe(218.57);
+    expect(wideApply / wideCancel).toBeCloseTo(1.8, 2);
+  });
+
+  test('keeps the default prompt (template naming) on its own rows', () => {
+    // The variant is opt-in: without `layout` the shared form is untouched.
+    const renderer = render(
+      <PromptDialog
+        isDark={false}
+        request={{
+          title: t('Dashboard_SaveDayTemplate'),
+          message: t('Common_EnterName'),
+          initialValue: '',
+          cancelText: t('Common_Cancel'),
+          confirmText: t('Common_Save'),
+          validate: () => null,
+          onCancel: () => undefined,
+          onConfirm: () => undefined,
+        }}
+      />,
+    );
+    expect(styleOf(pressable(renderer, t('Common_Save'))).minHeight).toBe(52);
+    expect(styleOf(pressable(renderer, t('Common_Cancel'))).minHeight).toBe(52);
+    // No date chrome leaks into it: no field label, no format hint.
+    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateLabel'));
+    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateFormatHint'));
   });
 });
 

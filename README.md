@@ -260,6 +260,12 @@ Layout facts worth knowing:
   target).
 * **Templates** — compact cards with a “Meal preview” accordion and one
   full-width **Apply to date** button; a template carries no state or photos.
+  Applying opens the **compact date sheet** (`PromptDialog`'s opt-in
+  `layout: 'template-date'`): a calendar badge, the real template name and meal
+  count, a “Date to apply” label with a **Today** shortcut (fills the field only),
+  a 48 pt outlined date field with its `YYYY-MM-DD` hint (replaced in place by the
+  validation error), and a 1 : 1.8 **Cancel / Apply template** pair that stacks at
+  full width below 350 dp or above a 1.15 font scale.
 * **Calendar** — month grid with five state dots per recorded day plus a key, day
   rows under the grid, “Open day” as a 36 pt capsule, today = hollow accent ring,
   selected day = accent fill.

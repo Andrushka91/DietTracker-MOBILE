@@ -168,6 +168,9 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_TemplateDateRequired: 'Enter a date first.',
   Rn_TemplateDateFormat: 'Use the format yyyy-MM-dd, for example 2026-11-02.',
   Rn_TemplateDateImpossible: 'That day does not exist. Check the day and the month.',
+  /** Apply-template sheet (r3 reference): the field label and its format hint. */
+  Rn_TemplateDateLabel: 'Date to apply',
+  Rn_TemplateDateFormatHint: 'YYYY-MM-DD',
   /**
    * Save-as-template name prompt: a name is required. The field starts empty and
    * the day's date is never suggested or used as a fallback.

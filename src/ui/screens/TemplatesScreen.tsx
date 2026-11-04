@@ -138,6 +138,21 @@ export function TemplatesScreen(): React.JSX.Element {
     setExpanded((open) => (open.includes(id) ? open.filter((key) => key !== id) : [...open, id]));
   };
 
+  /**
+   * The Apply sheet's summary: the SAME name the card prints (a template named
+   * after its day is shown as a long date) plus the real meal count, in the
+   * card's own singular/plural wording. Nothing is invented when no template is
+   * selected - the sheet is not mounted then.
+   */
+  const applyingSummary =
+    applying === null
+      ? ''
+      : `${isCalendarDate(applying.name) ? formatMediumDate(applying.name) : applying.name} · ${
+          templateContents(applying).length === 1
+            ? t('Rn_TemplateMealCountOne')
+            : tFmt('Rn_TemplateMealCount', templateContents(applying).length)
+        }`;
+
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
@@ -366,8 +381,17 @@ export function TemplatesScreen(): React.JSX.Element {
         <PromptDialog
           isDark={app.isDark}
           request={{
+            // The compact Apply-template sheet (r3 reference). Every other
+            // prompt - the template NAME prompt included - keeps the default
+            // layout, because this variant is opt-in per call site.
+            layout: 'template-date',
             title: t('Template_ApplyTitle'),
+            // The input's accessible name and the fallback hint; the sheet shows
+            // the template summary under the title and a visible field label.
             message: t('Rn_TemplateDatePrompt'),
+            contextLabel: applyingSummary,
+            fieldLabel: t('Rn_TemplateDateLabel'),
+            formatHint: t('Rn_TemplateDateFormatHint'),
             initialValue: formatDate(new Date()),
             cancelText: t('Common_Cancel'),
             // "Apply template", not a generic OK: the action writes five meals.

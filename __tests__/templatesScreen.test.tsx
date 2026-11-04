@@ -17,7 +17,7 @@ import { MealCategoryKey, SyncStatus } from '../src/domain/enums';
 import { MealTemplate, MealTemplateContent } from '../src/domain/models';
 import { formatDate } from '../src/domain/analytics';
 import { TemplatesScreen } from '../src/ui/screens/TemplatesScreen';
-import { t, tFmt } from '../src/ui/strings';
+import { formatMediumDate, t, tFmt } from '../src/ui/strings';
 
 /** ONE stable app object, mutable per test (the theme). */
 const mockApp = {
@@ -291,7 +291,14 @@ describe('applying', () => {
     act(() => applyButtons(renderer)[0].props.onPress());
     const field = renderer.root.findByType(TextInput);
     expect(field.props.value).toBe(formatDate(new Date()));
-    expect(texts(renderer)).toContain(t('Rn_TemplateDatePrompt'));
+    // The compact sheet names the real template (a day-named one as a long
+    // date, exactly like the card) and counts its real meals.
+    expect(texts(renderer)).toContain(
+      `${formatMediumDate(DAY_TEMPLATE.name)} · ${tFmt('Rn_TemplateMealCount', 5)}`,
+    );
+    // ...and it labels the field it asks for, with the format under it.
+    expect(texts(renderer)).toContain(t('Rn_TemplateDateLabel'));
+    expect(texts(renderer)).toContain(t('Rn_TemplateDateFormatHint'));
   });
 
   test('writes the template into the typed date', async () => {

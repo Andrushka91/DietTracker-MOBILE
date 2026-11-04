@@ -16,8 +16,21 @@
 // `layout: 'card'` - where a badge, centered copy, a tinted note and two pill
 // answers say more in less space.
 
-import React, { useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type TextInputProps,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -47,39 +60,97 @@ export function DialogSheet(props: {
   caption?: string;
   isDark: boolean;
   onDismiss: () => void;
+  /**
+   * Opt-in chrome. `default` is the shared question sheet every caller draws.
+   * `template-date` is the compact Apply-template form: a narrower sheet with
+   * 24 pt corners, a leading badge in the header, a scrollable body and keyboard
+   * avoidance. It changes the PRESENTATION only - the form state, the mask, the
+   * validation and the answers are the caller's existing ones.
+   */
+  variant?: 'default' | 'template-date';
+  /** Leading badge of the header (the template-date form's calendar tile). */
+  badge?: CardBadge;
   children: React.ReactNode;
 }): React.JSX.Element {
   const colors = themeColors(props.isDark);
   const insets = useSafeAreaInsets();
+  const dateForm = props.variant === 'template-date';
+  const card = (
+    <View
+      testID={`${props.name}-card`}
+      style={[
+        styles.sheet,
+        dateForm && styles.sheetDate,
+        { backgroundColor: colors.surface, paddingBottom: insets.bottom + 12 },
+      ]}
+      onStartShouldSetResponder={() => true}>
+      <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+      <View style={[styles.header, dateForm && styles.headerDate]}>
+        {props.badge !== undefined && (
+          <View
+            accessible={false}
+            style={[
+              styles.headerBadge,
+              { backgroundColor: tintAlpha(colors.accent, props.isDark ? '2E' : '1A') },
+            ]}>
+            {'icon' in props.badge ? (
+              <Icon name={props.badge.icon} size={22} color={colors.accent} />
+            ) : (
+              <FeatherIcon name={props.badge.feather} size={22} color={colors.accent} />
+            )}
+          </View>
+        )}
+        <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('Common_Close')}
+          onPress={props.onDismiss}
+          hitSlop={6}
+          style={({ pressed }) => [
+            styles.close,
+            dateForm && styles.closeDate,
+            { opacity: pressed ? 0.6 : 1 },
+          ]}>
+          <Icon
+            name="close"
+            size={dateForm ? 22 : 20}
+            color={dateForm ? colors.textSecondary : colors.textMuted}
+          />
+        </Pressable>
+      </View>
+      {props.caption !== undefined && props.caption !== '' && (
+        <Text
+          style={[
+            styles.sheetCaption,
+            dateForm && styles.sheetCaptionDate,
+            { color: colors.textMuted },
+          ]}>
+          {props.caption}
+        </Text>
+      )}
+      {dateForm ? (
+        <ScrollView keyboardShouldPersistTaps="handled" bounces={false} style={styles.sheetScroll}>
+          {props.children}
+        </ScrollView>
+      ) : (
+        props.children
+      )}
+    </View>
+  );
   return (
     <Pressable
       testID={`${props.name}-scrim`}
       style={[styles.scrim, { backgroundColor: colors.overlay }]}
       onPress={props.onDismiss}>
-      <View
-        testID={`${props.name}-card`}
-        style={[
-          styles.sheet,
-          { backgroundColor: colors.surface, paddingBottom: insets.bottom + 12 },
-        ]}
-        onStartShouldSetResponder={() => true}>
-        <View style={[styles.grabber, { backgroundColor: colors.border }]} />
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]}>{props.title}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('Common_Close')}
-            onPress={props.onDismiss}
-            hitSlop={6}
-            style={({ pressed }) => [styles.close, { opacity: pressed ? 0.6 : 1 }]}>
-            <Icon name="close" size={20} color={colors.textMuted} />
-          </Pressable>
-        </View>
-        {props.caption !== undefined && props.caption !== '' && (
-          <Text style={[styles.sheetCaption, { color: colors.textMuted }]}>{props.caption}</Text>
-        )}
-        {props.children}
-      </View>
+      {dateForm ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardHost}>
+          {card}
+        </KeyboardAvoidingView>
+      ) : (
+        card
+      )}
     </Pressable>
   );
 }
@@ -91,6 +162,10 @@ function Sheet(props: {
   caption?: string;
   isDark: boolean;
   onDismiss: () => void;
+  /** Opt-in chrome of the compact Apply-template form (see `DialogSheet`). */
+  variant?: 'default' | 'template-date';
+  /** Leading badge of the header (the template-date form's calendar tile). */
+  badge?: CardBadge;
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
@@ -785,6 +860,21 @@ export interface PromptDialogRequest {
   sanitize?: (raw: string) => string;
   /** Longest accepted text (default `PROMPT_MAX_LENGTH`). */
   maxLength?: number;
+  /**
+   * Opt-in presentation of THIS form. `default` is the shared question sheet
+   * (the template NAME prompt and every other caller keep it untouched).
+   * `template-date` is the compact Apply-template sheet: a leading calendar
+   * badge, the real template summary, a labelled date field with a Today
+   * shortcut, a format hint and side-by-side answers. It is the SAME value/error
+   * state, mask, validation and callbacks - only the chrome differs.
+   */
+  layout?: 'default' | 'template-date';
+  /** `template-date`: the real template name and meal count under the title. */
+  contextLabel?: string;
+  /** `template-date`: the visible label above the date field. */
+  fieldLabel?: string;
+  /** `template-date`: the format hint under the field while the value is valid. */
+  formatHint?: string;
   /** Returns an error message, or null when the value is acceptable. */
   validate: (value: string) => string | null;
   onCancel: () => void;
@@ -804,16 +894,161 @@ export function PromptDialog({
   const colors = themeColors(isDark);
   const [value, setValue] = useState(request.initialValue);
   const [error, setError] = useState<string | null>(null);
+  const field = useRef<React.ElementRef<typeof TextInput>>(null);
+  const { width, fontScale } = useWindowDimensions();
+  const dateForm = request.layout === 'template-date';
+  /** Narrow screens and enlarged text stack the two answers at full width. */
+  const stacked = width < 350 || fontScale > 1.15;
+  /**
+   * The reference's exact 1 : 1.8 split, measured from the sheet's own width (it
+   * is capped at 520 dp): a flex ratio alone would hand each answer its label's
+   * width PLUS a share of the rest, which is not the drawn proportion.
+   */
+  const actionsWidth = Math.max(0, Math.min(width, 520) - 40 - 10);
+  const cancelWidth = Math.round((actionsWidth / 2.8) * 100) / 100;
+  const applyWidth = Math.round((actionsWidth - cancelWidth) * 100) / 100;
+  const cancelSize = stacked ? undefined : { width: cancelWidth };
+  const applySize = stacked ? undefined : { width: applyWidth };
 
   const confirm = (): void => {
     const failure = request.validate(value);
     if (failure !== null) {
-      // The dialog stays open: the typed value is still there to correct.
+      // The form stays open: the typed value is still there to correct.
       setError(failure);
+      if (dateForm) {
+        field.current?.focus();
+      }
       return;
     }
     request.onConfirm(value.trim());
   };
+
+  /** One masked keystroke: the mask runs FIRST, so a forbidden character never
+   *  reaches the field, the error line or the validator. */
+  const changeText = (next: string): void => {
+    setValue(request.sanitize === undefined ? next : request.sanitize(next));
+    if (error !== null) {
+      setError(null);
+    }
+  };
+
+  /** Today only FILLS the field - it never applies the template. */
+  const fillToday = (): void => {
+    setValue(request.today?.value ?? '');
+    setError(null);
+  };
+
+  if (dateForm) {
+    return (
+      <Sheet
+        name="prompt-dialog"
+        variant="template-date"
+        badge={{ icon: 'calendar-outline' }}
+        title={request.title}
+        caption={request.contextLabel}
+        isDark={isDark}
+        onDismiss={request.onCancel}>
+        <View style={styles.dateBody}>
+          <View style={styles.dateHeading}>
+            <Text style={[styles.dateLabel, { color: colors.text }]} numberOfLines={2}>
+              {request.fieldLabel ?? request.message}
+            </Text>
+            {request.today !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={request.today.label}
+                onPress={fillToday}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.todayChip,
+                  {
+                    backgroundColor: tintAlpha(colors.accent, isDark ? '2E' : '1A'),
+                    opacity: pressed ? 0.65 : 1,
+                  },
+                ]}>
+                <Text style={[styles.todayText, { color: colors.accent }]}>
+                  {request.today.label}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+          <View
+            style={[
+              styles.dateField,
+              {
+                backgroundColor: colors.surfaceVariant,
+                borderColor: error !== null ? colors.error : colors.border,
+              },
+            ]}>
+            <Icon name="calendar-outline" size={22} color={colors.textMuted} />
+            <TextInput
+              ref={field}
+              accessibilityLabel={request.fieldLabel ?? request.message}
+              accessibilityHint={request.formatHint}
+              style={[styles.dateInput, { color: colors.text }]}
+              value={value}
+              onChangeText={changeText}
+              placeholder={request.formatHint ?? request.initialValue}
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType={request.keyboardType}
+              maxLength={request.maxLength ?? PROMPT_MAX_LENGTH}
+              returnKeyType="done"
+              onSubmitEditing={confirm}
+            />
+          </View>
+          {error !== null ? (
+            <Text
+              testID="prompt-dialog-error"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={[styles.dateHint, { color: colors.error }]}>
+              {error}
+            </Text>
+          ) : (
+            <Text style={[styles.dateHint, { color: colors.textMuted }]}>
+              {request.formatHint ?? ''}
+            </Text>
+          )}
+        </View>
+        <View style={[styles.dateDivider, { backgroundColor: colors.cardDivider }]} />
+        <View style={[styles.dateActions, stacked && styles.dateActionsStacked]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={request.cancelText}
+            onPress={request.onCancel}
+            style={({ pressed }) => [
+              styles.dateButton,
+              stacked ? styles.dateButtonStacked : cancelSize,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              pressed && { opacity: 0.7 },
+            ]}>
+            <Text style={[styles.dateButtonText, { color: colors.text }]} numberOfLines={2}>
+              {request.cancelText}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={request.confirmText}
+            onPress={confirm}
+            style={({ pressed }) => [
+              styles.dateButton,
+              stacked ? styles.dateButtonStacked : applySize,
+              { backgroundColor: colors.accentFill, borderColor: colors.accentFill },
+              pressed && { opacity: 0.8 },
+            ]}>
+            <Icon name="checkmark" size={20} color={colors.accentFillText} />
+            <Text
+              style={[styles.dateButtonText, { color: colors.accentFillText }]}
+              numberOfLines={2}>
+              {request.confirmText}
+            </Text>
+          </Pressable>
+        </View>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet
@@ -832,14 +1067,7 @@ export function PromptDialog({
               error !== null && { borderWidth: 1, borderColor: colors.error },
             ]}
             value={value}
-            onChangeText={(next) => {
-              // The mask runs FIRST: a forbidden character never reaches the
-              // field, the error line or the validator.
-              setValue(request.sanitize === undefined ? next : request.sanitize(next));
-              if (error !== null) {
-                setError(null);
-              }
-            }}
+            onChangeText={changeText}
             placeholder={request.initialValue}
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
@@ -851,10 +1079,7 @@ export function PromptDialog({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={request.today.label}
-              onPress={() => {
-                setValue(request.today?.value ?? '');
-                setError(null);
-              }}
+              onPress={fillToday}
               hitSlop={6}
               style={({ pressed }) => [styles.promptChip, { opacity: pressed ? 0.6 : 1 }]}>
               <Text style={[styles.promptChipText, { color: colors.accent }]}>
@@ -936,6 +1161,91 @@ const styles = StyleSheet.create({
   close: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   /** The question's explanation, muted, under the title. */
   sheetCaption: { fontSize: 13, lineHeight: 19, paddingHorizontal: 16, marginTop: 2 },
+  /**
+   * The compact Apply-template sheet (r3 reference): a 520 dp cap with 24 pt top
+   * corners, a 36 pt badge in the header, a 12 pt summary line, and a scrollable
+   * body so the answers stay reachable with the keyboard open.
+   */
+  sheetDate: {
+    maxWidth: 520,
+    maxHeight: '92%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  headerDate: { columnGap: 12, paddingLeft: 20, paddingRight: 10, marginTop: 10, minHeight: 44 },
+  headerBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeDate: { width: 44, height: 44 },
+  sheetCaptionDate: { fontSize: 12, lineHeight: 17, paddingHorizontal: 20, marginTop: 3 },
+  sheetScroll: { flexShrink: 1 },
+  keyboardHost: { flex: 1, justifyContent: 'flex-end' },
+  /** The date form's body: label + Today, the field, then the hint/error line. */
+  dateBody: { paddingHorizontal: 20, marginTop: 12 },
+  dateHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: 12,
+    marginBottom: 8,
+  },
+  dateLabel: { flex: 1, minWidth: 0, fontFamily: fonts.medium, fontSize: 14 },
+  todayChip: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  todayText: { fontFamily: fonts.medium, fontSize: 14 },
+  dateField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 48,
+  },
+  dateInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 48,
+    paddingVertical: 10,
+    paddingHorizontal: 0,
+    fontFamily: fonts.regular,
+    fontSize: 17,
+  },
+  dateHint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, marginTop: 6 },
+  /** ONE 1 pt inset rule before the answers. */
+  dateDivider: { height: 1, marginHorizontal: 20, marginTop: 16 },
+  dateActions: { flexDirection: 'row', columnGap: 10, paddingHorizontal: 20, paddingTop: 14 },
+  dateActionsStacked: { flexDirection: 'column' },
+  dateButton: {
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    columnGap: 7,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+  },
+  /** The answers share the row's width as 1 : 1.8 (computed in the component,
+   *  because a flex ratio would add each label's width to the split). */
+  dateButtonStacked: { width: '100%' },
+  dateButtonText: {
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    flexShrink: 1,
+    textAlign: 'center',
+  },
   /** Content between the caption and the rows (input fields, errors). */
   body: { paddingHorizontal: 16, paddingTop: 14 },
   rows: { marginTop: 12 },
