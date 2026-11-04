@@ -60,7 +60,9 @@ import { PHOTO_GAP, PHOTO_TILE, PhotoGallery } from './PhotoGallery';
 /**
  * Geometry of the compact inline editor (dp / sp), scoped to this card so no
  * other screen changes: 12 pt card inset, two 44 pt shallow fields 12 pt apart,
- * then a 44 pt footer 10 pt below them.
+ * then a footer 6 pt below them. Every footer control is a real 44 pt target
+ * around a SMALLER neutral outline (36 pt), so the answers stay quiet on the
+ * card's own surface while remaining comfortable to tap.
  */
 const EDITOR_TOP_GAP = 12;
 const EDITOR_FIELD_GAP = 12;
@@ -73,14 +75,23 @@ const EDITOR_FIELD_LINE_HEIGHT = 20;
 /** The floating label / counter: 10 pt on the field's top border. */
 const EDITOR_LABEL_SIZE = 10;
 const EDITOR_LABEL_TOP = -7;
-const EDITOR_FOOTER_GAP = 10;
+const EDITOR_FOOTER_GAP = 6;
 /** Normal width of the clock + time chip; it widens with the system text size. */
-export const EDITOR_TIME_WIDTH = 92;
-const EDITOR_TIME_TEXT_SIZE = 15;
-const EDITOR_CANCEL_MIN_WIDTH = 76;
-const EDITOR_SAVE_MIN_WIDTH = 64;
-const EDITOR_BUTTON_GAP = 8;
+export const EDITOR_TIME_WIDTH = 84;
+const EDITOR_TIME_TEXT_SIZE = 14;
+const EDITOR_CANCEL_MIN_WIDTH = 64;
+const EDITOR_SAVE_MIN_WIDTH = 56;
+const EDITOR_BUTTON_GAP = 6;
+/** The real touch target around every footer control. */
 const EDITOR_BUTTON_MIN_HEIGHT = 44;
+/**
+ * The visible neutral outline inside that target: 36 pt tall, 8 pt corners and
+ * 13 pt regular ink - the same quiet control family as "Apply to date" on the
+ * templates page. There is deliberately no accent fill on this card.
+ */
+const EDITOR_CONTROL_MIN_HEIGHT = 36;
+const EDITOR_CONTROL_RADIUS = 8;
+const EDITOR_CONTROL_TEXT_SIZE = 13;
 /** Above this system font scale the floating labels move into normal flow. */
 const EDITOR_LABEL_FLOW_SCALE = 1.2;
 /** Above this scale (or under this card width) the footer stacks. */
@@ -710,40 +721,56 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
               {t('Rn_EditorLegacyHint')}
             </Text>
           )}
-          {/* Footer on the CARD's own surface (no tinted band): a compact clock +
-              time chip on the LEFT, Cancel / Save on the RIGHT, 8 pt apart. The
-              chip keeps its 92 pt normal width and widens with the text scale; a
-              narrow card or the largest sizes stack the answers under it. */}
+          {/* Footer on the CARD's own surface (no tinted band): the clock + time
+              chip on the LEFT, Cancel / Save on the RIGHT, 6 pt apart. Every
+              control is a real 44 pt target around a 36 pt NEUTRAL outline - the
+              card's own surface inside a thin border, normal ink, no accent fill.
+              A narrow card or the largest text sizes stack the answers under the
+              time instead of squeezing it. */}
           <View style={[styles.editorFoot, editorFooterStacked && styles.editorFootStacked]}>
             <Pressable
               accessible={false}
               onPress={() => timeRef.current?.focus()}
-              style={[
-                styles.timeChip,
-                {
-                  borderColor: colors.border,
-                  backgroundColor: colors.cardFill,
-                  width: Math.max(EDITOR_TIME_WIDTH, Math.ceil(68 * fontScale)),
-                },
-              ]}>
-              <Icon name="time-outline" size={17} color={colors.textSecondary} />
-              <TextInput
-                ref={timeRef}
-                accessibilityLabel={t('Rn_FieldPlannedTime')}
-                // The mask below makes the value a time and nothing else; the chip
-                // is only as wide as "HH:MM" needs, so it never stretches the row.
-                style={[styles.timeInput, { color: colors.text }]}
-                value={draftTime}
-                editable={!saving}
-                onChangeText={(text) => setDraftTime(timeDraft(text))}
-                placeholder="HH:MM"
-                placeholderTextColor={colors.textMuted}
-                // iOS can type the colon (numbers-and-punctuation); Android's number
-                // pad cannot, so the mask inserts it automatically.
-                keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
-                maxLength={TIME_MAX_LENGTH}
-                autoCorrect={false}
-              />
+              style={styles.timeTarget}>
+              <View
+                style={[
+                  styles.timeChip,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: colors.cardFill,
+                    // A MINIMUM width: it widens with the system text size.
+                    width: Math.max(EDITOR_TIME_WIDTH, Math.ceil(68 * fontScale)),
+                  },
+                ]}>
+                <Icon name="time-outline" size={15} color={colors.textSecondary} />
+                <TextInput
+                  ref={timeRef}
+                  accessibilityLabel={t('Rn_FieldPlannedTime')}
+                  // The mask below makes the value a time and nothing else; the chip
+                  // is only as wide as "HH:MM" needs, so it never stretches the row.
+                  style={[
+                    styles.timeInput,
+                    { color: colors.text },
+                    // Grows with the system text instead of clipping it.
+                    {
+                      minHeight: Math.max(
+                        EDITOR_CONTROL_MIN_HEIGHT - 2,
+                        Math.ceil(26 * fontScale),
+                      ),
+                    },
+                  ]}
+                  value={draftTime}
+                  editable={!saving}
+                  onChangeText={(text) => setDraftTime(timeDraft(text))}
+                  placeholder="HH:MM"
+                  placeholderTextColor={colors.textMuted}
+                  // iOS can type the colon (numbers-and-punctuation); Android's number
+                  // pad cannot, so the mask inserts it automatically.
+                  keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'number-pad'}
+                  maxLength={TIME_MAX_LENGTH}
+                  autoCorrect={false}
+                />
+              </View>
             </Pressable>
             <View style={[styles.editorActions, editorFooterStacked && styles.editorActionsStacked]}>
               <Pressable
@@ -752,19 +779,25 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 accessibilityState={{ disabled: saving }}
                 disabled={saving}
                 onPress={cancelEdit}
-                hitSlop={4}
-                style={({ pressed }) => [
-                  styles.answer,
-                  styles.answerCancel,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: 'transparent',
-                    opacity: saving ? 0.5 : pressed ? 0.7 : 1,
-                  },
+                style={[
+                  styles.controlTarget,
+                  styles.cancelTarget,
+                  saving && styles.subdued,
                 ]}>
-                <Text style={[styles.answerLabel, { color: colors.text }]} numberOfLines={1}>
-                  {t('Common_Cancel')}
-                </Text>
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.control,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: pressed ? colors.surfaceVariant : colors.cardFill,
+                      },
+                    ]}>
+                    <Text style={[styles.controlLabel, { color: colors.text }]} numberOfLines={1}>
+                      {t('Common_Cancel')}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -772,21 +805,25 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 accessibilityState={{ disabled: saving, busy: saving }}
                 disabled={saving}
                 onPress={() => void saveEdit()}
-                hitSlop={4}
-                style={({ pressed }) => [
-                  styles.answer,
-                  styles.answerSave,
-                  {
-                    borderColor: colors.accentFill,
-                    backgroundColor: colors.accentFill,
-                    opacity: saving ? 0.5 : pressed ? 0.8 : 1,
-                  },
+                style={[
+                  styles.controlTarget,
+                  styles.saveTarget,
+                  saving && styles.subdued,
                 ]}>
-                <Text
-                  style={[styles.answerLabel, { color: colors.accentFillText }]}
-                  numberOfLines={1}>
-                  {t('Common_Save')}
-                </Text>
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.control,
+                      {
+                        borderColor: colors.border,
+                        backgroundColor: pressed ? colors.surfaceVariant : colors.cardFill,
+                      },
+                    ]}>
+                    <Text style={[styles.controlLabel, { color: colors.text }]} numberOfLines={1}>
+                      {t('Common_Save')}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
             </View>
           </View>
@@ -1154,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   /** The editor's one-line feedback: refused change, or the legacy note. */
   editorHint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 16, marginTop: 6 },
-  /** Time chip left, Cancel / Save right, on the card surface (no tinted band). */
+  /** Time target left, Cancel / Save right, on the card surface (no tinted band). */
   editorFoot: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1164,21 +1201,25 @@ const styles = StyleSheet.create({
   },
   /** Narrow card or the largest text sizes: the answers drop under the time. */
   editorFootStacked: { flexDirection: 'column', alignItems: 'stretch' },
-  /** Clock + time: 44 pt tall, 10 pt corner, 92 pt wide at the default scale. */
+  /** The real 44 pt target behind the smaller visible clock chip. */
+  timeTarget: { minHeight: EDITOR_BUTTON_MIN_HEIGHT, justifyContent: 'center' },
+  /**
+   * Clock + time: 36 pt tall neutral outline, 8 pt corners, 84 pt wide at the
+   * default scale (a minimum - it grows with the system text size).
+   */
   timeChip: {
-    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
+    minHeight: EDITOR_CONTROL_MIN_HEIGHT,
     borderWidth: 1,
-    borderRadius: EDITOR_FIELD_RADIUS,
+    borderRadius: EDITOR_CONTROL_RADIUS,
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 6,
-    paddingHorizontal: 8,
+    columnGap: 4,
+    paddingHorizontal: 6,
   },
   timeInput: {
     flex: 1,
     minWidth: 0,
-    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
-    paddingVertical: 8,
+    paddingVertical: 3,
     paddingHorizontal: 0,
     fontFamily: fonts.regular,
     fontSize: EDITOR_TIME_TEXT_SIZE,
@@ -1186,19 +1227,26 @@ const styles = StyleSheet.create({
   },
   editorActions: { flexDirection: 'row', alignItems: 'center', columnGap: EDITOR_BUTTON_GAP },
   editorActionsStacked: { justifyContent: 'flex-end' },
-  /** The two answers: 44 pt tall, 10 pt corner - the app's control family. */
-  answer: {
-    minHeight: EDITOR_BUTTON_MIN_HEIGHT,
+  /** The two answers' touch targets: 44 pt tall, centred on the visible control. */
+  controlTarget: { minHeight: EDITOR_BUTTON_MIN_HEIGHT, justifyContent: 'center' },
+  /** A save in flight: the whole control is subdued, never recoloured. */
+  subdued: { opacity: 0.5 },
+  /** Cancel 64 pt / Save 56 pt - MINIMUM widths, so longer labels can grow. */
+  cancelTarget: { minWidth: EDITOR_CANCEL_MIN_WIDTH },
+  saveTarget: { minWidth: EDITOR_SAVE_MIN_WIDTH },
+  /**
+   * The visible answer: the card's own surface inside a 1 pt neutral border,
+   * 36 pt tall with 8 pt corners and normal 13 pt ink. No accent fill.
+   */
+  control: {
+    width: '100%',
+    minHeight: EDITOR_CONTROL_MIN_HEIGHT,
     borderWidth: 1,
-    borderRadius: EDITOR_FIELD_RADIUS,
+    borderRadius: EDITOR_CONTROL_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
-  /** Outlined Cancel - 76 pt, never narrower than its label needs. */
-  answerCancel: { minWidth: EDITOR_CANCEL_MIN_WIDTH },
-  /** Filled indigo Save - 64 pt. */
-  answerSave: { minWidth: EDITOR_SAVE_MIN_WIDTH },
-  answerLabel: { fontFamily: fonts.regular, fontSize: 14 },
+  controlLabel: { fontFamily: fonts.regular, fontSize: EDITOR_CONTROL_TEXT_SIZE },
 });

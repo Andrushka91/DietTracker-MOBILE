@@ -954,8 +954,10 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     letterSpacing: 1.1,
     textTransform: 'uppercase',
-    marginTop: 18,
-    marginBottom: 7,
+    // These two margins ARE the day-header-to-MEALS and MEALS-to-first-card
+    // spacing: 8 pt of air above, 6 pt below, with no extra spacer in between.
+    marginTop: 8,
+    marginBottom: 6,
     marginLeft: 2,
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.gridGap },

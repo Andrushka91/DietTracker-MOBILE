@@ -15,7 +15,7 @@ import { StyleSheet, Text } from 'react-native';
 
 import { SaveAllRow } from '../src/ui/components/SaveAllRow';
 import { t, tFmt } from '../src/ui/strings';
-import { darkColors, lightColors, tintAlpha, type ThemeColors } from '../src/ui/theme';
+import { darkColors, lightColors, type ThemeColors } from '../src/ui/theme';
 
 type Renderer = TestRenderer.ReactTestRenderer;
 
@@ -55,11 +55,25 @@ function styleOf(node: { props: { style?: unknown } }): Record<string, unknown> 
   return (StyleSheet.flatten(resolved as never) ?? {}) as Record<string, unknown>;
 }
 
-/** The one pressable of the row: the Save all button. */
+/** The one pressable of the row: the Save all button's 44 pt target. */
 function button(renderer: Renderer): TestRenderer.ReactTestInstance {
   const found = renderer.root.findAll((node) => typeof node.props?.onPress === 'function').pop();
   if (found === undefined) {
     throw new Error('the save button was not rendered');
+  }
+  return found;
+}
+
+/**
+ * The VISIBLE control inside that target: the 36 pt neutral outline (card surface
+ * inside a thin border) the row actually draws.
+ */
+function control(renderer: Renderer): TestRenderer.ReactTestInstance {
+  const found = button(renderer)
+    .findAll((node) => styleOf(node).minHeight === 36)
+    .pop();
+  if (found === undefined) {
+    throw new Error('the visible save control was not rendered');
   }
   return found;
 }
@@ -78,15 +92,20 @@ describe('the save row', () => {
     expect(render({ unsaved: 0 }).toJSON()).toBeNull();
   });
 
-  test('counts the open editors and offers the indigo button', () => {
+  test('counts the open editors and offers the neutral outlined button', () => {
     const onSaveAll = jest.fn();
     const one = render({ unsaved: 1, onSaveAll });
     expect(texts(one)).toContain(t('Rn_EditorOpenOne'));
     const save = button(one);
     expect(save.props.disabled).toBe(false);
-    expect(save.props.accessibilityState).toEqual({ disabled: false });
-    expect(styleOf(save).backgroundColor).toBe(lightColors.accentFill);
+    expect(save.props.accessibilityState).toEqual({ disabled: false, busy: false });
+    // A real 44 pt target around a smaller NEUTRAL outline - never an indigo fill.
     expect(styleOf(save).minHeight).toBe(44);
+    expect(styleOf(save).minWidth).toBe(96);
+    const visible = styleOf(control(one));
+    expect(visible.backgroundColor).toBe(lightColors.cardFill);
+    expect(visible.borderColor).toBe(lightColors.border);
+    expect(visible.borderRadius).toBe(8);
     act(() => save.props.onPress());
     expect(onSaveAll).toHaveBeenCalledTimes(1);
 
@@ -99,8 +118,10 @@ describe('the save row', () => {
     expect(texts(renderer)).toContain(t('Rn_Saving'));
     const save = button(renderer);
     expect(save.props.disabled).toBe(true);
-    // A wash of the SAME indigo, not a grey dead control.
-    expect(styleOf(save).backgroundColor).toBe(tintAlpha(lightColors.accent, '1F'));
+    expect(save.props.accessibilityState).toEqual({ disabled: true, busy: true });
+    // Truthful busy state: the whole control is subdued, not repainted indigo.
+    expect(styleOf(save).opacity).toBe(0.5);
+    expect(styleOf(control(renderer)).backgroundColor).toBe(lightColors.cardFill);
   });
 
   test('names a partial batch result and keeps the rest saveable', () => {
@@ -119,6 +140,9 @@ describe('the save row', () => {
   test('works in the dark theme too', () => {
     const renderer = render({ unsaved: 1, colors: darkColors, isDark: true });
     expect(texts(renderer)).toContain(t('Rn_EditorOpenOne'));
-    expect(styleOf(button(renderer)).backgroundColor).toBe(darkColors.accentFill);
+    // The same neutral control: the dark card's surface inside the dark border.
+    const visible = styleOf(control(renderer));
+    expect(visible.backgroundColor).toBe(darkColors.cardFill);
+    expect(visible.borderColor).toBe(darkColors.border);
   });
 });

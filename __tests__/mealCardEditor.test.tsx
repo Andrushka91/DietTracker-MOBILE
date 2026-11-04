@@ -6,8 +6,8 @@
 //  * the editor's own 40/80 character policy (see `mealEditorLimits`): an
 //    over-limit keystroke or paste is refused AS A WHOLE and never sliced, while
 //    an already-longer saved value opens intact and may be kept or shortened,
-//  * the planned time stays the masked HH:MM chip of the footer, beside the
-//    outlined Cancel and the indigo Save,
+//  * the planned time stays the masked HH:MM chip of the footer, beside the two
+//    neutral outlined answers (Cancel / Save) - no filled control anywhere,
 //  * the header's duplicate time caption is hidden only while editing.
 //
 // The domain's own 120 / 2000 limits are untouched (see domain/validation.ts):
@@ -156,6 +156,21 @@ function pressable(renderer: TestRenderer.ReactTestRenderer, label: string) {
   return found;
 }
 
+/**
+ * The VISIBLE control inside one answer's 44 pt pressable: the neutral outline
+ * the footer actually draws (36 pt tall, 8 pt corners, card surface inside a thin
+ * border). The pressable itself is only the touch target.
+ */
+function compactControl(renderer: TestRenderer.ReactTestRenderer, label: string) {
+  const found = pressable(renderer, label)
+    .findAll((node) => styleOf(node).minHeight === 36)
+    .pop();
+  if (found === undefined) {
+    throw new Error(`no visible control inside "${label}"`);
+  }
+  return found;
+}
+
 async function renderEditor(
   meal: MealEntry = MEAL,
   onSave: (draft: MealEntry) => Promise<string | null> = async () => null,
@@ -264,10 +279,13 @@ describe('the planned-time field', () => {
     expect(time.props.maxLength).toBe(5);
     expect(time.props.keyboardType).toBeDefined();
     expect(time.props.keyboardType).not.toBe('default');
-    // The chip is 92 pt at the default scale, 44 pt tall - a touch target.
-    expect(EDITOR_TIME_WIDTH).toBe(92);
-    expect(styleOf(time).minHeight).toBe(EDITOR_FIELD_MIN_HEIGHT);
-    expect(EDITOR_FIELD_MIN_HEIGHT).toBeGreaterThanOrEqual(44);
+    // The chip is 84 pt at the default scale; the 44 pt target is its wrapper and
+    // the visible outline inside it is 36 pt tall with 8 pt corners.
+    expect(EDITOR_TIME_WIDTH).toBe(84);
+    const compact = hosts(renderer, (style) => style.borderRadius === 8 && style.minHeight === 36);
+    // The clock and the two answers share the one compact control shape.
+    expect(compact).toHaveLength(3);
+    expect(styleOf(compact[0]).width).toBe(84);
 
     // Typing digits produces the masked value.
     await type(renderer, t('Rn_FieldPlannedTime'), '1230');
@@ -442,7 +460,7 @@ describe('the editor layout', () => {
     const renderer = await renderEditor();
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 10 && styleOf(node).justifyContent === 'space-between',
+        (node) => styleOf(node).marginTop === 6 && styleOf(node).justifyContent === 'space-between',
       )
       .pop();
     expect(footer).toBeDefined();
@@ -452,16 +470,18 @@ describe('the editor layout', () => {
     expect(footerStyle.backgroundColor).toBeUndefined();
     expect(footerStyle.borderRadius).toBeUndefined();
 
-    const cancel = styleOf(pressable(renderer, t('Common_Cancel')));
-    const save = styleOf(pressable(renderer, t('Common_Save')));
-    // Outlined Cancel and filled indigo Save, both 44 pt tall touch targets.
-    expect(cancel.minWidth).toBe(76);
-    expect(save.minWidth).toBe(64);
-    expect(cancel.minHeight).toBe(44);
-    expect(save.minHeight).toBe(44);
-    expect(cancel.backgroundColor).toBe('transparent');
-    expect(cancel.borderColor).toBe(lightColors.border);
-    expect(save.backgroundColor).toBe(lightColors.accentFill);
+    // Both answers are real 44 pt targets around a smaller NEUTRAL outline.
+    expect(styleOf(pressable(renderer, t('Common_Cancel'))).minWidth).toBe(64);
+    expect(styleOf(pressable(renderer, t('Common_Save'))).minWidth).toBe(56);
+    expect(styleOf(pressable(renderer, t('Common_Cancel'))).minHeight).toBe(44);
+    expect(styleOf(pressable(renderer, t('Common_Save'))).minHeight).toBe(44);
+    for (const label of [t('Common_Cancel'), t('Common_Save')]) {
+      const visible = styleOf(compactControl(renderer, label));
+      // The card's own surface inside a thin border, 8 pt corners: no accent fill.
+      expect(visible.backgroundColor).toBe(lightColors.cardFill);
+      expect(visible.borderColor).toBe(lightColors.border);
+      expect(visible.borderRadius).toBe(8);
+    }
   });
 
   test('moves the floating captions into flow and stacks the footer at large text', async () => {
@@ -483,7 +503,7 @@ describe('the editor layout', () => {
     // The footer stacks, and every target keeps its 44 pt floor.
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 10 && styleOf(node).alignItems === 'stretch',
+        (node) => styleOf(node).marginTop === 6 && styleOf(node).alignItems === 'stretch',
       )
       .pop();
     expect(footer).toBeDefined();
@@ -500,7 +520,7 @@ describe('the editor layout', () => {
     const renderer = await renderEditor();
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 10 && styleOf(node).alignItems === 'stretch',
+        (node) => styleOf(node).marginTop === 6 && styleOf(node).alignItems === 'stretch',
       )
       .pop();
     expect(footer).toBeDefined();
@@ -541,9 +561,13 @@ describe('the editor layout', () => {
     expect(styleOf(label as TestRenderer.ReactTestInstance).backgroundColor).toBe(
       darkColors.cardFill,
     );
-    // The primary answer keeps the dark accent fill with its own ink.
-    const save = styleOf(pressable(renderer!, t('Common_Save')));
-    expect(save.backgroundColor).toBe(darkColors.accentFill);
+    // The answers are the dark card's own surface inside the dark border too:
+    // there is no filled accent anywhere on this card.
+    for (const label of [t('Common_Cancel'), t('Common_Save')]) {
+      const visible = styleOf(compactControl(renderer!, label));
+      expect(visible.backgroundColor).toBe(darkColors.cardFill);
+      expect(visible.borderColor).toBe(darkColors.border);
+    }
   });
 
   test('the action strip is hidden while the editor is open', async () => {
