@@ -37,6 +37,14 @@ echo Building the arm64-v8a APK...
 call gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 if errorlevel 1 goto :failed
 copy /y app\build\outputs\apk\release\app-release.apk ..\release\DietTracker-%VERSION%-arm64-v8a.apk >nul
+
+rem Windows `copy` keeps the SOURCE file's timestamp, so when Gradle is already
+rem up to date the copied APK still looks older than this run and scripts\dev.js
+rem rejects it ("finished but did not rewrite"). Stamp both copies with the time
+rem of THIS build - the bytes are untouched - so that freshness check means what
+rem it says: the artifact was produced by this run.
+powershell -NoProfile -Command "Get-Item -LiteralPath '..\release\DietTracker-%VERSION%-universal.apk','..\release\DietTracker-%VERSION%-arm64-v8a.apk' | ForEach-Object { $_.LastWriteTime = Get-Date }"
+if errorlevel 1 goto :failed
 popd
 
 echo.
