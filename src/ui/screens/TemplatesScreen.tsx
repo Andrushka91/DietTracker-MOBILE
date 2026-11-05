@@ -24,7 +24,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -45,10 +44,10 @@ import {
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { PromptDialog } from '../components/dialogs';
-import { Icon, MaterialIcon } from '../components/icons';
+import { Icon, MaterialIcon, FeatherIcon } from '../components/icons';
+import { TemplateCardActions } from '../components/TemplateCardActions';
 import { mealCategoryGlyph } from '../mealGlyphs';
 import { fonts, themeColors } from '../theme';
-import { accentActionColors } from '../accentActions';
 import { TEMPLATE_GUTTER, templatesCalendarTokens as TPL } from '../templatesCalendar';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
@@ -73,7 +72,19 @@ const PREVIEW = {
   categoryRadius: 8,
 } as const;
 
-
+/**
+ * Collapsed height floor for a TEMPLATE card, so it reads at the height of an
+ * ordinary Home READ card (full-width phone card, Pending, no title /
+ * ingredients, no photos) at the same default font scale. Home is
+ * CONTENT-sized: `metrics.cardMinHeight` (104 dp, theme.ts) is only its lower
+ * bound - the real natural height is the 14/12 pt card body above the 1 dp
+ * rule plus the 52 pt toolbar. Measured on the emulator (1080x2400 @ 420 dpi,
+ * font scale 1.0): a normal empty/Pending Home READ card is 148.8 dp border to
+ * border (the card below it 148.6 dp, and the 8.2 dp gap between them confirms
+ * the reading), so 148 dp is that height in whole dp. A MINIMUM, never a
+ * fixed height: expanded contents and large text grow past it.
+ */
+const HOME_READ_CARD_MIN_HEIGHT = 148;
 
 /**
  * Date prompt for "Apply to date" (spec 8.7). The Windows app shows a
@@ -255,6 +266,14 @@ export function TemplatesScreen(): React.JSX.Element {
         {templates.map((template) => {
           const open = expanded.includes(template.id);
           const contents = templateContents(template);
+          /**
+           * The name ONCE, exactly as the header prints it: a saved date in the
+           * medium date form, a custom name as saved. The footer's accessible
+           * names reuse it, so they can never disagree with the title.
+           */
+          const displayName = isCalendarDate(template.name)
+            ? formatMediumDate(template.name)
+            : template.name;
           /** The REAL stored meal count, in the card's singular/plural wording. */
           const countLabel =
             contents.length === 1
@@ -268,12 +287,14 @@ export function TemplatesScreen(): React.JSX.Element {
             key={template.id}
             style={[
               styles.card,
+              styles.templateCard,
               { backgroundColor: colors.cardFill, borderColor: colors.border },
             ]}>
             {/* Header: the kind's glyph, the real name, then ONE wrapping metadata
                 row - kind · REAL meal count on the left, the update time on the
                 right. The old kind badge and the preview-count column are gone:
                 the same facts share this line instead of competing with the name. */}
+            <View style={styles.headerArea}>
             <View style={styles.header}>
               <View
                 style={[
@@ -302,7 +323,7 @@ export function TemplatesScreen(): React.JSX.Element {
                 <Text
                   style={[styles.name, { color: colors.text }]}
                   numberOfLines={stacked ? undefined : 2}>
-                  {isCalendarDate(template.name) ? formatMediumDate(template.name) : template.name}
+                  {displayName}
                 </Text>
                 <View style={styles.metadata}>
                   <Text style={[styles.metaText, { color: colors.textMuted }]}>
@@ -315,76 +336,30 @@ export function TemplatesScreen(): React.JSX.Element {
                 </View>
               </View>
             </View>
-  
-            {/* ONE compact action row under the header, split off by a single 1 dp
-                rule: "Meal preview" on the left, "Apply to date" on the right.
-                These are SIBLING targets - the card itself is not pressable, so
-                previewing can never apply anything and applying never previews.
-                An empty template has nothing to preview: it keeps Apply alone. */}
-            <View
-              style={[
-                styles.actions,
-                { borderTopColor: colors.border },
-                stacked && styles.actionsStacked,
-              ]}>
-              {contents.length > 0 && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('Rn_TemplateMealPreview')}
-                  accessibilityState={{ expanded: open }}
-                  accessibilityValue={{ text: countLabel }}
-                  onPress={() => togglePreview(template.id)}
-                  style={({ pressed }) => [
-                    styles.previewToggle,
-                    stacked && styles.previewToggleStacked,
-                    pressed && { backgroundColor: colors.surfaceVariant },
-                  ]}>
-                  <Text
-                    style={[styles.previewLabel, { color: colors.text }]}
-                    numberOfLines={stacked ? undefined : 1}>
-                    {t('Rn_TemplateMealPreview')}
-                  </Text>
-                  <Icon
-                    name={open ? 'chevron-up' : 'chevron-down'}
-                    size={18}
-                    color={colors.textMuted}
-                  />
-                </Pressable>
-              )}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('Template_Apply')}
-                onPress={() => requestApply(template)}
-                style={[
-                  styles.applyTarget,
-                  stacked && styles.applyTargetStacked,
-                  contents.length === 0 && styles.applyTargetOnly,
-                ]}>
-                {/* A real 48/44 dp target around a 36 dp visible control: 8 dp
-                    corners, the accent outline and pale wash from the shared helper.
-                    It is a low-emphasis action repeated on every card — never a solid
-                    slab, never a shadow. */}
-                {({ pressed }) => {
-                  const action = accentActionColors(colors, pressed);
-                  return (
-                    <View
-                      style={[
-                        styles.apply,
-                        {
-                          borderColor: action.border,
-                          backgroundColor: action.fill,
-                        },
-                      ]}>
-                      <MaterialIcon name="calendar-month-outline" size={TPL.icon} color={action.foreground} />
-                      <Text style={[styles.applyText, { color: action.foreground }]} numberOfLines={1}>
-                        {t('Template_Apply')}
-                      </Text>
-                    </View>
-                  );
-                }}
-              </Pressable>
             </View>
-            {/* Expanded contents sit BELOW the action row, inside the same card:
+  
+            {/* The approved action footer: ONE flush pair of independent
+                halves - Preview (list glyph, word, chevron) on the left and the
+                pale-accent Apply plan half (word, arrow) on the right. They are
+                SIBLING targets in a card that is not pressable, so previewing
+                can never apply anything and applying never previews. An empty
+                template has nothing to preview: Apply fills the whole footer. */}
+            <TemplateCardActions
+              colors={colors}
+              canPreview={contents.length > 0}
+              expanded={open}
+              previewText={t('Rn_TemplatePreviewAction')}
+              applyText={t('Rn_TemplateApplyPlanAction')}
+              previewAccessibilityLabel={tFmt('Rn_TemplatePreviewNamed', displayName)}
+              applyAccessibilityLabel={tFmt('Rn_TemplateApplyNamed', displayName)}
+              countLabel={countLabel}
+              onTogglePreview={() => togglePreview(template.id)}
+              onRequestApply={() => requestApply(template)}
+              renderIcon={(name, color, size) => (
+                <FeatherIcon name={name} color={color} size={size} />
+              )}
+            />
+            {/* Expanded contents sit BELOW the action footer, inside the same card:
                 one top rule, then one thin inset line between rows. Read-only, in
                 the order the applier uses - no status and no photographs. */}
             {open && contents.length > 0 && (
@@ -562,6 +537,10 @@ const styles = StyleSheet.create({
     borderRadius: TPL.cardRadius,
     overflow: 'hidden',
   },
+  /** The template tile's collapsed height floor - see HOME_READ_CARD_MIN_HEIGHT. */
+  templateCard: { minHeight: HOME_READ_CARD_MIN_HEIGHT },
+  /** The free space above the footer: the existing header centres in it. */
+  headerArea: { flexGrow: 1, justifyContent: 'center' },
   /** Header: the kind's outlined glyph tile, then the name over its metadata. */
   header: {
     flexDirection: 'row',
@@ -601,22 +580,10 @@ const styles = StyleSheet.create({
   updated: { marginLeft: 'auto' },
   /** A 1 dp rule inset to the card's 12 dp gutter (never the frame itself). */
   divider: { height: TPL.border, marginHorizontal: TPL.cardPadding },
-  /** "Meal preview": its own 48/44 dp target - label left, chevron right. */
-  previewToggle: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: TOUCH,
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 6,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  previewToggleStacked: { flex: 0, width: '100%' },
-  previewLabel: { flexShrink: 1, fontSize: 13, fontFamily: fonts.regular },
   /**
-   * The expanded contents BELOW the action row: one top rule, then a thin inset
-   * line between rows. The page's own scroll view scrolls it - no inner one.
+   * The expanded contents BELOW the action footer: one top rule, then a thin
+   * inset line between rows. The page's own scroll view scrolls it - no inner
+   * one.
    */
   previewPanel: { borderTopWidth: TPL.border, paddingBottom: 4 },
   /** One read-only meal: time | 28 dp glyph tile | title over its stored detail. */
@@ -645,52 +612,5 @@ const styles = StyleSheet.create({
   previewCopy: { flex: 1, minWidth: 0 },
   previewTitle: { fontSize: 14, lineHeight: 19, fontFamily: fonts.medium },
   previewDetail: { fontSize: 11, lineHeight: 16, marginTop: 1, fontFamily: fonts.regular },
-  /**
-   * ONE compact action row under the header, split off by a single 1 dp rule:
-   * the preview target grows, the Apply target keeps its 136 dp minimum. The row
-   * is the ONLY separator between the two actions - 8 dp of air, no vertical
-   * rule, so the pair reads as one quiet line of controls.
-   */
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: TPL.actionGap,
-    paddingHorizontal: TPL.cardPadding,
-    borderTopWidth: TPL.border,
-    minHeight: TOUCH,
-  },
-  /** Narrow window / large text: the controls stack, Apply stays right aligned. */
-  actionsStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: 2, paddingBottom: 4 },
-  /** The real 48/44 dp target around the 36 dp visible button. */
-  applyTarget: {
-    minHeight: TOUCH,
-    minWidth: TPL.applyMinWidth,
-    justifyContent: 'center',
-  },
-  applyTargetStacked: { alignSelf: 'flex-end' },
-  /** Nothing to preview: the Apply control stays alone, right aligned. */
-  applyTargetOnly: { marginLeft: 'auto' },
-  /**
-   * The visible control: 36 dp tall, 8 dp corners, the accent outline and pale
-   * wash from the shared helper. Never a solid slab and never a shadow.
-   */
-  apply: {
-    minHeight: TPL.visibleControl,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    columnGap: TPL.iconGap,
-    paddingHorizontal: TPL.controlPaddingX,
-    paddingVertical: 5,
-    borderWidth: TPL.border,
-    borderRadius: TPL.controlRadius,
-  },
-  applyText: {
-    flexShrink: 1,
-    fontSize: TPL.controlText,
-    lineHeight: TPL.controlLine,
-    fontFamily: fonts.regular,
-    textAlign: 'center',
-  },
   status: { fontSize: 13, fontFamily: fonts.medium, marginTop: TPL.sectionGap },
 });

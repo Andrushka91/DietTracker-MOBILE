@@ -1,9 +1,10 @@
 // The Templates page: the "Templates" heading with its small regular subtitle,
 // ONE quiet inline notice, then a compact outlined TILE per template - the
 // outlined kind glyph, the real name, ONE metadata row (kind · real meal count,
-// update time at the right) and ONE action row holding two SIBLING targets:
-// "Meal preview" + chevron, and a neutral outlined "Apply to date" inside a real
-// 48/44 dp target. The expanded contents render below that row.
+// update time at the right) and ONE flush action FOOTER holding two equal
+// SIBLING halves: a neutral "Preview" (list glyph + word + chevron) and the pale
+// accent "Apply plan" half (word + arrow) that fills its side edge to edge. The
+// expanded contents render below that footer.
 //
 // Pinned here: the wording, the count and every time/title come from the stored
 // template, the accordion really toggles, preview and apply are separate targets
@@ -171,15 +172,24 @@ function button(renderer: Renderer, label: string): TestRenderer.ReactTestInstan
   return found;
 }
 
-function accordion(renderer: Renderer): TestRenderer.ReactTestInstance {
-  return button(renderer, t('Rn_TemplateMealPreview'));
+/** The display name the card prints (and the footer's accessible names carry). */
+const DAY_NAME = formatMediumDate(DAY_TEMPLATE.name);
+
+function accordion(
+  renderer: Renderer,
+  name: string = DAY_NAME,
+): TestRenderer.ReactTestInstance {
+  return button(renderer, tFmt('Rn_TemplatePreviewNamed', name));
 }
 
-/** The one "Apply to date" control (it must exist exactly once in both states). */
-function applyButtons(renderer: Renderer): TestRenderer.ReactTestInstance[] {
+/** The ONE "Apply plan" half (it must exist exactly once in both states). */
+function applyButtons(
+  renderer: Renderer,
+  name: string = DAY_NAME,
+): TestRenderer.ReactTestInstance[] {
   return renderer.root.findAll(
     (node) =>
-      node.props?.accessibilityLabel === t('Template_Apply') &&
+      node.props?.accessibilityLabel === tFmt('Rn_TemplateApplyNamed', name) &&
       typeof node.props.onPress === 'function',
   );
 }
@@ -323,29 +333,57 @@ describe('the template card', () => {
     expect(printed).not.toContain(t('Rn_TemplateNoTime'));
   });
 
-  test('puts Apply in a real 48/44 pt target around a 36 pt blue control', async () => {
+  test('gives Apply plan the whole pale-accent half of a flush footer', async () => {
     const renderer = await renderScreen();
-    // The TARGET carries the platform touch height (44 in this iOS test window)
-    // and keeps the design's 136 dp minimum width.
-    const target = styleOf(applyButtons(renderer)[0]);
-    expect(target.minHeight).toBeGreaterThanOrEqual(44);
-    expect(target.minWidth).toBe(templatesCalendarTokens.applyMinWidth);
-    // The VISIBLE control inside that target is a 36 dp OUTLINED accent control:
-    // 8 dp corners, the page's pale accent wash — the same family the popup's
-    // "Apply template" wears, and never a solid slab.
-    const visible = applyButtons(renderer)[0]
-      .findAllByType(View)
-      .map((node) => styleOf(node))
-      .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
-    expect(visible).toBeDefined();
-    expect(visible?.minHeight).toBe(36);
-    expect(visible?.borderColor).toBe(lightColors.accent);
-    expect(visible?.backgroundColor).toBe(selectedAccentFill(lightColors));
+    // The card's own words are the approved short pair: the old "Meal preview"
+    // and "Apply to date" wording is gone from the card actions.
+    const printed = texts(renderer);
+    expect(printed).toContain(t('Rn_TemplatePreviewAction'));
+    expect(printed).toContain(t('Rn_TemplateApplyPlanAction'));
+    expect(printed).not.toContain('Meal preview');
+    expect(printed).not.toContain(t('Template_Apply'));
+
+    const apply = styleOf(applyButtons(renderer)[0]);
+    const preview = styleOf(accordion(renderer));
+    /**
+     * The halves are EQUAL in either layout: side by side they share the row
+     * (flex: 1); stacked for large text each one takes the full width. This test
+     * window reports a large font scale, so the stacked branch is the live one.
+     */
+    const share = (style: Record<string, unknown>): string =>
+      style.flex === 1 ? 'row' : style.width === '100%' ? 'stacked' : 'none';
+    expect(share(apply)).toBe(share(preview));
+    expect(share(apply)).not.toBe('none');
+    // No 136 dp target and no minimum width of any kind for a half.
+    expect(apply.minWidth).toBe(0);
+    expect(preview.minWidth).toBe(0);
+    expect(apply.minWidth).not.toBe(templatesCalendarTokens.applyMinWidth);
+    // A real 44 (this iOS test window) / 48 dp target - never a 36 dp face.
+    expect(apply.minHeight).toBeGreaterThanOrEqual(44);
+    expect(preview.minHeight).toBeGreaterThanOrEqual(44);
+    // The pale accent wash COVERS the half: not a small outlined button inside a
+    // white inset. Only the reserved 2 dp focus ring is drawn, transparent until
+    // a keyboard focuses the half.
+    expect(apply.backgroundColor).toBe(selectedAccentFill(lightColors));
+    expect(apply.borderRadius).toBe(0);
+    expect(apply.borderWidth).toBe(2);
+    expect(apply.borderColor).toBe('transparent');
+    // The Preview half is its neutral twin.
+    expect(preview.backgroundColor).toBe(lightColors.cardFill);
+    // No old outlined capsule survives inside either half.
+    for (const half of [applyButtons(renderer)[0], accordion(renderer)]) {
+      expect(
+        half.findAllByType(View).filter((node) => styleOf(node).borderRadius === 8),
+      ).toHaveLength(0);
+    }
     expect(applyButtons(renderer)).toHaveLength(1);
 
-    // Expanding the contents must neither move nor duplicate the control.
+    // Expanding the contents must neither move nor duplicate the half.
     act(() => accordion(renderer).props.onPress());
-    expect(styleOf(applyButtons(renderer)[0]).minHeight).toBeGreaterThanOrEqual(44);
+    expect(accordion(renderer).props.accessibilityState.expanded).toBe(true);
+    expect(styleOf(applyButtons(renderer)[0]).backgroundColor).toBe(
+      selectedAccentFill(lightColors),
+    );
     expect(applyButtons(renderer)).toHaveLength(1);
   });
 
@@ -355,10 +393,14 @@ describe('the template card', () => {
     const apply = applyButtons(renderer)[0];
     // Neither target contains the other, so a press can only ever do its own job.
     expect(
-      apply.findAll((node) => node.props?.accessibilityLabel === t('Rn_TemplateMealPreview')),
+      apply.findAll(
+        (node) => node.props?.accessibilityLabel === tFmt('Rn_TemplatePreviewNamed', DAY_NAME),
+      ),
     ).toHaveLength(0);
     expect(
-      preview.findAll((node) => node.props?.accessibilityLabel === t('Template_Apply')),
+      preview.findAll(
+        (node) => node.props?.accessibilityLabel === tFmt('Rn_TemplateApplyNamed', DAY_NAME),
+      ),
     ).toHaveLength(0);
     // One template, exactly two controls - no whole-card press, no third action.
     const controls = renderer.root.findAll(
@@ -367,8 +409,8 @@ describe('the template card', () => {
         typeof node.props?.accessibilityLabel === 'string',
     );
     expect(controls.map((node) => node.props.accessibilityLabel)).toEqual([
-      t('Rn_TemplateMealPreview'),
-      t('Template_Apply'),
+      tFmt('Rn_TemplatePreviewNamed', DAY_NAME),
+      tFmt('Rn_TemplateApplyNamed', DAY_NAME),
     ]);
     // Previewing alone never opens the apply sheet.
     act(() => preview.props.onPress());

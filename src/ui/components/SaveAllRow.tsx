@@ -1,151 +1,158 @@
-// The day header's SAVE ROW - the mockup's single line, and only while it has a
-// job:
-//
-//     ✎ 1 editor open                          [ 🖫 Save all ]
-//
-// NOTHING TO SAVE = NO ROW. With every editor closed the row (and the hairline
-// above it) is not rendered at all, exactly as the reference draws an idle
-// dashboard: there is no save control to explain and no "saved" claim to read.
-//
-//   editors open   "1 editor open" / "2 editors open"   neutral outline + enabled
-//   saving         "Saving…"                            subdued + disabled
-//   partial batch  "2 of 3 saved" (warning ink)         button still enabled
-//
-// The control is deliberately NEUTRAL: the card's own surface inside a thin
-// border, normal ink and a slate glyph, 36 pt tall inside a real 44 pt target.
-// No indigo fill - saving a card is routine housekeeping, not a call to action.
-//
-// The wording is deliberately LOCAL: an open editor means edits waiting in this
-// card, and a save writes them to this device's database. Nothing here says the
-// cloud has them - the Settings sync card is the one place that talks about the
-// cloud, and a save only queues the upload for the next sync attempt.
-
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-
+import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { t, tFmt } from '../strings';
 import { fonts, type ThemeColors } from '../theme';
-import { Icon, type IconName } from './icons';
+import { accentActionColors, cancelActionColors } from '../accentActions';
+import { controls as k } from './compact-editor.tokens';
+import { Icon } from './icons';
+
+/** The interactive area around every face: 48 dp on Android, 44 dp on iOS. */
+const SAVE_TARGET_MIN = Platform.OS === 'ios' ? k.targetIOS : k.targetAndroid;
 
 export function SaveAllRow(props: {
-  /** Cards holding unsaved edits; 0 means there is nothing to save. */
   unsaved: number;
-  /** True while the batch save is running. */
   saving: boolean;
-  /** A partial result worth naming ("2 of 3 saved"); null when all of it landed. */
+  /**
+   * A card's OWN save is running. The bulk actions must not start underneath it,
+   * so both faces are disabled - the status sentence is unchanged.
+   */
+  locked?: boolean;
   notice?: string | null;
   onSaveAll: () => void;
+  onCancelAll: () => void;
   colors: ThemeColors;
   isDark: boolean;
 }): React.JSX.Element | null {
   const { colors } = props;
   const { width, fontScale } = useWindowDimensions();
-  // No open editor and no save in flight: the row does not exist.
-  if (props.unsaved === 0 && !props.saving) {
-    return null;
-  }
-  const canSave = props.unsaved > 0 && !props.saving;
+  if (props.unsaved === 0 && !props.saving) { return null; }
+  const locked = props.locked === true;
+  const canAct = props.unsaved > 0 && !props.saving && !locked;
   const partial = props.notice !== undefined && props.notice !== null && props.notice !== '';
-  /** Narrow window or the largest text sizes: the control drops under the status. */
   const stacked = width > 0 && (width < 350 || fontScale > 1.3);
-
+  const label = props.saving
+    ? t('Rn_Saving')
+    : partial
+      ? (props.notice as string)
+      : props.unsaved === 1
+        ? t('Rn_EditorOpenOne')
+        : tFmt('Rn_EditorsOpen', props.unsaved);
   /**
-   * Left slot: what the save state IS, and the glyph that says it. The glyph is
-   * NEUTRAL - the save control is part of an ordinary page, not a call to action.
+   * The quiet glyph beside the sentence: a pencil for open drafts, a disk while
+   * the batch runs, a warning for a partial result. It is DECORATION - the
+   * sentence already says the state in words - so it carries no count, no
+   * "saved"/"synced" claim and nothing for a screen reader.
    */
-  let icon: IconName = 'create-outline';
-  let ink = colors.textSecondary;
-  let label =
-    props.unsaved === 1 ? t('Rn_EditorOpenOne') : tFmt('Rn_EditorsOpen', props.unsaved);
-  if (props.saving) {
-    icon = 'save-outline';
-    ink = colors.textMuted;
-    label = t('Rn_Saving');
-  } else if (partial) {
-    // A partial save is the one result that must be named: those editors are
-    // still open, so the button stays live.
-    icon = 'alert-circle-outline';
-    ink = colors.warning;
-    label = props.notice as string;
-  }
-  const statusInk = props.saving ? colors.textMuted : colors.text;
-
+  const statusIcon = props.saving
+    ? 'save-outline'
+    : partial
+      ? 'alert-circle-outline'
+      : 'create-outline';
+  // Secondary ink for the wording, muted while the batch runs. The partial
+  // notice keeps its own truthful sentence.
+  const statusInk = props.saving ? colors.textMuted : colors.textSecondary;
   return (
-    <View
-      style={[styles.row, stacked && styles.rowStacked, { borderTopColor: colors.hairline }]}>
+    <View style={[styles.row, stacked && styles.rowStacked, { borderTopColor: colors.hairline }]}>
       <View style={[styles.status, stacked && styles.statusStacked]}>
-        <Icon name={icon} size={16} color={ink} />
-        <Text
-          accessibilityLiveRegion="polite"
-          style={[styles.statusText, { color: statusInk }]}
-          numberOfLines={1}>
+        <View
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants">
+          <Icon name={statusIcon} size={14} color={statusInk} />
+        </View>
+        <Text accessibilityLiveRegion="polite" style={[styles.statusText, { color: statusInk }]}>
           {label}
         </Text>
       </View>
-      {/* The 44 pt target; the visible control inside it is the smaller neutral
-          outline, so "Save all" stays quiet beside the cards it saves. */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t('Dashboard_SaveAll')}
-        accessibilityState={{ disabled: !canSave, busy: props.saving }}
-        disabled={!canSave}
-        onPress={props.onSaveAll}
-        style={[styles.target, stacked && styles.targetStacked, !canSave && styles.subdued]}>
-        {({ pressed }) => (
-          <View
-            style={[
-              styles.button,
-              {
-                borderColor: colors.border,
-                backgroundColor: pressed && canSave ? colors.surfaceVariant : colors.cardFill,
-              },
-            ]}>
-            <Icon name="save-outline" size={16} color={colors.textSecondary} />
-            <Text style={[styles.buttonText, { color: colors.text }]} numberOfLines={1}>
-              {t('Dashboard_SaveAll')}
-            </Text>
-          </View>
-        )}
-      </Pressable>
+      {/* Cancel all first, then Save all: the discard sits beside the save, in the
+          same red family as a single card's Cancel. Each face is only as wide as
+          its own label plus the shared 5 dp padding — never an equal-width pair. */}
+      <View style={[styles.pair, stacked && styles.pairStacked]}>
+        <ControlFace
+          label={t('Rn_CancelAll')}
+          kind="cancel"
+          disabled={!canAct}
+          onPress={props.onCancelAll}
+          colors={colors}
+          align={stacked ? undefined : 'trailing'}
+        />
+        <ControlFace
+          label={t('Dashboard_SaveAll')}
+          kind="save"
+          disabled={!canAct}
+          onPress={props.onSaveAll}
+          colors={colors}
+          busy={props.saving}
+          align={stacked ? undefined : 'leading'}
+        />
+      </View>
     </View>
   );
 }
 
+function ControlFace(props: { label: string; kind: 'save'|'cancel'; disabled: boolean; onPress: () => void; colors: ThemeColors; align?: 'leading' | 'trailing'; busy?: boolean }): React.JSX.Element {
+  const ink = props.kind === 'cancel' ? cancelActionColors(props.colors) : accentActionColors(props.colors);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.kind === 'cancel' ? t('Rn_CancelAll') : t('Dashboard_SaveAll')}
+      accessibilityState={{ disabled: props.disabled, busy: props.busy === true }}
+      disabled={props.disabled}
+      onPress={props.onPress}
+      style={[styles.controlTarget, props.disabled && styles.subdued]}>
+      {/* The face is content-sized - its own label plus the shared 5 dp padding -
+          and hugs the target edge that FACES ITS PARTNER, so the two visible
+          outlines stay k.gap apart instead of gaining the wrapper's slack. */}
+      <View
+        style={[
+          styles.control,
+          props.align === 'trailing' && styles.faceTrailing,
+          props.align === 'leading' && styles.faceLeading,
+          { borderColor: ink.border, backgroundColor: ink.fill },
+        ]}>
+        <Text style={[styles.controlLabel, { color: ink.foreground }]}>{props.label}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  /** One line under the day actions, separated by its one existing hairline. */
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 8,
-    marginTop: 8,
-    paddingTop: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
+  /**
+   * The bulk row: the hairline stays, but only 4 dp of air above it and none
+   * below it - the 48/44 dp targets inside already carry their own transparent
+   * slack, so the old 8 + 6 dp stacked on top of that. Readable air is unchanged;
+   * a wrapped status or large text still grows the row.
+   */
+  row: { flexDirection: 'row', alignItems: 'center', columnGap: k.gap, marginTop: 4, paddingTop: 0, borderTopWidth: StyleSheet.hairlineWidth },
   rowStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: 6 },
   status: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', columnGap: 6 },
   statusStacked: { flex: 0, width: '100%' },
-  statusText: { fontSize: 13, fontFamily: fonts.regular, flexShrink: 1 },
-  /** The real 44 pt touch target, never narrower than 96 pt. */
-  target: { minHeight: 44, minWidth: 96, justifyContent: 'center' },
-  targetStacked: { alignSelf: 'flex-end' },
-  /** Busy or disabled: the control is subdued, never repainted. */
-  subdued: { opacity: 0.5 },
+  /** 12/18 sp secondary ink beside the 14 dp glyph; wraps, never clamped. */
+  statusText: { fontSize: 12, lineHeight: 18, fontFamily: fonts.regular, flexShrink: 1 },
+  pair: { flexDirection: 'row', alignItems: 'center', columnGap: k.gap, alignSelf: 'flex-end' },
+  pairStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: k.gap },
+  subdued: { opacity: k.disabledOpacity },
   /**
-   * The visible control: the card's own surface inside a 1 pt neutral border,
-   * 36 pt tall with 8 pt corners, a slate glyph and normal 13 pt ink. It is the
-   * same quiet family as the editor's Cancel / Save - no accent fill.
+   * A real 48/44 dp target around each face. `alignItems: 'center'` keeps a SHORT
+   * face short even when the row stacks, so Cancel all / Save all never stretch to
+   * an equal width.
    */
-  button: {
-    minWidth: 96,
-    minHeight: 36,
-    borderWidth: 1,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+  controlTarget: {
     justifyContent: 'center',
-    columnGap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    alignItems: 'center',
+    minWidth: SAVE_TARGET_MIN,
+    minHeight: SAVE_TARGET_MIN,
   },
-  buttonText: { fontSize: 13, fontFamily: fonts.regular, flexShrink: 1 },
+  control: { borderWidth: k.border, borderRadius: k.radius, alignItems: 'center', justifyContent: 'center', paddingHorizontal: k.paddingX, paddingVertical: k.paddingY },
+  /**
+   * Row layout only: the face hugs the edge of its own target that faces its
+   * partner (logical start/end, so RTL flips with the row). A face shorter than
+   * the 48/44 dp target then leaves its slack OUTSIDE the pair, and the two
+   * visible outlines sit exactly k.gap apart. The stacked fallback passes no
+   * align, so both faces stay centred there.
+   */
+  faceTrailing: { alignSelf: 'flex-end' },
+  faceLeading: { alignSelf: 'flex-start' },
+  controlLabel: { fontFamily: fonts.regular, fontSize: k.fontSize, lineHeight: k.lineHeight, textAlign: 'center' },
 });
+

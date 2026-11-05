@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
+  Keyboard,
   Platform,
   Pressable,
   ScrollView,
@@ -50,6 +51,7 @@ import { IconButton, localizedCode } from '../components/buttons';
 import { DayProgress } from '../components/DayProgress';
 import { SaveAllRow } from '../components/SaveAllRow';
 import { PhotoViewer } from '../components/PhotoViewer';
+import { cancelOpenDrafts, type RegisteredEditor } from '../cancelOpenDrafts';
 
 import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../strings';
 import { clearMealRequest } from '../clearMealPrompt';
@@ -123,6 +125,18 @@ export function DashboardScreen({
   const batchRef = useRef({ remaining: 0, saved: 0, total: 0 });
   /** Guards the single photograph pipeline (picker + save) against re-entry. */
   const photoBusyRef = useRef(false);
+  /** Registry of open editors keyed by meal id for synchronous Cancel all. */
+  const editorRegistryRef = useRef(new Map<string, RegisteredEditor>());
+  /** True while a Save all or Cancel all batch is in flight. */
+  const batchBusyRef = useRef(false);
+  /**
+   * The cards whose OWN save is running. It is a ref because the bulk handlers
+   * must see it in the same frame as the tap - React's disabled state only lands
+   * on the next render - and a render count exists only so the row disables the
+   * bulk controls visibly at the same time.
+   */
+  const savingCardsRef = useRef<Set<string>>(new Set());
+  const [savingCards, setSavingCards] = useState(0);
   const { width, fontScale } = useWindowDimensions();
   /** Narrow screen or large text: the two bulk actions stack at full width. */
   const stackActions = width < STACK_ACTIONS_WIDTH || fontScale > STACK_ACTIONS_FONT_SCALE;
@@ -540,12 +554,21 @@ export function DashboardScreen({
   }, []);
 
   const handleSaveAll = (): void => {
-    if (openEditors.length === 0 || saving) {
+    // One batch at a time AND never on top of a card's own write: a card that is
+    // already saving would answer "saved" without writing, which would make the
+    // batch report a success it never performed.
+    if (
+      openEditors.length === 0 ||
+      saving ||
+      batchBusyRef.current ||
+      savingCardsRef.current.size > 0
+    ) {
       return;
     }
     setSaving(true);
     setSaveNotice(null);
     batchRef.current = { remaining: openEditors.length, saved: 0, total: openEditors.length };
+    batchBusyRef.current = true;
     setSaveAllTick((tick) => tick + 1);
   };
 
@@ -560,6 +583,7 @@ export function DashboardScreen({
     }
     if (batch.remaining === 0) {
       setSaving(false);
+      batchBusyRef.current = false;
       // A full success needs no sentence: the row's own state becomes "All
       // changes saved". Only a partial one has to be named.
       setSaveNotice(
@@ -567,6 +591,52 @@ export function DashboardScreen({
       );
     }
   }, []);
+
+  /** Register an editor so Cancel all can discard it synchronously. */
+  const registerEditor = useCallback((mealId: string, commands: { isEditing: () => boolean; isSaving: () => boolean; cancel: () => void }) => {
+    const registration: RegisteredEditor = { id: mealId, ...commands };
+    editorRegistryRef.current.set(mealId, registration);
+    return () => {
+      // Remove ONLY this exact registration. Returning a cleanup that just deleted
+      // by id would let an older card's unmount drop a newer card's commands.
+      if (editorRegistryRef.current.get(mealId) === registration) {
+        editorRegistryRef.current.delete(mealId);
+      }
+    };
+  }, []);
+
+  /**
+   * Called by MealCard when its own saving state changes: the bulk controls must
+   * refuse to start while ANY card is mid-write, even on the same frame as the tap.
+   */
+  const handleSavingChange = useCallback((mealId: string, busy: boolean) => {
+    const cards = savingCardsRef.current;
+    if (busy) {
+      cards.add(mealId);
+    } else {
+      cards.delete(mealId);
+    }
+    setSavingCards(cards.size);
+  }, []);
+
+  /** Discard open drafts across every registered card on this day. */
+  const handleCancelAll = useCallback((): void => {
+    // Same-frame guard: refs, not the render state the buttons were drawn with.
+    if (batchBusyRef.current || saving || savingCardsRef.current.size > 0) {
+      return;
+    }
+    const result = cancelOpenDrafts(editorRegistryRef.current.values(), batchBusyRef.current, () => {
+      // Accepted only: a cancelled editor must not be reopened by a pending
+      // forceEditing request, and a partial-batch sentence is stale once the drafts
+      // it described are gone. Nothing is cleared on blocked/empty.
+      setEditRequestId(null);
+      setSaveNotice(null);
+    });
+    if (result.kind === 'cancelled') {
+      // The drafts are gone, so the keyboard has nothing left to type into.
+      Keyboard.dismiss();
+    }
+  }, [saving]);
 
   if (meals === null) {
     return (
@@ -588,6 +658,13 @@ export function DashboardScreen({
   const canMarkMissed = meals.some(
     (m) => m.status !== MealStatus.Missed && !isFutureMeal(m, now) && hasMealText(m),
   );
+
+  /**
+   * The SAME rule SaveAllRow uses to render itself. The header gives up its
+   * bottom air (6 -> 2 dp) ONLY while that row really exists; an idle header
+   * keeps the token's 6 dp, so nothing moves on a day with no drafts.
+   */
+  const showBulkRow = openEditors.length > 0 || saving;
 
   return (
     <ScrollView
@@ -616,6 +693,7 @@ export function DashboardScreen({
         testID="day-header"
         style={[
           styles.header,
+          showBulkRow && styles.headerWithBulkRow,
           cardShadow,
           { backgroundColor: colors.cardFill, borderColor: colors.border },
         ]}>
@@ -699,8 +777,10 @@ export function DashboardScreen({
         <SaveAllRow
           unsaved={openEditors.length}
           saving={saving}
+          locked={savingCards > 0}
           notice={saveNotice}
           onSaveAll={handleSaveAll}
+          onCancelAll={handleCancelAll}
           colors={colors}
           isDark={app.isDark}
         />
@@ -754,6 +834,8 @@ export function DashboardScreen({
                   });
                 }}
                 uploadingPhoto={uploadingMealId === meal.id}
+                registerEditor={registerEditor}
+                onSavingChange={handleSavingChange}
               />
             </View>
           );
@@ -924,6 +1006,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: homeCompact.paddingX,
     paddingVertical: homeCompact.paddingY,
   },
+  /**
+   * While the bulk save row is rendered: same 6 dp top air and 10 dp sides, but
+   * the gap below closes (6 -> 2 dp) because the row's own hairline already
+   * separates the two. An idle header never takes this override.
+   */
+  headerWithBulkRow: { paddingBottom: 2 },
   /**
    * The date is a plain HEADING between two equal arrows: ONE 15 pt regular
    * phrase with the year in it, on a 20 pt line. It is not a control, so it

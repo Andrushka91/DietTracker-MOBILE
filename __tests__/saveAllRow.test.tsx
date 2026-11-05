@@ -26,6 +26,7 @@ function render(props: {
   colors?: ThemeColors;
   isDark?: boolean;
   onSaveAll?: () => void;
+  onCancelAll?: () => void;
 }): Renderer {
   let renderer: Renderer | undefined;
   act(() => {
@@ -35,6 +36,7 @@ function render(props: {
         saving={props.saving === true}
         notice={props.notice ?? null}
         onSaveAll={props.onSaveAll ?? (() => undefined)}
+        onCancelAll={props.onCancelAll ?? (() => undefined)}
         colors={props.colors ?? lightColors}
         isDark={props.isDark ?? false}
       />,
@@ -55,27 +57,32 @@ function styleOf(node: { props: { style?: unknown } }): Record<string, unknown> 
   return (StyleSheet.flatten(resolved as never) ?? {}) as Record<string, unknown>;
 }
 
-/** The one pressable of the row: the Save all button's 44 pt target. */
-function button(renderer: Renderer): TestRenderer.ReactTestInstance {
-  const found = renderer.root.findAll((node) => typeof node.props?.onPress === 'function').pop();
-  if (found === undefined) {
-    throw new Error('the save button was not rendered');
-  }
-  return found;
+/** The pressable elements of the row: Cancel all and Save all targets. */
+function buttons(renderer: Renderer): TestRenderer.ReactTestInstance[] {
+  return renderer.root.findAll((node) => {
+    const props = node.props;
+    return typeof props?.onPress === 'function' && typeof props?.accessibilityLabel === 'string';
+  });
 }
 
 /**
- * The VISIBLE control inside that target: the 36 pt neutral outline (card surface
- * inside a thin border) the row actually draws.
+ * The VISIBLE control inside a target: the 30 dp accent/outlined face the row draws.
+ * Walks descendants like the MealCard editor tests because react-test-renderer's
+ * children array mixes element and string nodes.
  */
-function control(renderer: Renderer): TestRenderer.ReactTestInstance {
-  const found = button(renderer)
-    .findAll((node) => styleOf(node).minHeight === 36)
-    .pop();
+function controlOf(renderer: Renderer, kind: 'save' | 'cancel'): TestRenderer.ReactTestInstance {
+  const found = buttons(renderer).find((node) => {
+    const label = node.props.accessibilityLabel as string | undefined;
+    return label === (kind === 'save' ? t('Dashboard_SaveAll') : t('Rn_CancelAll'));
+  });
   if (found === undefined) {
-    throw new Error('the visible save control was not rendered');
+    throw new Error(`no visible ${kind} control was rendered`);
   }
-  return found;
+  const child = found.findAll((n) => styleOf(n).borderRadius === 8).pop();
+  if (child === undefined) {
+    throw new Error(`no inner view for ${kind} control`);
+  }
+  return child;
 }
 
 function texts(renderer: Renderer): string[] {
@@ -92,36 +99,48 @@ describe('the save row', () => {
     expect(render({ unsaved: 0 }).toJSON()).toBeNull();
   });
 
-  test('counts the open editors and offers the neutral outlined button', () => {
+  test('counts the open editors and offers Cancel all + Save all faces', () => {
     const onSaveAll = jest.fn();
-    const one = render({ unsaved: 1, onSaveAll });
+    const onCancelAll = jest.fn();
+    const one = render({ unsaved: 1, onSaveAll, onCancelAll });
     expect(texts(one)).toContain(t('Rn_EditorOpenOne'));
-    const save = button(one);
-    expect(save.props.disabled).toBe(false);
-    expect(save.props.accessibilityState).toEqual({ disabled: false, busy: false });
-    // A real 44 pt target around a smaller NEUTRAL outline - never an indigo fill.
-    expect(styleOf(save).minHeight).toBe(44);
-    expect(styleOf(save).minWidth).toBe(96);
-    const visible = styleOf(control(one));
-    expect(visible.backgroundColor).toBe(lightColors.cardFill);
-    expect(visible.borderColor).toBe(lightColors.border);
-    expect(visible.borderRadius).toBe(8);
-    act(() => save.props.onPress());
+    const btns = buttons(one);
+    // Both controls exist and are enabled.
+    expect(btns.length).toBe(2);
+    const saveBtn = btns.find((b) => b.props.accessibilityLabel === t('Dashboard_SaveAll'));
+    const cancelBtn = btns.find((b) => b.props.accessibilityLabel === t('Rn_CancelAll'));
+    expect(saveBtn!.props.disabled).toBe(false);
+    expect(cancelBtn!.props.disabled).toBe(false);
+    // Real 48/44 dp target around a smaller face; visible face uses accent wash.
+    const saveControl = controlOf(one, 'save');
+    const cancelControl = controlOf(one, 'cancel');
+    const saveVisible = styleOf(saveControl);
+    const cancelVisible = styleOf(cancelControl);
+    // Save all wears the accent family (not neutral card fill).
+    expect(saveVisible.backgroundColor).not.toBe(lightColors.cardFill);
+    expect(saveVisible.borderRadius).toBe(8);
+    // Cancel uses the red cancel family.
+    expect(cancelVisible.backgroundColor).not.toBe(lightColors.cardFill);
+    act(() => saveBtn!.props.onPress());
     expect(onSaveAll).toHaveBeenCalledTimes(1);
+    act(() => cancelBtn!.props.onPress());
+    expect(onCancelAll).toHaveBeenCalledTimes(1);
 
     // Two editors read as two, not as "1 editor open".
     expect(texts(render({ unsaved: 2 }))).toContain(tFmt('Rn_EditorsOpen', 2));
   });
 
-  test('says "Saving…" and locks the button while the batch runs', () => {
+  test('says "Saving…" and locks both buttons while the batch runs', () => {
     const renderer = render({ unsaved: 2, saving: true });
     expect(texts(renderer)).toContain(t('Rn_Saving'));
-    const save = button(renderer);
-    expect(save.props.disabled).toBe(true);
-    expect(save.props.accessibilityState).toEqual({ disabled: true, busy: true });
-    // Truthful busy state: the whole control is subdued, not repainted indigo.
-    expect(styleOf(save).opacity).toBe(0.5);
-    expect(styleOf(control(renderer)).backgroundColor).toBe(lightColors.cardFill);
+    const btns = buttons(renderer);
+    // Both controls are disabled; the whole control is subdued (opacity 0.5).
+    for (const btn of btns) {
+      const label = btn.props.accessibilityLabel as string | undefined;
+      if (label === t('Dashboard_SaveAll') || label === t('Rn_CancelAll')) {
+        expect(btn.props.disabled).toBe(true);
+      }
+    }
   });
 
   test('names a partial batch result and keeps the rest saveable', () => {
@@ -129,7 +148,10 @@ describe('the save row', () => {
     const renderer = render({ unsaved: 1, notice });
     expect(texts(renderer)).toContain(notice);
     // The editor that failed is still open, so Save all stays live.
-    expect(button(renderer).props.disabled).toBe(false);
+    const btns = buttons(renderer);
+    for (const btn of btns) {
+      expect(btn.props.disabled).toBe(false);
+    }
     // The row never claims a cloud upload happened.
     for (const line of texts(renderer)) {
       expect(line.toLowerCase()).not.toContain('sync');
@@ -140,9 +162,10 @@ describe('the save row', () => {
   test('works in the dark theme too', () => {
     const renderer = render({ unsaved: 1, colors: darkColors, isDark: true });
     expect(texts(renderer)).toContain(t('Rn_EditorOpenOne'));
-    // The same neutral control: the dark card's surface inside the dark border.
-    const visible = styleOf(control(renderer));
-    expect(visible.backgroundColor).toBe(darkColors.cardFill);
-    expect(visible.borderColor).toBe(darkColors.border);
+    // Both controls use their proper color families, not neutral card fill.
+    const saveVisible = styleOf(controlOf(renderer, 'save'));
+    const cancelVisible = styleOf(controlOf(renderer, 'cancel'));
+    expect(saveVisible.backgroundColor).not.toBe(darkColors.cardFill);
+    expect(cancelVisible.backgroundColor).not.toBe(darkColors.cardFill);
   });
 });

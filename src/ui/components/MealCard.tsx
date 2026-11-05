@@ -61,9 +61,10 @@ import { PHOTO_GAP, PHOTO_TILE, PhotoGallery } from './PhotoGallery';
 /**
  * Geometry of the compact inline editor (dp / sp), scoped to this card so no
  * other screen changes: 12 pt card inset, two 44 pt shallow fields 12 pt apart,
- * then a footer 6 pt below them. Every footer control is a real 44 pt target
- * around a SMALLER neutral outline (36 pt), so the answers stay quiet on the
- * card's own surface while remaining comfortable to tap.
+ * then a footer 6 pt below them. Every footer control is a real 48/44 dp target
+ * around a SMALLER 30 dp visible face (equal across Save / Cancel / time), so
+ * the answers stay quiet on the card's own surface while remaining comfortable
+ * to tap. Time shares the exact same resting fill family as Save via accentActionColors.
  */
 const EDITOR_TOP_GAP = 12;
 const EDITOR_FIELD_GAP = 12;
@@ -76,23 +77,32 @@ const EDITOR_FIELD_LINE_HEIGHT = 20;
 /** The floating label / counter: 10 pt on the field's top border. */
 const EDITOR_LABEL_SIZE = 10;
 const EDITOR_LABEL_TOP = -7;
-const EDITOR_FOOTER_GAP = 6;
-/** Normal width of the clock + time chip; it widens with the system text size. */
-export const EDITOR_TIME_WIDTH = 84;
-const EDITOR_TIME_TEXT_SIZE = 14;
-const EDITOR_CANCEL_MIN_WIDTH = 64;
-const EDITOR_SAVE_MIN_WIDTH = 56;
-const EDITOR_BUTTON_GAP = 6;
-/** The real touch target around every footer control. */
-const EDITOR_BUTTON_MIN_HEIGHT = 44;
 /**
- * The visible neutral outline inside that target: 36 pt tall, 8 pt corners and
- * 13 pt regular ink - the same quiet control family as "Apply to date" on the
- * templates page. There is deliberately no accent fill on this card.
+ * Air above the footer row: 2 dp. The row's own 48/44 dp targets already leave
+ * ~9/7 dp of transparent slack around the 30 dp faces, so the old 6 dp margin
+ * doubled the gap on an open editor.
  */
-const EDITOR_CONTROL_MIN_HEIGHT = 36;
+const EDITOR_FOOTER_GAP = 2;
+const EDITOR_TIME_TEXT_SIZE = 12;
+/** The clock glyph and its gap are the ONLY additions to the measured time text. */
+const EDITOR_TIME_ICON_SIZE = 12;
+const EDITOR_TIME_ICON_GAP = 2;
+/** "HH:MM" width assumed until the displayed value has really been measured. */
+const EDITOR_TIME_TEXT_FALLBACK = 36;
+/** Side padding shared by the four action faces AND the time chip: 5 dp. */
+const EDITOR_CONTROL_PADDING_X = 5;
+const EDITOR_BUTTON_GAP = 8;
+/** The real touch target around every footer control. */
+export const EDITOR_BUTTON_MIN_HEIGHT_ANDROID = 48;
+export const EDITOR_BUTTON_MIN_HEIGHT_IOS = 44;
+/** The real touch target is at least 48 dp (Android) / 44 dp (iOS) in BOTH axes. */
+const EDITOR_TARGET_MIN =
+  Platform.OS === 'ios' ? EDITOR_BUTTON_MIN_HEIGHT_IOS : EDITOR_BUTTON_MIN_HEIGHT_ANDROID;
+/** The visible face height for every footer control: 30 dp. */
+const EDITOR_CONTROL_MIN_HEIGHT = 30;
 const EDITOR_CONTROL_RADIUS = 8;
-const EDITOR_CONTROL_TEXT_SIZE = 13;
+const EDITOR_CONTROL_TEXT_SIZE = 12;
+const EDITOR_CONTROL_LINE_HEIGHT = 18;
 /** Above this system font scale the floating labels move into normal flow. */
 const EDITOR_LABEL_FLOW_SCALE = 1.2;
 /** Above this scale (or under this card width) the footer stacks. */
@@ -207,6 +217,18 @@ export interface MealCardProps {
   /** A photograph of this meal is being saved (spinner tile in the gallery). */
   uploadingPhoto?: boolean;
   isDark: boolean;
+  /**
+   * Registry callback from Dashboard: inserts a command object into the parent's
+   * registry so Cancel all can discard this card's open draft synchronously.
+   * Returns a cleanup function called on unmount / identity change.
+   */
+  registerEditor?: (id: string, commands: {
+    isEditing: () => boolean;
+    isSaving: () => boolean;
+    cancel: () => void;
+  }) => (() => void) | void;
+  /** Called when this card's saving state changes (true → false transitions). */
+  onSavingChange?: (mealId: string, busy: boolean) => void;
 }
 
 export function MealCard(props: MealCardProps): React.JSX.Element {
@@ -239,6 +261,33 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   const [draftIngredients, setDraftIngredients] = useState(meal.ingredients);
   const [draftTime, setDraftTime] = useState('');
   /**
+   * Content-fit geometry for the time chip. The face is only as wide as the
+   * displayed value plus the clock, its 2 dp gap, the shared 5 dp side padding
+   * and the border — never a fixed 64 dp slot, so nothing around it is padded by
+   * accident. The value is measured from a hidden copy of the same 12 sp text.
+   */
+  const [timeTextWidth, setTimeTextWidth] = useState<number | null>(null);
+  /** The chip thickens its border while the input is focused (focus indication). */
+  const [timeFocused, setTimeFocused] = useState(false);
+  /**
+   * Content-fit geometry for the time chip and its input. The face is measured
+   * text + clock + its 2 dp gap + the shared 5 dp side padding + the border —
+   * never a fixed 64 dp slot. A very large system font can never push the footer
+   * off the card: the face is clamped to the window and the footer stacks long
+   * before this clamp matters.
+   */
+  const timeBorderWidth = timeFocused ? 2 : 1;
+  const timeDisplayed = draftTime === '' ? 'HH:MM' : draftTime;
+  const timeInputWidth = Math.ceil(timeTextWidth ?? EDITOR_TIME_TEXT_FALLBACK * fontScale);
+  const timeFaceWidth = Math.min(
+    width > 0 ? width : Number.MAX_SAFE_INTEGER,
+    timeInputWidth +
+      EDITOR_TIME_ICON_SIZE +
+      EDITOR_TIME_ICON_GAP +
+      2 * EDITOR_CONTROL_PADDING_X +
+      2 * timeBorderWidth,
+  );
+  /**
    * The concise reason an over-limit keystroke or paste was refused. It is local
    * feedback for THIS editor - not a global status - and disappears with the next
    * accepted change, Cancel or a successful save.
@@ -260,6 +309,10 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
    * refresh must neither reset the drafts nor move the goalposts under a save.
    */
   const editStartRef = useRef({ title: meal.title, ingredients: meal.ingredients });
+  /** Mutable editing flag for synchronous Cancel all access. */
+  const editingRef = useRef(false);
+  /** Mutable saving flag for synchronous Cancel all guard. */
+  const savingRef = useRef(false);
   /** The three editor inputs, so a tap on a field's frame focuses its input. */
   const titleRef = useRef<React.ElementRef<typeof TextInput> | null>(null);
   const descriptionRef = useRef<React.ElementRef<typeof TextInput> | null>(null);
@@ -405,6 +458,14 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.forceEditing]);
 
+  /**
+   * The LATEST cancelEdit. The Cancel all registry is created once per meal
+   * identity, so it must call through a ref - a captured `cancelEdit` would
+   * restore the values the meal had when the card first mounted instead of the
+   * ones it has now.
+   */
+  const cancelEditRef = useRef<() => void>(() => undefined);
+
   const cancelEdit = (): void => {
     setDraftTitle(meal.title);
     setDraftIngredients(meal.ingredients);
@@ -414,6 +475,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     setEditing(false);
     props.onEditingChange?.(meal.id, false);
   };
+  cancelEditRef.current = cancelEdit;
 
   /** Validates + persists the draft. Returns true when the card was written. */
   const runSave = async (): Promise<boolean> => {
@@ -425,6 +487,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     }
     saveBusyRef.current = true;
     setSaving(true);
+    props.onSavingChange?.(meal.id, true);
     try {
       const timeValue = draftTime.trim();
       let plannedTime: string | null = null;
@@ -484,6 +547,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
     } finally {
       saveBusyRef.current = false;
       setSaving(false);
+      props.onSavingChange?.(meal.id, false);
     }
   };
 
@@ -492,8 +556,40 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
   };
 
   // "Save all" from the dashboard: bump → save this card's open editor.
-  const editingRef = useRef(false);
   editingRef.current = editing;
+  savingRef.current = saving;
+
+  // Register this card with the dashboard's Cancel all registry. Cleanup on
+  // unmount or when meal identity changes (browsing to another day).
+  useEffect(() => {
+    if (!props.registerEditor) {
+      return;
+    }
+    const commands = {
+      id: meal.id,
+      isEditing: () => editingRef.current,
+      isSaving: () => savingRef.current,
+      cancel: () => {
+        // Update the ref synchronously BEFORE the callback so Cancel all's
+        // synchronous protocol can never see a reopened draft. The write guard is
+        // deliberately untouched: cancelOpenDrafts already refuses while a save is
+        // in flight, so a RESTORE here could only mask a running write.
+        editingRef.current = false;
+        // Through the ref: the registry outlives this render, so the LATEST
+        // persisted values are restored, never a stale closure's.
+        cancelEditRef.current();
+      },
+    };
+    const cleanup = props.registerEditor(meal.id, commands);
+    return () => {
+      if (cleanup !== undefined) {
+        cleanup();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meal.id]);
+
+  // "Save all" from the dashboard: bump → save this card's open editor.
   const saveAllSeen = useRef(props.saveAllTick ?? 0);
   useEffect(() => {
     const tick = props.saveAllTick ?? 0;
@@ -532,7 +628,7 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
       {meal.status !== MealStatus.Pending && (
         <View style={[styles.rail, { backgroundColor: statusColor }]} />
       )}
-      <View style={styles.cardBody}>
+      <View style={[styles.cardBody, editing && styles.cardBodyEditing]}>
       {/* header - no fill: the card keeps its surface and only the rail and the
           pill carry the state. Compact: a 36 pt glyph tile, the category at
           16 pt over a 12 pt time, and an 11 pt badge on the trailing edge. */}
@@ -723,46 +819,84 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
             </Text>
           )}
           {/* Footer on the CARD's own surface (no tinted band): the clock + time
-              chip on the LEFT, Cancel / Save on the RIGHT, 6 pt apart. Every
-              control is a real 44 pt target around a 36 pt NEUTRAL outline - the
-              card's own surface inside a thin border, normal ink, no accent fill.
-              A narrow card or the largest text sizes stack the answers under the
-              time instead of squeezing it. */}
+              chip on the LEFT, Cancel / Save on the RIGHT, 8 pt apart. Every
+              control is a real 48/44 dp target around a 30 dp visible face whose
+              WIDTH is its own content plus the shared 5 dp side padding — so a
+              short label keeps a short face and the lower pair stays narrower
+              than the top one. Save and Save all use the accent family (the same
+              resting wash as time), Cancel uses the red cancel family. A narrow
+              card or the largest text sizes stack the answers under the time
+              instead of squeezing it. */}
           <View style={[styles.editorFoot, editorFooterStacked && styles.editorFootStacked]}>
+            {/* Hidden measuring copy of the value: the chip is sized to what the
+                user actually sees ("HH:MM" while the field is empty) instead of a
+                fixed slot. Absolutely positioned, so it reserves no space. */}
+            <View
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={styles.timeMeasure}>
+              <View style={styles.timeMeasureInner}>
+                <Text
+                  key={`${timeDisplayed}:${fontScale}`}
+                  accessible={false}
+                  style={[styles.timeMeasureText, { color: colors.text }]}
+                  onLayout={(event) => {
+                    const next = Math.ceil(event.nativeEvent.layout.width);
+                    if (next > 0) {
+                      setTimeTextWidth((old) => (old === next ? old : next));
+                    }
+                  }}>
+                  {timeDisplayed}
+                </Text>
+              </View>
+            </View>
             <Pressable
               accessible={false}
               onPress={() => timeRef.current?.focus()}
-              style={styles.timeTarget}>
+              style={[
+                styles.timeTarget,
+                { minHeight: Platform.OS === 'ios' ? EDITOR_BUTTON_MIN_HEIGHT_IOS : EDITOR_BUTTON_MIN_HEIGHT_ANDROID },
+              ]}>
               <View
                 style={[
                   styles.timeChip,
                   {
-                    borderColor: colors.border,
-                    backgroundColor: colors.cardFill,
-                    // A MINIMUM width: it widens with the system text size.
-                    width: Math.max(EDITOR_TIME_WIDTH, Math.ceil(68 * fontScale)),
+                    borderColor: accentActionColors(colors).border,
+                    backgroundColor: accentActionColors(colors).fill,
+                    // Focus indication without moving the row: the border thickens.
+                    borderWidth: timeBorderWidth,
+                    width: timeFaceWidth,
                   },
                 ]}>
-                <Icon name="time-outline" size={15} color={colors.textSecondary} />
+                <Icon
+                  name="time-outline"
+                  size={EDITOR_TIME_ICON_SIZE}
+                  color={accentActionColors(colors).foreground}
+                />
                 <TextInput
                   ref={timeRef}
                   accessibilityLabel={t('Rn_FieldPlannedTime')}
-                  // The mask below makes the value a time and nothing else; the chip
-                  // is only as wide as "HH:MM" needs, so it never stretches the row.
+                  // The mask below makes the value a time and nothing else, and the
+                  // field is exactly as wide as the measured value, so the chip
+                  // never stretches the row.
                   style={[
                     styles.timeInput,
-                    { color: colors.text },
-                    // Grows with the system text instead of clipping it.
                     {
+                      color: colors.text,
+                      width: timeInputWidth,
+                      // Grows with the system text instead of clipping it.
                       minHeight: Math.max(
                         EDITOR_CONTROL_MIN_HEIGHT - 2,
-                        Math.ceil(26 * fontScale),
+                        Math.ceil(24 * fontScale),
                       ),
                     },
                   ]}
                   value={draftTime}
                   editable={!saving}
                   onChangeText={(text) => setDraftTime(timeDraft(text))}
+                  onFocus={() => setTimeFocused(true)}
+                  onBlur={() => setTimeFocused(false)}
                   placeholder="HH:MM"
                   placeholderTextColor={colors.textMuted}
                   // iOS can type the colon (numbers-and-punctuation); Android's number
@@ -780,23 +914,20 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 accessibilityState={{ disabled: saving }}
                 disabled={saving}
                 onPress={cancelEdit}
-                style={[
-                  styles.controlTarget,
-                  styles.cancelTarget,
-                  saving && styles.subdued,
-                ]}>
+                style={[styles.controlTarget, saving && styles.subdued]}>
                 {({ pressed }) => {
                   const cancel = cancelActionColors(colors, pressed);
                   return (
                     <View
                       style={[
                         styles.control,
+                        !editorFooterStacked && styles.controlToTrailing,
                         {
                           borderColor: cancel.border,
                           backgroundColor: cancel.fill,
                         },
                       ]}>
-                      <Text style={[styles.controlLabel, { color: cancel.foreground }]} numberOfLines={1}>
+                      <Text style={[styles.controlLabel, { color: cancel.foreground }]}>
                         {t('Common_Cancel')}
                       </Text>
                     </View>
@@ -809,23 +940,20 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                 accessibilityState={{ disabled: saving, busy: saving }}
                 disabled={saving}
                 onPress={() => void saveEdit()}
-                style={[
-                  styles.controlTarget,
-                  styles.saveTarget,
-                  saving && styles.subdued,
-                ]}>
+                style={[styles.controlTarget, saving && styles.subdued]}>
                 {({ pressed }) => {
                   const action = accentActionColors(colors, pressed);
                   return (
                     <View
                       style={[
                         styles.control,
+                        !editorFooterStacked && styles.controlToLeading,
                         {
                           borderColor: action.border,
                           backgroundColor: action.fill,
                         },
                       ]}>
-                      <Text style={[styles.controlLabel, { color: action.foreground }]} numberOfLines={1}>
+                      <Text style={[styles.controlLabel, { color: action.foreground }]}>
                         {t('Common_Save')}
                       </Text>
                     </View>
@@ -1040,6 +1168,14 @@ const styles = StyleSheet.create({
    * side by side keep their toolbars level at the bottom edge.
    */
   cardBody: { padding: 14, paddingBottom: 12, flexGrow: 1 },
+  /**
+   * An OPEN editor's body: the same 14 dp top/side inset, fields, counters, time
+   * and status kept - but no 12 dp tail below the footer (the footer's targets
+   * carry their own slack) and no growing, so the card hugs its editor instead of
+   * trailing empty body. Only ever applied while editing; READ cards keep the
+   * body above and the toolbar below untouched.
+   */
+  cardBodyEditing: { paddingBottom: 2, flexGrow: 0 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1208,11 +1344,12 @@ const styles = StyleSheet.create({
   },
   /** Narrow card or the largest text sizes: the answers drop under the time. */
   editorFootStacked: { flexDirection: 'column', alignItems: 'stretch' },
-  /** The real 44 pt target behind the smaller visible clock chip. */
-  timeTarget: { minHeight: EDITOR_BUTTON_MIN_HEIGHT, justifyContent: 'center' },
+  /** The real touch target behind the smaller visible clock chip (platform-dependent). */
+  timeTarget: { justifyContent: 'center', alignItems: 'center', minWidth: EDITOR_TARGET_MIN },
   /**
-   * Clock + time: 36 pt tall neutral outline, 8 pt corners, 84 pt wide at the
-   * default scale (a minimum - it grows with the system text size).
+   * Clock + time: 30 dp tall accent-outlined chip, 8 pt corners. Its WIDTH is the
+   * measured value plus the clock, its 2 dp gap, the shared 5 dp side padding and
+   * the border — there is no fixed slot, so the row is not padded by accident.
    */
   timeChip: {
     minHeight: EDITOR_CONTROL_MIN_HEIGHT,
@@ -1220,40 +1357,82 @@ const styles = StyleSheet.create({
     borderRadius: EDITOR_CONTROL_RADIUS,
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 4,
-    paddingHorizontal: 6,
+    columnGap: EDITOR_TIME_ICON_GAP,
+    paddingHorizontal: EDITOR_CONTROL_PADDING_X,
   },
+  /**
+   * The typed value. Native TextInput padding is ZERO on purpose: the 5 dp inset
+   * lives on the chip, so nothing is added after the last digit and the caret
+   * sits exactly where the measured text ends.
+   */
   timeInput: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: 3,
+    paddingVertical: 0,
     paddingHorizontal: 0,
     fontFamily: fonts.regular,
     fontSize: EDITOR_TIME_TEXT_SIZE,
     fontVariant: ['tabular-nums'],
   },
+  /** Hidden copy of the value: measures it without reserving any space. */
+  timeMeasure: {
+    position: 'absolute',
+    opacity: 0,
+    width: 0,
+    height: 0,
+    overflow: 'hidden',
+    left: 0,
+    top: 0,
+  },
+  timeMeasureInner: { width: 10000 },
+  timeMeasureText: {
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_TIME_TEXT_SIZE,
+    fontVariant: ['tabular-nums'],
+    alignSelf: 'flex-start',
+  },
   editorActions: { flexDirection: 'row', alignItems: 'center', columnGap: EDITOR_BUTTON_GAP },
   editorActionsStacked: { justifyContent: 'flex-end' },
-  /** The two answers' touch targets: 44 pt tall, centred on the visible control. */
-  controlTarget: { minHeight: EDITOR_BUTTON_MIN_HEIGHT, justifyContent: 'center' },
+  /**
+   * The four answers' touch targets: a real 48/44 dp area around the visible
+   * face. `alignItems: 'center'` is what keeps a SHORT face short — the target
+   * never stretches the face to its own width.
+   */
+  controlTarget: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: EDITOR_TARGET_MIN,
+    minHeight: EDITOR_TARGET_MIN,
+  },
   /** A save in flight: the whole control is subdued, never recoloured. */
   subdued: { opacity: 0.5 },
-  /** Cancel 64 pt / Save 56 pt - MINIMUM widths, so longer labels can grow. */
-  cancelTarget: { minWidth: EDITOR_CANCEL_MIN_WIDTH },
-  saveTarget: { minWidth: EDITOR_SAVE_MIN_WIDTH },
   /**
-   * The visible answer: the card's own surface inside a 1 pt neutral border,
-   * 36 pt tall with 8 pt corners and normal 13 pt ink. No accent fill.
+   * The visible answer: 30 pt tall with 8 pt corners and 12 sp regular ink, and
+   * its OWN content width — measured text plus the shared 5 dp side padding and
+   * the border. Save uses the accent wash; Cancel uses the red cancel family.
    */
   control: {
-    width: '100%',
     minHeight: EDITOR_CONTROL_MIN_HEIGHT,
     borderWidth: 1,
     borderRadius: EDITOR_CONTROL_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: EDITOR_CONTROL_PADDING_X,
+    paddingVertical: 4,
   },
-  controlLabel: { fontFamily: fonts.regular, fontSize: EDITOR_CONTROL_TEXT_SIZE },
+  controlLabel: {
+    fontFamily: fonts.regular,
+    fontSize: EDITOR_CONTROL_TEXT_SIZE,
+    lineHeight: EDITOR_CONTROL_LINE_HEIGHT,
+    textAlign: 'center',
+  },
+  /**
+   * Row layout only: each face hugs the edge of its OWN touch target that faces
+   * its partner - trailing for Cancel, leading for Save (logical start/end, so
+   * RTL flips with the row). The target keeps its 48/44 dp minimum, so the slack
+   * a short face leaves (Save is thinner than Cancel) falls OUTSIDE the pair and
+   * the two visible outlines stay exactly EDITOR_BUTTON_GAP apart, instead of
+   * that gap plus the wrapper's inner slack. Stacked mode passes neither, so
+   * both faces stay centred there.
+   */
+  controlToTrailing: { alignSelf: 'flex-end' },
+  controlToLeading: { alignSelf: 'flex-start' },
 });

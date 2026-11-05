@@ -74,6 +74,8 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_Saving: 'Saving…',
   /** A batch save that left some cards open ("2 of 3 saved"). */
   Rn_SaveAllPartialRow: '{0} of {1} saved',
+  /** The "Cancel all" button in the day header save row. */
+  Rn_CancelAll: 'Cancel all',
   /**
    * The "Delete this photo?" card: its title and what the answer removes. The
    * badge, the two pills and the action keep their own strings.
@@ -266,6 +268,17 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_TemplateSubtitle: 'Reuse a saved meal plan.',
   Rn_TemplateInfo: 'Meal details only — no status or photos',
   Rn_TemplateMealPreview: 'Meal preview',
+  /**
+   * The card's own action footer (the approved design): a SHORT neutral
+   * "Preview" disclosure and a "Apply plan" half that opens the existing
+   * date-range popup. Both names are contextual, so a screen reader hears which
+   * template the control belongs to. The popup's own "Apply template" label and
+   * the dynamic "Apply to N days" answer are separate and unchanged.
+   */
+  Rn_TemplatePreviewAction: 'Preview',
+  Rn_TemplateApplyPlanAction: 'Apply plan',
+  Rn_TemplatePreviewNamed: 'Preview meals in {0}',
+  Rn_TemplateApplyNamed: 'Apply plan {0}',
   Rn_TemplateMealCount: '{0} meals',
   Rn_TemplateMealCountOne: '1 meal',
   Rn_TemplateNoTime: 'No time',

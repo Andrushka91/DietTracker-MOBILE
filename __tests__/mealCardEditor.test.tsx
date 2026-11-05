@@ -15,13 +15,12 @@
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { StyleSheet, Text } from 'react-native';
+import { Platform, StyleSheet, Text } from 'react-native';
 
 import { MealCategoryKey, MealStatus, SyncStatus } from '../src/domain/enums';
 import { MealCategory, MealEntry } from '../src/domain/models';
 import {
   EDITOR_FIELD_MIN_HEIGHT,
-  EDITOR_TIME_WIDTH,
   MealCard,
   timeDraft,
 } from '../src/ui/components/MealCard';
@@ -138,6 +137,7 @@ function editorTexts(renderer: TestRenderer.ReactTestRenderer): string[] {
   }
   return (editor as TestRenderer.ReactTestInstance)
     .findAllByType(Text)
+    .filter((node) => node.props.accessible !== false)
     .map((node) => node.props.children)
     .filter((value): value is string => typeof value === 'string');
 }
@@ -163,7 +163,7 @@ function pressable(renderer: TestRenderer.ReactTestRenderer, label: string) {
  */
 function compactControl(renderer: TestRenderer.ReactTestRenderer, label: string) {
   const found = pressable(renderer, label)
-    .findAll((node) => styleOf(node).minHeight === 36)
+    .findAll((node) => styleOf(node).minHeight === 30)
     .pop();
   if (found === undefined) {
     throw new Error(`no visible control inside "${label}"`);
@@ -279,13 +279,18 @@ describe('the planned-time field', () => {
     expect(time.props.maxLength).toBe(5);
     expect(time.props.keyboardType).toBeDefined();
     expect(time.props.keyboardType).not.toBe('default');
-    // The chip is 84 pt at the default scale; the 44 pt target is its wrapper and
-    // the visible outline inside it is 36 pt tall with 8 pt corners.
-    expect(EDITOR_TIME_WIDTH).toBe(84);
-    const compact = hosts(renderer, (style) => style.borderRadius === 8 && style.minHeight === 36);
+    // The chip is CONTENT-FIT: there is no fixed slot and no 64 dp minimum, so the
+    // face is only as wide as "HH:MM" plus the clock, its gap, the shared 5 dp
+    // padding and the border. The wrapper, not the face, is the touch target.
+    const compact = hosts(renderer, (style) => style.borderRadius === 8 && style.minHeight === 30);
     // The clock and the two answers share the one compact control shape.
     expect(compact).toHaveLength(3);
-    expect(styleOf(compact[0]).width).toBe(84);
+    for (const face of compact) {
+      expect(styleOf(face).width).not.toBe('100%');
+    }
+    // Only the time chip carries an explicit width (its measured value); the two
+    // answers are content-sized, so a short label keeps a short face.
+    expect(styleOf(compact[0]).width).toBeDefined();
 
     // Typing digits produces the masked value.
     await type(renderer, t('Rn_FieldPlannedTime'), '1230');
@@ -416,6 +421,8 @@ describe('the editor layout', () => {
     const headerTexts = () =>
       renderer.root
         .findAllByType(Text)
+        // The hidden measuring copy of the time value is not content.
+        .filter((node) => node.props.accessible !== false)
         .map((node) => node.props.children)
         .filter((value): value is string => typeof value === 'string');
     // The saved time (the category's 12:30 default) is not repeated in the header
@@ -460,7 +467,7 @@ describe('the editor layout', () => {
     const renderer = await renderEditor();
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 6 && styleOf(node).justifyContent === 'space-between',
+        (node) => styleOf(node).marginTop === 2 && styleOf(node).justifyContent === 'space-between',
       )
       .pop();
     expect(footer).toBeDefined();
@@ -470,17 +477,20 @@ describe('the editor layout', () => {
     expect(footerStyle.backgroundColor).toBeUndefined();
     expect(footerStyle.borderRadius).toBeUndefined();
 
-    // Both answers are real 44 pt targets around a smaller NEUTRAL outline.
-    expect(styleOf(pressable(renderer, t('Common_Cancel'))).minWidth).toBe(64);
-    expect(styleOf(pressable(renderer, t('Common_Save'))).minWidth).toBe(56);
-    expect(styleOf(pressable(renderer, t('Common_Cancel'))).minHeight).toBe(44);
-    expect(styleOf(pressable(renderer, t('Common_Save'))).minHeight).toBe(44);
+    // A real 48/44 dp target around a visible face that is only as wide as its own
+    // label: no equal-width pair, no 64 dp minimum and no stretch.
+    const targetMin = Platform.OS === 'ios' ? 44 : 48;
     for (const label of [t('Common_Cancel'), t('Common_Save')]) {
+      const target = styleOf(pressable(renderer, label));
+      expect(target.minWidth).toBe(targetMin);
+      expect(target.minHeight).toBe(targetMin);
       const visible = styleOf(compactControl(renderer, label));
-      // The card's own surface inside a thin border, 8 pt corners: no accent fill.
-      expect(visible.backgroundColor).toBe(lightColors.cardFill);
-      expect(visible.borderColor).toBe(lightColors.border);
+      // Cancel wears the red cancel family; Save wears the accent wash.
       expect(visible.borderRadius).toBe(8);
+      expect(visible.minHeight).toBe(30);
+      // The face itself is content-sized.
+      expect(visible.width).toBeUndefined();
+      expect(visible.minWidth).toBeUndefined();
     }
   });
 
@@ -500,16 +510,17 @@ describe('the editor layout', () => {
     );
     expect(captions).toHaveLength(2);
 
-    // The footer stacks, and every target keeps its 44 pt floor.
+    // The footer stacks, and every visible control keeps its 30 dp face floor.
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 6 && styleOf(node).alignItems === 'stretch',
+        (node) => styleOf(node).marginTop === 2 && styleOf(node).alignItems === 'stretch',
       )
       .pop();
     expect(footer).toBeDefined();
     expect(styleOf(footer as TestRenderer.ReactTestInstance).flexDirection).toBe('column');
     for (const label of [t('Common_Cancel'), t('Common_Save')]) {
-      expect(styleOf(pressable(renderer, label)).minHeight).toBe(44);
+      const visible = styleOf(compactControl(renderer, label));
+      expect(visible.minHeight).toBe(30);
     }
     // The field's floor grows with the text instead of clipping it.
     expect(styleOf(field(renderer, t('Rn_FieldMealName'))).minHeight).toBeGreaterThan(44);
@@ -520,7 +531,7 @@ describe('the editor layout', () => {
     const renderer = await renderEditor();
     const footer = renderer.root
       .findAll(
-        (node) => styleOf(node).marginTop === 6 && styleOf(node).alignItems === 'stretch',
+        (node) => styleOf(node).marginTop === 2 && styleOf(node).alignItems === 'stretch',
       )
       .pop();
     expect(footer).toBeDefined();
@@ -561,12 +572,13 @@ describe('the editor layout', () => {
     expect(styleOf(label as TestRenderer.ReactTestInstance).backgroundColor).toBe(
       darkColors.cardFill,
     );
-    // The answers are the dark card's own surface inside the dark border too:
-    // there is no filled accent anywhere on this card.
+    // Cancel wears the red cancel family; Save wears the accent wash; both share
+    // the same 30 dp visible face height and 8 dp corners.
     for (const label of [t('Common_Cancel'), t('Common_Save')]) {
       const visible = styleOf(compactControl(renderer!, label));
-      expect(visible.backgroundColor).toBe(darkColors.cardFill);
-      expect(visible.borderColor).toBe(darkColors.border);
+      expect(visible.backgroundColor).not.toBe(darkColors.cardFill);
+      expect(visible.borderRadius).toBe(8);
+      expect(visible.minHeight).toBe(30);
     }
   });
 
