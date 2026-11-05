@@ -12,6 +12,8 @@
     "refresh": "node scripts/dev.js --all",
     "refresh:dev": "node scripts/dev.js --deps",
     "apk": "scripts\\build-apk.bat",
+    "setup:android": "scripts\\setup-android.bat",
+    "deploy": "scripts\\deploy.bat",
     "start": "expo start",
     "ios": "expo run:ios",
     "check": "npm run typecheck && npm run lint && npm test",

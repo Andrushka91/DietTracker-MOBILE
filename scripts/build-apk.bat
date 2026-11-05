@@ -14,6 +14,13 @@ cd /d "%~dp0.."
 set VERSION=1.0.0.1
 if not defined ANDROID_HOME set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
 if not defined JAVA_HOME if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
+
+rem Auto-generate local.properties if missing (prevents "SDK location not found" errors)
+if not exist android\local.properties (
+  echo Generating android\local.properties ...
+  echo sdk.dir=%ANDROID_HOME%> android\local.properties
+)
+
 set "PATH=%JAVA_HOME%\bin;%ANDROID_HOME%\platform-tools;%PATH%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ensure-ninja.ps1"
@@ -28,13 +35,13 @@ if not exist release mkdir release
 
 echo Building the universal APK...
 pushd android
-call gradlew.bat assembleRelease --no-daemon
+call "%~dp0..\android\gradlew.bat" assembleRelease --no-daemon
 if errorlevel 1 goto :failed
 if not exist ..\release mkdir ..\release
 copy /y app\build\outputs\apk\release\app-release.apk ..\release\DietTracker-%VERSION%-universal.apk >nul
 
 echo Building the arm64-v8a APK...
-call gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+call "%~dp0..\android\gradlew.bat" assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 if errorlevel 1 goto :failed
 copy /y app\build\outputs\apk\release\app-release.apk ..\release\DietTracker-%VERSION%-arm64-v8a.apk >nul
 

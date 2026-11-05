@@ -17,6 +17,22 @@ npm run emulator:apk
 One command runs the whole pipeline after any change — no separate `npm install`,
 `npm run apk`, `adb install` or `am start`.
 
+## First time setup
+
+Run these steps once after cloning the repo:
+
+```bash
+npm install
+npm run setup:android
+npm run emulator:apk
+```
+
+1. **`npm install`** — downloads all Node.js dependencies.
+2. **`npm run setup:android`** — generates `android\local.properties` with your Android SDK path (auto-detected from `%LOCALAPPDATA%\Android\Sdk`). If you installed the SDK elsewhere, edit `android\local.properties` and set `sdk.dir` to your SDK folder.
+3. **`npm run emulator:apk`** — builds the APK, boots the emulator, installs and launches the app.
+
+> **Note:** `android\local.properties` is gitignored (it contains local paths). The build script (`scripts\build-apk.bat`) also auto-generates it if missing, so `npm run apk` will work even without running `setup:android` first.
+
 | # | Step | What it runs |
 |---|---|---|
 | 1 | Toolchain | finds SDK / JDK / adb, exports `ANDROID_HOME`, `JAVA_HOME`, `PATH` |
@@ -56,6 +72,8 @@ after `--`: `npm run emulator:apk -- --reset --cold`.
 | `npm run emulator:apk:only` | install + launch the existing APK | SDK + `npm run apk` once |
 | `npm run emulator` | start the AVD and wait for boot | Android SDK |
 | `npm run emulator:stop` | graceful, snapshot-safe shutdown | Android SDK |
+| `npm run setup:android` | generate `android\local.properties` with SDK path | SDK installed |
+| `npm run deploy` | `git add -A` + commit + push to origin | — |
 | `npm run check` | `typecheck` + `lint` + `test` | — |
 | `npm run typecheck` · `lint` · `test` | individual checks | — |
 | `npm run ios` | local iOS build (`expo run:ios`) | macOS + Xcode |
@@ -342,4 +360,5 @@ Layout facts worth knowing:
 | `adb install … device offline` / `failed to run abb_exec` | the AVD restored a quick-boot snapshot and adbd reconnected in the middle of the install. The script now waits for two shell round trips before installing and retries (3rd try `--no-streaming`); if it still fails: `npm run emulator:stop`, then `npm run emulator:apk -- --cold` |
 | `the package manager … does not answer` (`pm path android` times out) | the quick-boot snapshot came back half-restored: `sys.boot_completed` says 1 while `pm` / `am` hang. The script reboots Android inside the emulator, and if that does not help it stops the AVD, deletes its broken snapshot and cold boots it, so the install still runs. Manual fix: `npm run emulator:stop`, then `npm run emulator:apk -- --cold`; if even that fails, **Wipe Data** in Device Manager once |
 | Blue screen “Base module not found” | historical `op-sqlite` error; the app now uses Expo-Go-safe modules only — restart Expo Go and rescan |
+| `SDK location not found` / `local.properties` missing | run `npm run setup:android` to generate it, or edit `android\local.properties` and set `sdk.dir` to your Android SDK path (usually `%LOCALAPPDATA%\Android\Sdk`) |
 
