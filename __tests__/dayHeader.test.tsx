@@ -1,23 +1,28 @@
-// The dashboard's day header (r3 reference) - the part that lives in
+// The dashboard's day header (v3 reference) - the part that lives in
 // DashboardScreen rather than in a component of its own:
 //
-//   * the DATE is a plain heading on EVERY day: 20 pt regular neutral ink with a
-//     muted year beneath, no dot, no badge, no highlight, and NO press handler -
-//     tapping it does nothing, so the header has exactly one job per control;
-//   * the two 44 pt arrows are the header's ONLY date navigation: there is no
+//   * the DATE is a plain heading on EVERY day: ONE 15 pt regular phrase with the
+//     year in it ("Thu 5 Nov 2026"), no dot, no badge, no highlight and NO press
+//     handler - tapping it does nothing, so the header has exactly one job per
+//     control;
+//   * on the CURRENT day only, a plain 11 pt "Today" caption sits 2 dp directly
+//     beneath that phrase, in the same centred column. It is text, never a chip,
+//     a fill, a dot or a second control, and it disappears the moment another day
+//     is browsed (or the local date rolls over);
+//   * the two equal arrows are the header's ONLY date navigation: there is no
 //     calendar button, no return-to-current-day shortcut and no space reserved
-//     for one, on the current day or on any other;
-//   * the current/next-day headers therefore have the same structure and height;
+//     for one;
 //   * "today" is re-read on focus, on resume and just after local midnight,
 //     WITHOUT changing the day being browsed;
-//   * the two day-wide actions stay truthful about being disabled, and Save all
-//     is only wired while it has work.
+//   * the two day-wide actions stay truthful about being disabled - and each is a
+//     real touch target around a small outlined control - while Save all is only
+//     wired while it has work.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { StyleSheet, Text } from 'react-native';
+import { Platform, StyleSheet, Text } from 'react-native';
 
 import { addDays, formatDate } from '../src/domain/analytics';
 import { MealCategoryKey, MealStatus, SyncStatus } from '../src/domain/enums';
@@ -25,6 +30,7 @@ import { MealCategory, MealEntry } from '../src/domain/models';
 import { DashboardScreen } from '../src/ui/screens/DashboardScreen';
 import { SaveAllRow } from '../src/ui/components/SaveAllRow';
 import { formatCompactDate, formatLongDate, t } from '../src/ui/strings';
+import { homeCompact, homeTodayInk } from '../src/ui/homeCompact';
 import { darkColors, fonts, lightColors } from '../src/ui/theme';
 
 type Renderer = TestRenderer.ReactTestRenderer;
@@ -174,21 +180,35 @@ function pressable(renderer: Renderer, label: string): TestRenderer.ReactTestIns
   return found;
 }
 
+/** The date phrase the header shows for `day`: weekday, day, month AND year. */
+function fullDate(day: string): string {
+  const compact = formatCompactDate(day);
+  return [compact.primary, compact.year].filter(Boolean).join(' ');
+}
+
 /**
- * The date heading on `day`: the Text carrying the header role and the full-date
- * accessibility label. It is a heading, so it never has an `onPress` - and it is
- * real text, so it is announced as text rather than as a button.
+ * The date heading: the ONE accessible element carrying the header role and the
+ * full-date label (plus "Today" on the current day). Its two texts - the date
+ * phrase and the caption - live inside it, which is exactly why the caption is
+ * announced once instead of being a second focus stop.
  */
-function headingOf(renderer: Renderer, day: string): TestRenderer.ReactTestInstance {
+function headingOf(renderer: Renderer): TestRenderer.ReactTestInstance {
   const found = renderer.root
-    .findAll(
-      (node) =>
-        node.props?.accessibilityLabel === formatLongDate(day) &&
-        node.props?.accessibilityRole === 'header',
-    )
+    .findAll((node) => node.props?.accessibilityRole === 'header')
     .pop();
   if (found === undefined) {
-    throw new Error(`no date heading for ${day}`);
+    throw new Error('no date heading');
+  }
+  return found;
+}
+
+/** The small visible outline inside a day action's 48 pt / 44 pt touch target. */
+function outlineOf(control: TestRenderer.ReactTestInstance): TestRenderer.ReactTestInstance {
+  const found = control
+    .findAll((node) => typeof node.type === 'string' && styleOf(node).borderWidth === 1)
+    .pop();
+  if (found === undefined) {
+    throw new Error('no visible outline inside the action target');
   }
   return found;
 }
@@ -249,58 +269,81 @@ beforeEach(() => {
 
 /** The plain date heading, on the real device-local day. */
 describe('the date heading', () => {
-  test('is plain neutral text with the year beneath, never a Pressable', async () => {
+  test('is ONE date phrase plus a plain Today caption on the current day', async () => {
     const day = todayKey();
     const renderer = await renderDashboard(day);
     const compact = formatCompactDate(day);
 
-    // A heading, not a control: the header role on real TEXT, no press handler.
-    const heading = headingOf(renderer, day);
-    expect(heading.type).toBe('Text');
+    // A heading, not a control: the header role on one element, no press handler.
+    const heading = headingOf(renderer);
     expect(heading.props.onPress).toBeUndefined();
     expect(heading.props.accessibilityHint).toBeUndefined();
-    // Exactly ONE host node carries the full date - the Text itself - so no
-    // wrapper repeats the label or the heading role, and nothing is a control.
+    // "Today" is announced ONCE, appended to the heading's own label.
+    expect(heading.props.accessibilityLabel).toBe(`${formatLongDate(day)}, ${t('Common_Today')}`);
+    // Exactly ONE node carries that label, so no second heading or control
+    // repeats the date or the caption.
     const labelledHosts = renderer.root
-      .findAll((node) => node.props?.accessibilityLabel === formatLongDate(day))
+      .findAll((node) => node.props?.accessibilityLabel === heading.props.accessibilityLabel)
       .filter((node) => typeof node.type === 'string');
     expect(labelledHosts).toHaveLength(1);
-    expect(labelledHosts[0].type).toBe('Text');
 
-    // 20 pt REGULAR neutral ink - the counters stay the only bold numbers.
-    const dateInk = styleOf(textOf(renderer, compact.primary));
-    expect(dateInk.fontSize).toBe(20);
+    // The date is ONE phrase with the year in it: 15 pt regular on a 20 pt line.
+    const dateText = textOf(renderer, fullDate(day));
+    const dateInk = styleOf(dateText);
+    expect(dateInk.fontSize).toBe(homeCompact.dateSize);
+    expect(dateInk.lineHeight).toBe(homeCompact.dateLine);
     expect(dateInk.fontFamily).toBe(fonts.regular);
     expect(dateInk.color).toBe(lightColors.text);
-    // ...and an 11 pt muted year under it.
-    const yearInk = styleOf(textOf(renderer, compact.year));
-    expect(yearInk.fontSize).toBe(11);
-    expect(yearInk.color).toBe(lightColors.textMuted);
+    expect(dateInk.textAlign).toBe('center');
+    // It wraps instead of truncating at large text sizes.
+    expect(dateText.props.numberOfLines).toBeUndefined();
+    // ...and the year no longer gets a line of its own.
+    expect(texts(renderer)).not.toContain(compact.year);
 
-    // No marker chrome survives on the current day: no dot, spacer or badge.
+    // "Today" is plain 11 pt semibold caption text 2 dp beneath the date.
+    const today = textOf(renderer, t('Common_Today'));
+    const todayInk = styleOf(today);
+    expect(todayInk.fontSize).toBe(homeCompact.todaySize);
+    expect(todayInk.lineHeight).toBe(homeCompact.todayLine);
+    expect(todayInk.fontFamily).toBe(fonts.medium);
+    expect(todayInk.color).toBe(homeTodayInk.light);
+    expect(todayInk.textAlign).toBe('center');
+    // No side badge, fill, border, dot or underline - just the word.
+    expect(todayInk.width).toBe('100%');
+    expect(todayInk.backgroundColor).toBeUndefined();
+    expect(todayInk.borderWidth).toBeUndefined();
+    expect(todayInk.textDecorationLine).toBeUndefined();
     expect(byTestId(renderer, 'day-current-dot')).toBeNull();
     expect(byTestId(renderer, 'day-current-spacer')).toBeNull();
     expect(byTestId(renderer, 'day-date-badge')).toBeNull();
-    // ...and no "Today" word, nor any control offering a way back.
-    expect(texts(renderer)).not.toContain(t('Calendar_Today'));
+    // It is not a control and there is no return-to-today shortcut.
+    expect(today.props.onPress).toBeUndefined();
     expect(shortcuts(renderer)).toHaveLength(0);
+
+    // Date and caption share ONE centred column, 2 dp apart, and each spans it.
+    const column = styleOf(heading);
+    expect(column.flexDirection).toBe('column');
+    expect(column.alignItems).toBe('center');
+    expect(column.gap).toBe(homeCompact.dateCaptionGap);
+    expect(styleOf(dateText).textAlign).toBe('center');
   });
 
-  test('is identical on an OTHER day, with no shortcut and no extra gap', async () => {
+  test('drops the caption on an OTHER day and keeps the same date type', async () => {
     const current = todayKey();
     const other = addDays(current, 1);
     const currentRenderer = await renderDashboard(current);
     const otherRenderer = await renderDashboard(other);
 
-    // The typography is the SAME style object on every day: only the words
-    // change, so the header cannot jump in height when the day does.
-    const currentInk = styleOf(textOf(currentRenderer, formatCompactDate(current).primary));
-    const otherInk = styleOf(textOf(otherRenderer, formatCompactDate(other).primary));
+    // The typography is the SAME style on every day: only the words change, so
+    // the header cannot jump in height when the day does.
+    const currentInk = styleOf(textOf(currentRenderer, fullDate(current)));
+    const otherInk = styleOf(textOf(otherRenderer, fullDate(other)));
     expect(otherInk).toEqual(currentInk);
     expect(otherInk.color).toBe(lightColors.text);
-    expect(styleOf(textOf(otherRenderer, formatCompactDate(other).year)).color).toBe(
-      lightColors.textMuted,
-    );
+
+    // No caption at all off the current day, and the label is the date alone.
+    expect(texts(otherRenderer)).not.toContain(t('Common_Today'));
+    expect(headingOf(otherRenderer).props.accessibilityLabel).toBe(formatLongDate(other));
 
     // No marker, no badge, no spacer and - above all - no return shortcut or the
     // gap it used to reserve under the arrows.
@@ -325,15 +368,24 @@ describe('the header arrows', () => {
     const day = todayKey();
     const renderer = await renderDashboard(day);
 
+    // Today: the date phrase carries the year and the caption is there.
+    expect(texts(renderer)).toContain(fullDate(day));
+    expect(texts(renderer)).toContain(t('Common_Today'));
+
+    // Tomorrow is not today any more, so the caption disappears with the date
+    // change - the words are the header's only difference between days.
     await act(async () => {
       pressable(renderer, t('Dashboard_NextDay')).props.onPress();
     });
-    expect(texts(renderer)).toContain(formatCompactDate(addDays(day, 1)).primary);
+    expect(texts(renderer)).toContain(fullDate(addDays(day, 1)));
+    expect(texts(renderer)).not.toContain(t('Common_Today'));
 
+    // ...and stepping back onto the current day brings it back.
     await act(async () => {
       pressable(renderer, t('Dashboard_PreviousDay')).props.onPress();
     });
-    expect(texts(renderer)).toContain(formatCompactDate(day).primary);
+    expect(texts(renderer)).toContain(fullDate(day));
+    expect(texts(renderer)).toContain(t('Common_Today'));
 
     // Exactly two labelled controls in the header row: previous and next.
     const controls = renderer.root.findAll(
@@ -351,17 +403,17 @@ describe('the header arrows', () => {
 
 /** The same neutral ink in dark mode: no accent, no wash, no hardcoded white. */
 describe('the date heading in dark mode', () => {
-  test('stays neutral and unhighlighted', async () => {
+  test('stays neutral, and the Today caption wears its own dark ink', async () => {
     mockApp.isDark = true;
     const day = todayKey();
     const renderer = await renderDashboard(day);
-    const compact = formatCompactDate(day);
 
-    const dateInk = styleOf(textOf(renderer, compact.primary));
+    const dateInk = styleOf(textOf(renderer, fullDate(day)));
     expect(dateInk.color).toBe(darkColors.text);
     expect(dateInk.color).not.toBe(darkColors.accent);
     expect(dateInk.fontFamily).toBe(fonts.regular);
-    expect(styleOf(textOf(renderer, compact.year)).color).toBe(darkColors.textMuted);
+    // The caption is the only tinted line: its own lighter indigo, not the accent.
+    expect(styleOf(textOf(renderer, t('Common_Today'))).color).toBe(homeTodayInk.dark);
     // Nothing draws a marker or a shortcut in the dark theme either.
     expect(byTestId(renderer, 'day-current-dot')).toBeNull();
     expect(byTestId(renderer, 'day-return-today')).toBeNull();
@@ -386,21 +438,22 @@ describe('the date is not a control', () => {
     expect(choosing).toHaveLength(0);
     expect(mockNavigate).not.toHaveBeenCalled();
 
-    // ...and the heading is real text with no press handler.
-    const heading = headingOf(renderer, day);
-    expect(heading.type).toBe('Text');
+    // ...and the heading is plain text with no press handler.
+    const heading = headingOf(renderer);
+    expect(heading.type).toBe('View');
     expect(heading.props.onPress).toBeUndefined();
     expect(heading.props.onClick).toBeUndefined();
   });
 });
 
 describe('staying correct across midnight', () => {
-  test('re-reads the local date without changing the selected day', async () => {
+  test('drops the Today caption without changing the selected day', async () => {
     jest.useFakeTimers({ now: new Date(2026, 10, 4, 23, 59, 0) });
     try {
-      // The selected day IS the current day at 23:59.
+      // The selected day IS the current day at 23:59, so it is captioned.
       const renderer = await renderDashboard('2026-11-04');
-      expect(texts(renderer)).toContain(formatCompactDate('2026-11-04').primary);
+      expect(texts(renderer)).toContain(fullDate('2026-11-04'));
+      expect(texts(renderer)).toContain(t('Common_Today'));
 
       // 61 s later the local date has rolled over to 5 November.
       await act(async () => {
@@ -408,10 +461,10 @@ describe('staying correct across midnight', () => {
       });
 
       // The SELECTED day is untouched...
-      expect(texts(renderer)).toContain(formatCompactDate('2026-11-04').primary);
-      // ...and no marker or shortcut appears, because neither exists any more.
-      expect(byTestId(renderer, 'day-current-dot')).toBeNull();
-      expect(byTestId(renderer, 'day-return-today')).toBeNull();
+      expect(texts(renderer)).toContain(fullDate('2026-11-04'));
+      // ...but it is yesterday now, so the caption and its label go away.
+      expect(texts(renderer)).not.toContain(t('Common_Today'));
+      expect(headingOf(renderer).props.accessibilityLabel).toBe(formatLongDate('2026-11-04'));
     } finally {
       jest.clearAllTimers();
       jest.useRealTimers();
@@ -420,21 +473,29 @@ describe('staying correct across midnight', () => {
 });
 
 describe('the day-wide actions', () => {
-  test('are two equal outlined buttons, 44 pt tall, with state glyphs', async () => {
+  test('are two equal outlined controls inside real touch targets', async () => {
     const renderer = await renderDashboard(todayKey());
     const missed = pressable(renderer, t('Rn_MarkAllMissed'));
     const done = pressable(renderer, t('Rn_MarkAllDone'));
+    // The platform's own minimum target, straight from the Home tokens.
+    const target = Platform.OS === 'ios' ? homeCompact.touchIOS : homeCompact.touchAndroid;
 
     for (const control of [missed, done]) {
       const style = styleOf(control);
-      expect(style.minHeight).toBe(44);
-      expect(style.borderWidth).toBe(1);
-      expect(style.borderRadius).toBe(12);
+      // The TARGET is 48 dp on Android / 44 pt on iOS, with no hitSlop padding.
+      expect(style.minHeight).toBe(target);
       expect(style.flex).toBe(1);
+      expect(style.opacity).toBeUndefined();
+      expect(control.props.hitSlop).toBeUndefined();
+
+      // The VISIBLE control inside it is the small neutral outline.
+      const outline = styleOf(outlineOf(control));
+      expect(outline.minHeight).toBe(homeCompact.controlVisibleMinHeight);
+      expect(outline.borderWidth).toBe(1);
+      expect(outline.borderRadius).toBe(homeCompact.controlRadius);
       // Neutral chrome: never a solid red/green slab.
-      expect(style.backgroundColor).toBe(lightColors.cardFill);
-      expect(style.borderColor).toBe(lightColors.cardDivider);
-      expect(style.opacity).toBe(1);
+      expect(outline.backgroundColor).toBe(lightColors.cardFill);
+      expect(outline.borderColor).toBe(lightColors.cardDivider);
     }
 
     // The glyphs carry the state colours; the labels stay neutral ink.
@@ -454,9 +515,11 @@ describe('the day-wide actions', () => {
       const control = pressable(renderer, label);
       expect(control.props.disabled).toBe(true);
       expect(control.props.accessibilityState).toEqual({ disabled: true });
-      // Truthful disabled: the whole button fades, it does not become a fill.
-      expect(styleOf(control).opacity).toBe(0.45);
-      expect(styleOf(control).backgroundColor).toBe(lightColors.cardFill);
+      // Truthful disabled: the whole target fades once - the outline inside it
+      // keeps the neutral card fill instead of turning into a coloured slab.
+      expect(styleOf(control).opacity).toBe(homeCompact.disabledOpacity);
+      expect(styleOf(control).backgroundColor).toBeUndefined();
+      expect(styleOf(outlineOf(control)).backgroundColor).toBe(lightColors.cardFill);
     }
   });
 

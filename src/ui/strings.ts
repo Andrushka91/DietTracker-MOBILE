@@ -16,7 +16,12 @@ export const RN_STRINGS: Record<string, string> = {
    * "Stats", which keeps all five captions comfortably on one row.
    */
   Rn_NavStats: 'Stats',
-  /** Section caption above the five meal cards on the dashboard. */
+  /**
+   * Section caption that used to sit above the five meal cards. The v3 Home
+   * header drops the caption (the cards' own 8 dp gap separates them from the
+   * header), so nothing draws it any more; the key is kept so a caller that
+   * still asks for "Meals" gets a word instead of the key itself.
+   */
   Rn_Meals: 'Meals',
   /** Placeholder on a meal card that has neither a title nor a description. */
   Rn_MealEmpty: 'No meal recorded yet',
@@ -153,6 +158,16 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_StatViewDay: 'View day',
   Rn_StatOpenCalendar: 'Calendar',
   Rn_StatDoneSuffix: '{0} / {1} done',
+  /**
+   * The vertical chart's three pieces of chrome: what the columns are measured
+   * in, the hint shown only while the columns overflow sideways, and the one
+   * instruction that says a column selects (it never navigates on its own).
+   */
+  Rn_StatAxisLabel: 'Planned slots',
+  Rn_StatChartScrollHint: 'Swipe sideways to see every column.',
+  Rn_StatChartSelectHint: 'Tap a column to see its details.',
+  /** Spoken hint of the Today shortcut (its visible label is Common_Today). */
+  Rn_StatTodayHint: 'Shows today in the Statistics day view.',
   /** Lower-case period words used inside the context sentence. */
   Rn_PeriodWordDay: 'day',
   Rn_PeriodWordWeek: 'week',
@@ -183,7 +198,7 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_EditorDescriptionLimit: 'Description: maximum 80 characters.',
   Rn_EditorLegacyHint: 'Longer text is kept. Leave it as it is or shorten it.',
   /** Template target-date prompt: its wording, validation and Today shortcut. */
-  Rn_TemplateDatePrompt: 'Enter the target date (yyyy-MM-dd)',
+  Rn_TemplateDatePrompt: 'Choose the first and last day the plan is applied to',
   /**
    * The sheet's own headline (the r3 reference). Shorter than the Windows
    * `Template_ApplyTitle` ("Apply the template"), and the same two words as the
@@ -194,9 +209,42 @@ export const RN_STRINGS: Record<string, string> = {
   Rn_TemplateDateRequired: 'Enter a date first.',
   Rn_TemplateDateFormat: 'Use the format yyyy-MM-dd, for example 2026-11-02.',
   Rn_TemplateDateImpossible: 'That day does not exist. Check the day and the month.',
-  /** Apply-template sheet (r3 reference): the field label and its format hint. */
-  Rn_TemplateDateLabel: 'Date to apply',
-  Rn_TemplateDateFormatHint: 'YYYY-MM-DD',
+  /**
+   * Apply-template RANGE (the popup asks for two days instead of one): the two
+   * field names, the inclusive summary with its singular/plural day count, the
+   * order rule, the way the calendar describes each day to a screen reader, and
+   * the truthful progress/partial-result wording. There is no typed fallback any
+   * more - the calendar is the one input method - so the seven day columns pan
+   * sideways on a phone instead of shrinking below 48 dp.
+   */
+  Rn_TemplateStartDate: 'Start date',
+  Rn_TemplateEndDate: 'End date',
+  /** "{0} – {1} · {2}", e.g. "5 November 2026 – 11 November 2026 · 7 days". */
+  Rn_TemplateRangeSummary: '{0} – {1} · {2}',
+  Rn_TemplateRangeDayOne: '1 day',
+  Rn_TemplateRangeDayMany: '{0} days',
+  Rn_TemplateRangeSamePlan: 'The same plan is applied to every day in the range.',
+  Rn_TemplateRangeOrder: 'The end date cannot be before the start date.',
+  Rn_TemplateApplyRangeOne: 'Apply to 1 day',
+  Rn_TemplateApplyRangeMany: 'Apply to {0} days',
+  /** How a day cell describes itself: the endpoint/inside words, then Today. */
+  Rn_TemplateRangeA11yStart: 'start of the range',
+  Rn_TemplateRangeA11yEnd: 'end of the range',
+  /** One day that is BOTH ends of a single-day range. */
+  Rn_TemplateRangeA11yStartEnd: 'start and end of the range',
+  Rn_TemplateRangeA11yInside: 'in the range',
+  Rn_TemplateCalendarHint: 'Swipe the calendar sideways to reach every day of the week.',
+  /** Determinate progress: completed DAYS, never meals or syncs. */
+  Rn_TemplateRangeProgress: 'Applying {0} of {1} days…',
+  /** Partial result: what finished, what may be half-written, what never ran. */
+  Rn_TemplateRangePartial: 'Stopped after {0} of {1} days.',
+  Rn_TemplateRangePartialFailed: '{0} may be partly updated.',
+  Rn_TemplateRangePartialUnattempted: '{0} not attempted.',
+  Rn_TemplateRangeClose: 'Close',
+  /** The page's one-line report after the range settles. */
+  Rn_TemplateRangeAppliedOne: 'Applied to 1 day.',
+  Rn_TemplateRangeAppliedMany: 'Applied to {0} days.',
+  Rn_TemplateRangeStopped: 'Stopped after {0} of {1} days.',
   /**
    * Save-as-template name prompt: a name is required. The field starts empty and
    * the day's date is never suggested or used as a fallback.

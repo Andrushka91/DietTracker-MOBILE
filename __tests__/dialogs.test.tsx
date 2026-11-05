@@ -12,7 +12,11 @@ import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, View } from 'rea
 
 import { ChoiceDialog, ConfirmDialog, LoadingSheet, PromptDialog } from '../src/ui/components/dialogs';
 import { dateDraft, dateInputProblem, DATE_INPUT_LENGTH } from '../src/ui/dates';
-import { t } from '../src/ui/strings';
+import {
+  type TemplateDateRange,
+  type TemplateRangeResult,
+} from '../src/services/applyTemplateRange';
+import { formatLongDate, formatMonthLabel, t, tFmt } from '../src/ui/strings';
 import { fonts, lightColors, typeScale } from '../src/ui/theme';
 
 /**
@@ -730,14 +734,18 @@ describe('the account sync sheet', () => {
 });
 
 /**
- * The compact Apply-template sheet (`layout: 'template-date'`) - the r3 reference
- * form, used ONLY by Templates. It is the SAME value/error state, mask, validator
- * and callbacks as the default prompt; only the chrome differs. These tests pin
- * that chrome (badge, real summary, labelled field, Today, hint, answers) and
- * re-check the semantics that must never regress: an invalid date keeps the sheet
- * open and applies nothing, Today only fills, and every dismissal applies nothing.
+ * The compact Apply-template RANGE sheet (`layout: 'template-date'` plus a typed
+ * `templateRange`) - used ONLY by Templates. It keeps the same sheet host, the
+ * blue Apply and the outlined red Cancel; only the single typed date changed into
+ * two INCLUSIVE calendar-only endpoints.
+ *
+ * Pinned here: both days start on the caller's today (so a one-day apply is still
+ * two taps), choosing a day only fills a draft, the calendar is the ONLY input
+ * (no typed fallback), a reversed End is an error rather than a silent swap,
+ * nothing is written until the single final answer, a double tap cannot start a
+ * second run, and a partial run is reported truthfully with one Close.
  */
-describe('the compact Apply-template sheet', () => {
+describe('the Apply-template range sheet', () => {
   beforeEach(() => {
     mockWindow.width = 390;
     mockWindow.fontScale = 1;
@@ -756,14 +764,6 @@ describe('the compact Apply-template sheet', () => {
       .filter((value): value is string => typeof value === 'string');
   }
 
-  function textOf(renderer: Renderer, value: string) {
-    const found = renderer.root.findAllByType(Text).find((node) => node.props.children === value);
-    if (found === undefined) {
-      throw new Error(`no text "${value}"`);
-    }
-    return found;
-  }
-
   const dateError = (value: string): string | null =>
     dateInputProblem(value) === null ? null : t('Rn_TemplateDateRequired');
 
@@ -775,14 +775,50 @@ describe('the compact Apply-template sheet', () => {
       .map((node) => styleOf(node))
       .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
     if (visible === undefined) {
-      throw new Error(`no visible button inside "${label}"`);
+      throw new Error(`no visible control inside "${label}"`);
     }
     return { target: styleOf(target), visible };
   }
 
-  function renderSheet(initialValue = '2026-11-02') {
+  /** One day of the expanded calendar, by its full-date accessible name. */
+  function dayIn(renderer: Renderer, iso: string) {
+    const long = formatLongDate(iso);
+    const found = renderer.root
+      .findAll(
+        (node) =>
+          typeof node.props?.onPress === 'function' &&
+          typeof node.props?.accessibilityLabel === 'string' &&
+          (node.props.accessibilityLabel === long ||
+            (node.props.accessibilityLabel as string).startsWith(`${long},`)),
+      )
+      .pop();
+    if (found === undefined) {
+      throw new Error(`no calendar day for ${iso}`);
+    }
+    return found;
+  }
+
+  const COMPLETE = (days: number, last: string): TemplateRangeResult => ({
+    kind: 'complete',
+    totalDays: days,
+    completedDays: days,
+    lastCompletedDate: last,
+  });
+
+  function renderSheet(
+    options: {
+      start?: string;
+      end?: string;
+      range?: (
+        range: TemplateDateRange,
+        onProgress: (done: number, total: number) => void,
+      ) => Promise<TemplateRangeResult>;
+    } = {},
+  ) {
     const onCancel = jest.fn();
-    const onConfirm = jest.fn();
+    const onConfirmRange = jest.fn(
+      options.range ?? (async () => COMPLETE(1, options.start ?? '2026-11-02')),
+    );
     const renderer = render(
       <PromptDialog
         isDark={false}
@@ -791,199 +827,259 @@ describe('the compact Apply-template sheet', () => {
           title: t('Rn_TemplateApplyTitle'),
           message: t('Rn_TemplateDatePrompt'),
           contextLabel: 'Full day · 5 meals',
-          fieldLabel: t('Rn_TemplateDateLabel'),
-          formatHint: t('Rn_TemplateDateFormatHint'),
-          initialValue,
+          initialValue: options.start ?? '2026-11-02',
           cancelText: t('Common_Cancel'),
           confirmText: t('Rn_TemplateApplyConfirm'),
           today: { label: t('Calendar_Today'), value: '2026-11-04' },
-          keyboardType: 'number-pad',
-          sanitize: dateDraft,
-          maxLength: DATE_INPUT_LENGTH,
           validate: dateError,
           onCancel,
-          onConfirm,
+          onConfirm: jest.fn(),
+          templateRange: {
+            initialEndValue: options.end ?? options.start ?? '2026-11-02',
+            onConfirmRange,
+          },
         }}
       />,
     );
-    return { renderer, onCancel, onConfirm };
+    return { renderer, onCancel, onConfirmRange };
   }
 
-  test('shows the real template ABOVE the title, then one small labelled field', () => {
-    const { renderer } = renderSheet();
+  test('asks for Start and End, states the inclusive count and names the days', () => {
+    const { renderer } = renderSheet({ start: '2026-11-05', end: '2026-11-11' });
     const printed = texts(renderer);
 
-    // Title, the REAL template summary, the field label and the two answers.
+    // The sheet's own chrome is unchanged: the real template above the title.
     expect(printed).toContain(t('Rn_TemplateApplyTitle'));
-    expect(t('Rn_TemplateApplyTitle')).toBe('Apply template');
     expect(printed).toContain('Full day · 5 meals');
-    expect(printed).toContain(t('Rn_TemplateDateLabel'));
-    expect(printed).not.toContain(t('Rn_TemplateDatePrompt'));
-    // The longer Windows headline ("Apply the template") is not this header.
-    expect(printed).not.toContain(t('Template_ApplyTitle'));
-    // The separate format line and the Today shortcut are gone.
-    expect(printed).not.toContain(t('Rn_TemplateDateFormatHint'));
-    expect(printed).not.toContain(t('Calendar_Today'));
+    // Two labelled endpoints, and the inclusive count in words.
+    expect(printed).toContain(t('Rn_TemplateStartDate'));
+    expect(printed).toContain(t('Rn_TemplateEndDate'));
+    expect(printed).toContain('5 November 2026 – 11 November 2026 · 7 days');
+    expect(printed).toContain(t('Rn_TemplateRangeSamePlan'));
 
-    // Context ABOVE the task title, in ONE column at 12 / 20 pt, in that order.
-    const title = textOf(renderer, t('Rn_TemplateApplyTitle'));
-    const summary = textOf(renderer, 'Full day · 5 meals');
-    expect(styleOf(summary).fontSize).toBe(12);
-    expect(styleOf(title).fontSize).toBe(20);
-    expect(summary.parent).toBe(title.parent);
-    expect(summary.parent?.findAllByType(Text).map((node) => node.props.children)).toEqual([
-      'Full day · 5 meals',
-      'Apply template',
-    ]);
-    // Neither line is clamped: a long real name/title wraps instead of being cut.
-    expect(summary.props.numberOfLines).toBeUndefined();
-    expect(title.props.numberOfLines).toBeUndefined();
+    // The calendar is the ONLY input: no typed field and no Type date links.
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(0);
+    for (const banned of ['Type date', 'Type dates', 'Use calendar']) {
+      expect(printed).not.toContain(banned);
+      expect(
+        renderer.root.findAll((node) => node.props?.accessibilityLabel === banned),
+      ).toHaveLength(0);
+    }
 
-    // No decorative badge, calendar tile or drag handle in this sheet.
-    const glyphs = renderer.root
-      .findAll((node) => typeof node.props?.accessibilityLabel === 'string')
-      .map((node) => node.props.accessibilityLabel as string);
-    expect(glyphs).not.toContain('material:calendar-text-outline');
-    expect(
-      renderer.root.findAll(
-        (node) =>
-          typeof node.type === 'string' &&
-          styleOf(node).width === 40 &&
-          styleOf(node).height === 4,
-      ),
-    ).toHaveLength(0);
-    // One date field, and NO second control beside it (the Today chip is gone).
-    const controls = renderer.root.findAll(
-      (node) =>
-        typeof node.props?.onPress === 'function' &&
-        typeof node.props?.accessibilityLabel === 'string',
-    );
-    expect(controls.map((node) => node.props.accessibilityLabel)).toEqual([
-      t('Common_Close'),
-      t('Common_Cancel'),
-      t('Rn_TemplateApplyConfirm'),
-    ]);
-
-    // The sheet itself: 520 dp cap with 16 dp top corners.
-    const card = styleOf(
-      renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-card').pop()!,
-    );
-    expect(card.maxWidth).toBe(520);
-    expect(card.borderTopLeftRadius).toBe(16);
-    expect(card.borderTopRightRadius).toBe(16);
-
-    // A COMPACT field: 40 dp tall, content-sized (not a full-width bar), on the
-    // card's own surface, with no calendar glyph inside it.
-    const input = renderer.root.findByType(TextInput);
-    const field = styleOf(input.parent!);
-    expect(field.minHeight).toBe(40);
-    expect(field.alignSelf).toBe('flex-start');
-    expect(field.flex).toBeUndefined();
-    expect(field.borderRadius).toBe(8);
-    expect(field.borderWidth).toBe(1);
-    expect(field.borderColor).toBe(lightColors.border);
-    expect(field.backgroundColor).toBe(lightColors.surface);
-    expect(
-      input.parent!.findAll(
-        (node) =>
-          typeof node.props?.accessibilityLabel === 'string' &&
-          (node.props.accessibilityLabel as string).startsWith('material:'),
-      ),
-    ).toHaveLength(0);
-    expect(styleOf(input).fontSize).toBe(16);
-    expect(input.props.keyboardType).toBe('number-pad');
-    expect(input.props.maxLength).toBe(DATE_INPUT_LENGTH);
-    // The format is still discoverable - as the field's hint, not a second line.
-    expect(input.props.accessibilityHint).toBe(t('Rn_TemplateDateFormatHint'));
-
-    // Footer: BOTH answers are outlined, in real targets around 36 dp buttons,
-    // sized by content (64 / 136 dp) instead of the old 1 : 1.8 split.
-    const cancel = visibleButton(renderer, t('Common_Cancel'));
-    const apply = visibleButton(renderer, t('Rn_TemplateApplyConfirm'));
-    expect(cancel.target.minHeight).toBeGreaterThanOrEqual(44);
-    expect(apply.target.minHeight).toBeGreaterThanOrEqual(44);
-    expect(cancel.visible.minHeight).toBe(36);
-    expect(apply.visible.minHeight).toBe(36);
-    expect(cancel.visible.borderWidth).toBe(1);
-    expect(cancel.visible.borderColor).toBe(lightColors.border);
-    expect(apply.visible.borderColor).toBe(lightColors.textMuted);
-    expect(apply.visible.backgroundColor).toBe(lightColors.surface);
-    expect(apply.visible.backgroundColor).not.toBe(lightColors.accentFill);
-    expect(cancel.visible.minWidth).toBe(64);
-    expect(apply.visible.minWidth).toBe(136);
+    // Each endpoint is a 36 dp control on a real 48/44 dp target.
+    for (const label of [t('Rn_TemplateStartDate'), t('Rn_TemplateEndDate')]) {
+      const field = visibleButton(renderer, label);
+      expect(field.visible.minHeight).toBe(36);
+      expect(field.target.minHeight).toBeGreaterThanOrEqual(44);
+    }
+    // The final answer names exactly how many days it will write.
+    expect(pressable(renderer, tFmt('Rn_TemplateApplyRangeMany', 7))).toBeDefined();
   });
 
-  test('an invalid date keeps the sheet open, explains why and applies nothing', () => {
-    const { renderer, onCancel, onConfirm } = renderSheet('');
-    act(() => pressable(renderer, t('Rn_TemplateApplyConfirm')).props.onPress());
+  test('choosing Start fills it, opens End and applies nothing', () => {
+    const { renderer, onConfirmRange, onCancel } = renderSheet({
+      start: '2026-11-02',
+      end: '2026-11-06',
+    });
+    act(() => pressable(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => dayIn(renderer, '2026-11-05').props.onPress());
 
-    expect(onConfirm).not.toHaveBeenCalled();
+    // Start holds the chosen day...
+    expect(pressable(renderer, t('Rn_TemplateStartDate')).props.accessibilityValue).toEqual({
+      text: '5 November 2026',
+    });
+    // ...End is the active field now (its own month on screen)...
+    expect(pressable(renderer, t('Rn_TemplateEndDate')).props.accessibilityState).toEqual({
+      expanded: true,
+      disabled: false,
+    });
+    expect(texts(renderer)).toContain(formatMonthLabel('2026-11'));
+    // ...and nothing was written or dismissed.
+    expect(onConfirmRange).not.toHaveBeenCalled();
     expect(onCancel).not.toHaveBeenCalled();
-    // The form is still there, with the reason beside the field.
-    expect(renderer.root.findAllByType(TextInput)).toHaveLength(1);
-    expect(
-      renderer.root.findAll((node) => node.props?.testID === 'prompt-dialog-error').length,
-    ).toBeGreaterThan(0);
-    expect(texts(renderer)).toContain(t('Rn_TemplateDateRequired'));
-    // ...and the label stays on screen while the field keeps the format as its
-    // accessibility hint, so the error still has context.
-    expect(texts(renderer)).toContain(t('Rn_TemplateDateLabel'));
-    expect(renderer.root.findByType(TextInput).props.accessibilityHint).toBe(
-      t('Rn_TemplateDateFormatHint'),
-    );
-    // The typed draft is kept, never silently replaced by another date.
-    expect(renderer.root.findByType(TextInput).props.value).toBe('');
   });
 
+  test('both endpoints only fill drafts; the answer writes the range ONCE', async () => {
+    const { renderer, onConfirmRange, onCancel } = renderSheet({
+      start: '2026-11-02',
+      end: '2026-11-02',
+      range: async () => COMPLETE(4, '2026-11-08'),
+    });
+    act(() => pressable(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => dayIn(renderer, '2026-11-05').props.onPress());
+    act(() => dayIn(renderer, '2026-11-08').props.onPress());
 
-
-  test('confirms the date as it stands, without a Today shortcut', () => {
-    const { renderer, onConfirm } = renderSheet();
-    // No Today control exists in this sheet any more...
+    // Both drafts are set and the calendar collapsed - still nothing written.
+    expect(pressable(renderer, t('Rn_TemplateEndDate')).props.accessibilityValue).toEqual({
+      text: '8 November 2026',
+    });
     expect(
       renderer.root.findAll(
-        (node) => node.props?.accessibilityLabel === t('Calendar_Today'),
+        (node) => node.props?.accessibilityLabel === t('Calendar_NextMonth'),
       ),
     ).toHaveLength(0);
-    // ...so the initial value (today) is what gets applied, once confirmed.
-    expect(renderer.root.findByType(TextInput).props.value).toBe('2026-11-02');
+    expect(onConfirmRange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pressable(renderer, tFmt('Rn_TemplateApplyRangeMany', 4)).props.onPress();
+    });
+
+    // ONE call, with both endpoints in order - and the sheet closed on success.
+    expect(onConfirmRange).toHaveBeenCalledTimes(1);
+    expect(onConfirmRange.mock.calls[0][0]).toEqual({
+      startDate: '2026-11-05',
+      endDate: '2026-11-08',
+    });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test('a reversed End is an error, never a silent swap', () => {
+    const { renderer, onConfirmRange } = renderSheet({
+      start: '2026-11-10',
+      end: '2026-11-12',
+    });
+    act(() => pressable(renderer, t('Rn_TemplateEndDate')).props.onPress());
+    act(() => dayIn(renderer, '2026-11-05').props.onPress());
+
+    // The End keeps exactly what was chosen: no swap, no extension...
+    expect(pressable(renderer, t('Rn_TemplateEndDate')).props.accessibilityValue).toEqual({
+      text: '5 November 2026',
+    });
+    // ...the sheet says why, and End stays open to be corrected.
+    expect(texts(renderer)).toContain(t('Rn_TemplateRangeOrder'));
+    expect(pressable(renderer, t('Rn_TemplateEndDate')).props.accessibilityState).toEqual({
+      expanded: true,
+      disabled: false,
+    });
+    // Apply refuses as well: still zero writes.
     act(() => pressable(renderer, t('Rn_TemplateApplyConfirm')).props.onPress());
-    expect(onConfirm).toHaveBeenCalledWith('2026-11-02');
+    expect(onConfirmRange).not.toHaveBeenCalled();
+  });
+
+  test('month navigation moves the grid only - even across a year', () => {
+    const { renderer, onConfirmRange } = renderSheet({
+      start: '2026-11-02',
+      end: '2026-11-06',
+    });
+    act(() => pressable(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => pressable(renderer, t('Calendar_NextMonth')).props.onPress());
+    expect(texts(renderer)).toContain(formatMonthLabel('2026-12'));
+    act(() => pressable(renderer, t('Calendar_PreviousMonth')).props.onPress());
+    expect(texts(renderer)).toContain(formatMonthLabel('2026-11'));
+
+    // Twelve steps back lands in November 2025: a day there is still a real ISO
+    // key, and no endpoint has moved on its own.
+    for (let step = 0; step < 12; step += 1) {
+      act(() => pressable(renderer, t('Calendar_PreviousMonth')).props.onPress());
+    }
+    expect(texts(renderer)).toContain(formatMonthLabel('2025-11'));
+    expect(pressable(renderer, t('Rn_TemplateEndDate')).props.accessibilityValue).toEqual({
+      text: '6 November 2026',
+    });
+    act(() => dayIn(renderer, '2025-11-20').props.onPress());
+    expect(pressable(renderer, t('Rn_TemplateStartDate')).props.accessibilityValue).toEqual({
+      text: '20 November 2025',
+    });
+    expect(onConfirmRange).not.toHaveBeenCalled();
+  });
+
+  test('the same Start and End is ONE day, not zero', () => {
+    const { renderer } = renderSheet({ start: '2026-11-02', end: '2026-11-02' });
+    expect(texts(renderer)).toContain('2 November 2026 – 2 November 2026 · 1 day');
+    // One cell describes BOTH ends, so the range is never ambiguous to a reader.
+    act(() => pressable(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    expect(dayIn(renderer, '2026-11-02').props.accessibilityLabel).toBe(
+      `${formatLongDate('2026-11-02')}, ${t('Rn_TemplateRangeA11yStartEnd')}`,
+    );
+    // ...and the final answer says one day.
+    expect(pressable(renderer, t('Rn_TemplateApplyRangeOne'))).toBeDefined();
+  });
+
+  test('locks every control while the days are written, and counts them', async () => {
+    let settle: ((result: TemplateRangeResult) => void) | undefined;
+    const pending = new Promise<TemplateRangeResult>((resolve) => {
+      settle = resolve;
+    });
+    const { renderer, onCancel, onConfirmRange } = renderSheet({
+      start: '2026-11-05',
+      end: '2026-11-08',
+      range: (_range, onProgress) => {
+        onProgress(1, 4);
+        return pending;
+      },
+    });
+
+    await act(async () => {
+      pressable(renderer, tFmt('Rn_TemplateApplyRangeMany', 4)).props.onPress();
+    });
+    // Progress counts DAYS (one of four), not meals.
+    expect(texts(renderer)).toContain(tFmt('Rn_TemplateRangeProgress', 1, 4));
+    // A second tap cannot start another range.
+    await act(async () => {
+      pressable(renderer, tFmt('Rn_TemplateApplyRangeMany', 4)).props.onPress();
+    });
+    expect(onConfirmRange).toHaveBeenCalledTimes(1);
+    // Fields, answers and every dismissal are locked while the writes run.
+    expect(pressable(renderer, t('Rn_TemplateStartDate')).props.disabled).toBe(true);
+    expect(pressable(renderer, t('Common_Cancel')).props.disabled).toBe(true);
+    act(() => pressable(renderer, t('Common_Close')).props.onPress());
+    expect(onCancel).not.toHaveBeenCalled();
+
+    await act(async () => {
+      settle?.(COMPLETE(4, '2026-11-08'));
+    });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  test('a partial run stops, reports it truthfully and offers only Close', async () => {
+    const { renderer, onCancel, onConfirmRange } = renderSheet({
+      start: '2026-11-05',
+      end: '2026-11-09',
+      range: async () => ({
+        kind: 'partial',
+        totalDays: 5,
+        completedDays: 2,
+        lastCompletedDate: '2026-11-06',
+        failedDate: '2026-11-07',
+        failedDayMayBePartial: true,
+        unattemptedDays: 2,
+        cause: new Error('disk on fire'),
+      }),
+    });
+
+    await act(async () => {
+      pressable(renderer, tFmt('Rn_TemplateApplyRangeMany', 5)).props.onPress();
+    });
+    const printed = texts(renderer);
+    // What finished, what MAY be half-written, and what never ran.
+    expect(printed).toContain(tFmt('Rn_TemplateRangePartial', 2, 5));
+    expect(printed).toContain(
+      tFmt('Rn_TemplateRangePartialFailed', formatLongDate('2026-11-07')),
+    );
+    expect(printed).toContain(tFmt('Rn_TemplateRangePartialUnattempted', 2));
+    // No raw exception text, no rollback claim, no retry and no Cancel.
+    expect(printed.join(' ')).not.toContain('disk on fire');
+    expect(
+      renderer.root.findAll(
+        (node) => node.props?.accessibilityLabel === tFmt('Rn_TemplateApplyRangeMany', 5),
+      ),
+    ).toHaveLength(0);
+    expect(
+      renderer.root.findAll((node) => node.props?.accessibilityLabel === t('Common_Cancel')),
+    ).toHaveLength(0);
+    // Close is the ONE exit; it dismisses and writes nothing more.
+    act(() => pressable(renderer, t('Rn_TemplateRangeClose')).props.onPress());
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirmRange).toHaveBeenCalledTimes(1);
   });
 
   test('Cancel and the close X dismiss without applying', () => {
-    const { renderer, onCancel, onConfirm } = renderSheet();
+    const { renderer, onCancel, onConfirmRange } = renderSheet();
     act(() => pressable(renderer, t('Common_Cancel')).props.onPress());
     act(() => pressable(renderer, t('Common_Close')).props.onPress());
     act(() => renderer.root.findByType(Modal).props.onRequestClose());
-
     expect(onCancel).toHaveBeenCalledTimes(3);
-    expect(onConfirm).not.toHaveBeenCalled();
-  });
-
-  test('stacks the two answers on a narrow screen or large text', () => {
-    mockWindow.width = 320;
-    const narrow = renderSheet();
-    expect(styleOf(pressable(narrow.renderer, t('Common_Cancel'))).width).toBe('100%');
-    expect(styleOf(pressable(narrow.renderer, t('Rn_TemplateApplyConfirm'))).width).toBe('100%');
-    // The date field stays the same compact box - it never becomes a bar.
-    const narrowField = styleOf(narrow.renderer.root.findByType(TextInput).parent!);
-    expect(narrowField.width).toBeUndefined();
-    expect(narrowField.minHeight).toBe(40);
-
-    mockWindow.width = 390;
-    mockWindow.fontScale = 1.5;
-    const large = renderSheet();
-    expect(styleOf(pressable(large.renderer, t('Common_Cancel'))).width).toBe('100%');
-
-    // Back at a phone width with normal text they sit side by side, sized by
-    // their own content: the old fixed 121.43 / 218.57 split and its 1 : 1.8
-    // ratio are gone.
-    mockWindow.fontScale = 1;
-    const wide = renderSheet();
-    expect(styleOf(pressable(wide.renderer, t('Common_Cancel'))).width).toBeUndefined();
-    expect(visibleButton(wide.renderer, t('Common_Cancel')).visible.minWidth).toBe(64);
-    expect(visibleButton(wide.renderer, t('Rn_TemplateApplyConfirm')).visible.minWidth).toBe(136);
+    expect(onConfirmRange).not.toHaveBeenCalled();
   });
 
   test('keeps the default prompt (template naming) on its own rows', () => {
@@ -1005,9 +1101,9 @@ describe('the compact Apply-template sheet', () => {
     );
     expect(styleOf(pressable(renderer, t('Common_Save'))).minHeight).toBe(52);
     expect(styleOf(pressable(renderer, t('Common_Cancel'))).minHeight).toBe(52);
-    // No date chrome leaks into it: no field label, no format hint.
-    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateLabel'));
-    expect(texts(renderer)).not.toContain(t('Rn_TemplateDateFormatHint'));
+    // One typed field, and no range chrome leaks into it.
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(1);
+    expect(texts(renderer)).not.toContain(t('Rn_TemplateStartDate'));
+    expect(texts(renderer)).not.toContain(t('Rn_TemplateRangeSamePlan'));
   });
 });
-

@@ -37,15 +37,21 @@ import { MealCategory, MealTemplate, MealTemplateContent } from '../../domain/mo
 import { formatDate } from '../../domain/analytics';
 import { getTemplates } from '../../data/repositories';
 import { applyTemplate, ensureCategories } from '../../services/mealTracking';
+import {
+  applyTemplateRange,
+  type TemplateDateRange,
+  type TemplateRangeResult,
+} from '../../services/applyTemplateRange';
 import { subscribeDataChange } from '../../cloud/syncEngine';
 import { useApp } from '../appContext';
 import { PromptDialog } from '../components/dialogs';
 import { Icon, MaterialIcon } from '../components/icons';
 import { mealCategoryGlyph } from '../mealGlyphs';
-import { fonts, metrics, pageTitleStyle, themeColors } from '../theme';
+import { fonts, themeColors } from '../theme';
+import { TEMPLATE_GUTTER, templateActionInk, templatesCalendarTokens as TPL } from '../templatesCalendar';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
-import { dateDraft, dateInputProblem, isCalendarDate, DATE_INPUT_LENGTH } from '../dates';
+import { dateInputProblem, isCalendarDate } from '../dates';
 
 /**
  * Real touch target: Android asks for 48 dp, iOS' convention is 44 dp. The
@@ -54,34 +60,16 @@ import { dateDraft, dateInputProblem, isCalendarDate, DATE_INPUT_LENGTH } from '
 const TOUCH = Platform.OS === 'android' ? 48 : 44;
 
 /**
- * Sizes of the template list in dp/sp - the palette comes from the theme, so
- * light and dark mode stay in step. One compact tile rhythm: 12 dp corners and
- * gutters, a 1 dp outline, NO shadow, and 12 dp metadata. There is deliberately
- * NO accent fill here: Apply to date is a NEUTRAL outlined control (card
- * surface, thin outline, normal ink, slate calendar glyph) inside a real target.
+ * Geometry of the READ-ONLY preview rows under an expanded card (time, the
+ * meal's own glyph tile, the stored title over its detail). The page, card and
+ * action dimensions come from the shared templatesCalendar tokens so both this
+ * page and the popup date form are measured by one source.
  */
-const TPL = {
-  cardRadius: 12,
-  cardPadding: 12,
-  borderWidth: 1,
-  headerIcon: 32,
-  iconRadius: 8,
-  headerGap: 10,
-  nameSize: 17,
-  metaSize: 11,
-  previewMinHeight: TOUCH,
-  rowMinHeight: TOUCH,
+const PREVIEW = {
   rowGap: 10,
   timeColumn: 44,
   categoryTile: 28,
   categoryRadius: 8,
-  actionGap: 8,
-  actionDivider: 24,
-  applyMinHeight: TOUCH,
-  applyVisibleHeight: 36,
-  applyMinWidth: 140,
-  applyRadius: 8,
-  applyLabelSize: 13,
 } as const;
 
 
@@ -115,9 +103,11 @@ function formatUpdated(value: string, sameDay: boolean): string {
 export function TemplatesScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
+  /** The two coloured actions this page owns (see templatesCalendar.ts). */
+  const ink = templateActionInk[app.isDark ? 'dark' : 'light'];
   const { width, fontScale } = useWindowDimensions();
   /** Large text or a narrow window: the card head stacks instead of squeezing. */
-  const stacked = fontScale > 1.3 || width < 350;
+  const stacked = fontScale > TPL.stackFont || width < TPL.stackWidth;
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [categories, setCategories] = useState<MealCategory[]>([]);
   const [status, setStatus] = useState<string | null>(null);
@@ -162,10 +152,36 @@ export function TemplatesScreen(): React.JSX.Element {
     return null;
   };
 
-  const applyToDate = async (template: MealTemplate, date: string): Promise<void> => {
-    await applyTemplate(template, date, app.accountId);
-    setStatus(tFmt('Template_Applied', date));
+  /**
+   * Applies the template to EVERY day of the chosen inclusive range, one day at a
+   * time through the EXISTING single-day applier. The app is refreshed ONCE after
+   * the run settles - including a partial failure, whose earlier days (and even
+   * the failed one) may already be written - and the page reports what happened.
+   *
+   * The range itself is walked by `applyTemplateRange`: sequential, validated
+   * before the first write, stopping at the first rejected day, never retried.
+   */
+  const applyToRange = async (
+    template: MealTemplate,
+    chosen: TemplateDateRange,
+    onProgress: (completedDays: number, totalDays: number) => void,
+  ): Promise<TemplateRangeResult> => {
+    const result = await applyTemplateRange(chosen, {
+      applyDay: (iso) => applyTemplate(template, iso, app.accountId),
+      onProgress,
+    });
+    // ONE refresh for the whole range, whatever the outcome.
     app.notifyChanged();
+    if (result.kind === 'complete') {
+      setStatus(
+        result.completedDays === 1
+          ? t('Rn_TemplateRangeAppliedOne')
+          : tFmt('Rn_TemplateRangeAppliedMany', result.completedDays),
+      );
+    } else {
+      setStatus(tFmt('Rn_TemplateRangeStopped', result.completedDays, result.totalDays));
+    }
+    return result;
   };
 
   const requestApply = (template: MealTemplate): void => {
@@ -219,232 +235,233 @@ export function TemplatesScreen(): React.JSX.Element {
         <Text style={[styles.noticeText, { color: colors.textMuted }]}>{t('Rn_TemplateInfo')}</Text>
       </View>
 
-      {templates.length === 0 && (
-        <View
-          style={[
-            styles.card,
-            styles.emptyPanel,
-            { backgroundColor: colors.cardFill, borderColor: colors.border },
-          ]}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceVariant }]}>
-            <Icon name="layers-outline" size={24} color={colors.textMuted} />
-          </View>
-          <Text style={[styles.empty, { color: colors.textSecondary }]}>{t('Template_Empty')}</Text>
-        </View>
-      )}
-
-      {templates.map((template) => {
-        const open = expanded.includes(template.id);
-        const contents = templateContents(template);
-        /** The REAL stored meal count, in the card's singular/plural wording. */
-        const countLabel =
-          contents.length === 1
-            ? t('Rn_TemplateMealCountOne')
-            : tFmt('Rn_TemplateMealCount', contents.length);
-        /** Single-meal templates wear their own category's glyph in the tile. */
-        const slotKey =
-          template.templateMealSlot ?? template.templateMeal?.mealCategoryKey ?? null;
-        return (
-        <View
-          key={template.id}
-          style={[
-            styles.card,
-            { backgroundColor: colors.cardFill, borderColor: colors.border },
-          ]}>
-          {/* Header: the kind's glyph, the real name, then ONE wrapping metadata
-              row - kind · REAL meal count on the left, the update time on the
-              right. The old kind badge and the preview-count column are gone:
-              the same facts share this line instead of competing with the name. */}
-          <View style={styles.header}>
-            <View
-              style={[
-                styles.tile,
-                { borderColor: colors.border, backgroundColor: colors.cardFill },
-              ]}>
-              {template.isFullDay ? (
-                <MaterialIcon
-                  name="calendar-month-outline"
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              ) : slotKey === null ? (
-                <Icon name="restaurant-outline" size={20} color={colors.textSecondary} />
-              ) : (
-                <MaterialIcon
-                  name={mealCategoryGlyph(slotKey)}
-                  size={20}
-                  color={colors.textSecondary}
-                />
-              )}
-            </View>
-            <View style={styles.headerText}>
-              {/* Two lines: a saved date or a long custom name WRAPS (and is
-                  unrestricted at large text) instead of being cut. */}
-              <Text
-                style={[styles.name, { color: colors.text }]}
-                numberOfLines={stacked ? undefined : 2}>
-                {isCalendarDate(template.name) ? formatMediumDate(template.name) : template.name}
-              </Text>
-              <View style={styles.metadata}>
-                <Text style={[styles.metaText, { color: colors.textMuted }]}>
-                  {template.isFullDay ? t('Template_KindDay') : t('Template_KindMeal')} ·{' '}
-                  {countLabel}
-                </Text>
-                <Text style={[styles.metaText, styles.updated, { color: colors.textMuted }]}>
-                  {formatUpdated(template.updatedAt, isCalendarDate(template.name))}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* ONE compact action row under the header, split off by a single 1 dp
-              rule: "Meal preview" on the left, "Apply to date" on the right.
-              These are SIBLING targets - the card itself is not pressable, so
-              previewing can never apply anything and applying never previews.
-              An empty template has nothing to preview: it keeps Apply alone. */}
+      {/* The cards' outer borders are all TEMPLATE_GUTTER apart, and the first
+          one sits the same distance under the notice: ONE list gap, no per-card
+          margin, so the side gutters and the vertical gaps are one number. */}
+      <View style={styles.list}>
+        {templates.length === 0 && (
           <View
             style={[
-              styles.actions,
-              { borderTopColor: colors.border },
-              stacked && styles.actionsStacked,
+              styles.card,
+              styles.emptyPanel,
+              { backgroundColor: colors.cardFill, borderColor: colors.border },
             ]}>
-            {contents.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('Rn_TemplateMealPreview')}
-                accessibilityState={{ expanded: open }}
-                accessibilityValue={{ text: countLabel }}
-                onPress={() => togglePreview(template.id)}
-                style={({ pressed }) => [
-                  styles.previewToggle,
-                  stacked && styles.previewToggleStacked,
-                  pressed && { backgroundColor: colors.surfaceVariant },
-                ]}>
-                <Text
-                  style={[styles.previewLabel, { color: colors.text }]}
-                  numberOfLines={stacked ? undefined : 1}>
-                  {t('Rn_TemplateMealPreview')}
-                </Text>
-                <Icon
-                  name={open ? 'chevron-up' : 'chevron-down'}
-                  size={18}
-                  color={colors.textMuted}
-                />
-              </Pressable>
-            )}
-            {/* A quiet vertical rule between the two targets - horizontal layout
-                only; stacked controls are separated by their own rows. */}
-            {contents.length > 0 && !stacked && (
-              <View style={[styles.actionDivider, { backgroundColor: colors.border }]} />
-            )}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('Template_Apply')}
-              onPress={() => requestApply(template)}
-              style={({ pressed }) => [
-                styles.applyTarget,
-                stacked && styles.applyTargetStacked,
-                contents.length === 0 && styles.applyTargetOnly,
-                // The whole target answers a press; the button stays neutral.
-                pressed && { opacity: 0.7 },
-              ]}>
-              {/* A real 48/44 dp target around a 36 dp visible NEUTRAL button:
-                  8 dp corners, a thin outline on the card's own surface, normal
-                  ink, a slate calendar glyph - never an accent fill or shadow. */}
+            <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceVariant }]}>
+              <Icon name="layers-outline" size={24} color={colors.textMuted} />
+            </View>
+            <Text style={[styles.empty, { color: colors.textSecondary }]}>{t('Template_Empty')}</Text>
+          </View>
+        )}
+  
+        {templates.map((template) => {
+          const open = expanded.includes(template.id);
+          const contents = templateContents(template);
+          /** The REAL stored meal count, in the card's singular/plural wording. */
+          const countLabel =
+            contents.length === 1
+              ? t('Rn_TemplateMealCountOne')
+              : tFmt('Rn_TemplateMealCount', contents.length);
+          /** Single-meal templates wear their own category's glyph in the tile. */
+          const slotKey =
+            template.templateMealSlot ?? template.templateMeal?.mealCategoryKey ?? null;
+          return (
+          <View
+            key={template.id}
+            style={[
+              styles.card,
+              { backgroundColor: colors.cardFill, borderColor: colors.border },
+            ]}>
+            {/* Header: the kind's glyph, the real name, then ONE wrapping metadata
+                row - kind · REAL meal count on the left, the update time on the
+                right. The old kind badge and the preview-count column are gone:
+                the same facts share this line instead of competing with the name. */}
+            <View style={styles.header}>
               <View
                 style={[
-                  styles.apply,
+                  styles.tile,
                   { borderColor: colors.border, backgroundColor: colors.cardFill },
                 ]}>
-                <MaterialIcon
-                  name="calendar-month-outline"
-                  size={15}
-                  color={colors.textSecondary}
-                />
-                <Text style={[styles.applyText, { color: colors.text }]} numberOfLines={1}>
-                  {t('Template_Apply')}
-                </Text>
+                {template.isFullDay ? (
+                  <MaterialIcon
+                    name="calendar-month-outline"
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                ) : slotKey === null ? (
+                  <Icon name="restaurant-outline" size={20} color={colors.textSecondary} />
+                ) : (
+                  <MaterialIcon
+                    name={mealCategoryGlyph(slotKey)}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
+                )}
               </View>
-            </Pressable>
-          </View>
-          {/* Expanded contents sit BELOW the action row, inside the same card:
-              one top rule, then one thin inset line between rows. Read-only, in
-              the order the applier uses - no status and no photographs. */}
-          {open && contents.length > 0 && (
-            <View style={[styles.previewPanel, { borderTopColor: colors.border }]}>
-              {contents.map((content, index) => {
-                const category = categories.find(
-                  (candidate) => candidate.fixedCategoryKey === content.mealCategoryKey,
-                );
-                const categoryName =
-                  category !== undefined && category.name !== ''
-                    ? category.name
-                    : t(mealNameKey(content.mealCategoryKey));
-                /**
-                 * The EFFECTIVE planned time, exactly as the calendar's agenda
-                 * resolves it: the template's own stored time, else the
-                 * category's planned time (which is what the diary shows for a
-                 * slot without one). Only a slot whose category is unknown falls
-                 * back to the "no time" caption.
-                 */
-                const time = formatTime(
-                  content.plannedTime ?? (category !== undefined ? category.defaultTime : null),
-                  app.use12HourClock,
-                );
-                /**
-                 * Hierarchy: the meal's own NAME leads when it has one, with the
-                 * category and the stored description on the meta line under it
-                 * ("Breakfast · with berries"); a slot without a name leads with
-                 * its CATEGORY and shows the description underneath. The category
-                 * is always printed (it is never blank), so a row can never read
-                 * as an anonymous glyph, and nothing is invented.
-                 */
-                const hasTitle = content.title !== '';
-                const primary = hasTitle ? content.title : categoryName;
-                const details = hasTitle
-                  ? content.ingredients === ''
-                    ? categoryName
-                    : `${categoryName} · ${content.ingredients}`
-                  : content.ingredients;
-                return (
-                  <View key={content.mealCategoryKey}>
-                    {index > 0 && (
-                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                    )}
-                    <View style={styles.previewRow}>
-                      <Text style={[styles.previewTime, { color: colors.textMuted }]} numberOfLines={1}>
-                        {time === '' ? t('Rn_TemplateNoTime') : time}
-                      </Text>
-                      <View style={[styles.previewIcon, { backgroundColor: colors.surfaceVariant }]}>
-                        <MaterialIcon
-                          name={mealCategoryGlyph(content.mealCategoryKey)}
-                          size={16}
-                          color={colors.textSecondary}
-                        />
-                      </View>
-                      <View style={styles.previewCopy}>
-                        {/* Stored titles and details wrap instead of being cut:
-                            they are the data this page exists to show. */}
-                        <Text style={[styles.previewTitle, { color: colors.text }]} numberOfLines={2}>
-                          {primary}
+              <View style={styles.headerText}>
+                {/* Two lines: a saved date or a long custom name WRAPS (and is
+                    unrestricted at large text) instead of being cut. */}
+                <Text
+                  style={[styles.name, { color: colors.text }]}
+                  numberOfLines={stacked ? undefined : 2}>
+                  {isCalendarDate(template.name) ? formatMediumDate(template.name) : template.name}
+                </Text>
+                <View style={styles.metadata}>
+                  <Text style={[styles.metaText, { color: colors.textMuted }]}>
+                    {template.isFullDay ? t('Template_KindDay') : t('Template_KindMeal')} ·{' '}
+                    {countLabel}
+                  </Text>
+                  <Text style={[styles.metaText, styles.updated, { color: colors.textMuted }]}>
+                    {formatUpdated(template.updatedAt, isCalendarDate(template.name))}
+                  </Text>
+                </View>
+              </View>
+            </View>
+  
+            {/* ONE compact action row under the header, split off by a single 1 dp
+                rule: "Meal preview" on the left, "Apply to date" on the right.
+                These are SIBLING targets - the card itself is not pressable, so
+                previewing can never apply anything and applying never previews.
+                An empty template has nothing to preview: it keeps Apply alone. */}
+            <View
+              style={[
+                styles.actions,
+                { borderTopColor: colors.border },
+                stacked && styles.actionsStacked,
+              ]}>
+              {contents.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('Rn_TemplateMealPreview')}
+                  accessibilityState={{ expanded: open }}
+                  accessibilityValue={{ text: countLabel }}
+                  onPress={() => togglePreview(template.id)}
+                  style={({ pressed }) => [
+                    styles.previewToggle,
+                    stacked && styles.previewToggleStacked,
+                    pressed && { backgroundColor: colors.surfaceVariant },
+                  ]}>
+                  <Text
+                    style={[styles.previewLabel, { color: colors.text }]}
+                    numberOfLines={stacked ? undefined : 1}>
+                    {t('Rn_TemplateMealPreview')}
+                  </Text>
+                  <Icon
+                    name={open ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('Template_Apply')}
+                onPress={() => requestApply(template)}
+                style={[
+                  styles.applyTarget,
+                  stacked && styles.applyTargetStacked,
+                  contents.length === 0 && styles.applyTargetOnly,
+                ]}>
+                {/* A real 48/44 dp target around a 36 dp visible control: 8 dp
+                    corners, the page's restrained BLUE outline and pale surface,
+                    the same blue the popup's "Apply template" wears. It is a low
+                    emphasis action repeated on every card - never a solid slab,
+                    never a shadow. */}
+                {({ pressed }) => (
+                  <View
+                    style={[
+                      styles.apply,
+                      {
+                        borderColor: ink.applyBorder,
+                        backgroundColor: pressed ? ink.applyPressed : ink.applyFill,
+                      },
+                    ]}>
+                    <MaterialIcon name="calendar-month-outline" size={TPL.icon} color={ink.apply} />
+                    <Text style={[styles.applyText, { color: ink.apply }]} numberOfLines={1}>
+                      {t('Template_Apply')}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
+            {/* Expanded contents sit BELOW the action row, inside the same card:
+                one top rule, then one thin inset line between rows. Read-only, in
+                the order the applier uses - no status and no photographs. */}
+            {open && contents.length > 0 && (
+              <View style={[styles.previewPanel, { borderTopColor: colors.border }]}>
+                {contents.map((content, index) => {
+                  const category = categories.find(
+                    (candidate) => candidate.fixedCategoryKey === content.mealCategoryKey,
+                  );
+                  const categoryName =
+                    category !== undefined && category.name !== ''
+                      ? category.name
+                      : t(mealNameKey(content.mealCategoryKey));
+                  /**
+                   * The EFFECTIVE planned time, exactly as the calendar's agenda
+                   * resolves it: the template's own stored time, else the
+                   * category's planned time (which is what the diary shows for a
+                   * slot without one). Only a slot whose category is unknown falls
+                   * back to the "no time" caption.
+                   */
+                  const time = formatTime(
+                    content.plannedTime ?? (category !== undefined ? category.defaultTime : null),
+                    app.use12HourClock,
+                  );
+                  /**
+                   * Hierarchy: the meal's own NAME leads when it has one, with the
+                   * category and the stored description on the meta line under it
+                   * ("Breakfast · with berries"); a slot without a name leads with
+                   * its CATEGORY and shows the description underneath. The category
+                   * is always printed (it is never blank), so a row can never read
+                   * as an anonymous glyph, and nothing is invented.
+                   */
+                  const hasTitle = content.title !== '';
+                  const primary = hasTitle ? content.title : categoryName;
+                  const details = hasTitle
+                    ? content.ingredients === ''
+                      ? categoryName
+                      : `${categoryName} · ${content.ingredients}`
+                    : content.ingredients;
+                  return (
+                    <View key={content.mealCategoryKey}>
+                      {index > 0 && (
+                        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                      )}
+                      <View style={styles.previewRow}>
+                        <Text style={[styles.previewTime, { color: colors.textMuted }]} numberOfLines={1}>
+                          {time === '' ? t('Rn_TemplateNoTime') : time}
                         </Text>
-                        {details !== '' && (
-                          <Text
-                            style={[styles.previewDetail, { color: colors.textMuted }]}
-                            numberOfLines={2}>
-                            {details}
+                        <View style={[styles.previewIcon, { backgroundColor: colors.surfaceVariant }]}>
+                          <MaterialIcon
+                            name={mealCategoryGlyph(content.mealCategoryKey)}
+                            size={16}
+                            color={colors.textSecondary}
+                          />
+                        </View>
+                        <View style={styles.previewCopy}>
+                          {/* Stored titles and details wrap instead of being cut:
+                              they are the data this page exists to show. */}
+                          <Text style={[styles.previewTitle, { color: colors.text }]} numberOfLines={2}>
+                            {primary}
                           </Text>
-                        )}
+                          {details !== '' && (
+                            <Text
+                              style={[styles.previewDetail, { color: colors.textMuted }]}
+                              numberOfLines={2}>
+                              {details}
+                            </Text>
+                          )}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-        );
-      })}
+                  );
+                })}
+              </View>
+            )}
+          </View>
+          );
+        })}
+      </View>
 
       {status !== null && <Text style={[styles.status, { color: colors.accent }]}>{status}</Text>}
       {applying !== null && (
@@ -458,35 +475,29 @@ export function TemplatesScreen(): React.JSX.Element {
             // "Apply template" - the reference's headline, stacked over the
             // real template summary (see `applyingSummary`).
             title: t('Rn_TemplateApplyTitle'),
-            // The input's accessible name and the fallback hint; the sheet shows
-            // the template summary under the title and a visible field label.
+            // The sheet's own description of the task (it needs a start and an
+            // end day, not one typed date).
             message: t('Rn_TemplateDatePrompt'),
             contextLabel: applyingSummary,
-            fieldLabel: t('Rn_TemplateDateLabel'),
-            formatHint: t('Rn_TemplateDateFormatHint'),
+            // Start and End both begin on today, so a single day is two taps away.
             initialValue: formatDate(new Date()),
             cancelText: t('Common_Cancel'),
-            // "Apply template", not a generic OK: the action writes five meals.
+            // Kept for the shared prompt contract; the range form never uses a
+            // single string value - it hands over both endpoints instead.
             confirmText: t('Rn_TemplateApplyConfirm'),
             today: { label: t('Calendar_Today'), value: formatDate(new Date()) },
-            // The target date is digits only: `dateDraft` drops every other
-            // character on the way in and inserts the two dashes itself, so
-            // Android's number pad (which has no dash key) can still type the
-            // whole date, and a letter, a slash or a second date can never be
-            // typed, pasted or reach the validator.
-            keyboardType: 'number-pad',
-            sanitize: dateDraft,
-            maxLength: DATE_INPUT_LENGTH,
             validate: dateError,
             onCancel: () => setApplying(null),
-            onConfirm: (value) => {
-              const template = applying;
-              setApplying(null);
-              // Only a validated date reaches the domain call.
-              void applyToDate(template, value).catch((error) => {
-                console.warn('[templates] the template could not be applied', error);
-                setStatus(t('Settings_SaveFailed'));
-              });
+            onConfirm: () => undefined,
+            // RANGE opted in explicitly: the sheet stays open while the days are
+            // written and closes only after the run settles (the dialog does
+            // that; a partial run stays open with its truthful report).
+            templateRange: {
+              initialEndValue: formatDate(new Date()),
+              onConfirmRange: (chosen, onProgress) => {
+                const template = applying;
+                return applyToRange(template, chosen, onProgress);
+              },
             },
           }}
         />
@@ -497,22 +508,39 @@ export function TemplatesScreen(): React.JSX.Element {
 
 
 const styles = StyleSheet.create({
-  /** Page frame; the bottom padding is computed at render time (tab bar). */
-  content: { padding: metrics.pagePadding },
-  pageTitle: { ...pageTitleStyle },
+  /**
+   * Page frame: ONE TEMPLATE_GUTTER for the left edge, the right edge and the
+   * top (after the navigator's safe area) - the same number the approved Home
+   * page uses. The bottom padding is computed at render time (tab bar).
+   */
+  content: { paddingHorizontal: TEMPLATE_GUTTER, paddingTop: TEMPLATE_GUTTER },
+  pageTitle: {
+    fontSize: TPL.pageTitle,
+    lineHeight: TPL.pageTitleLine,
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
+  },
   /** One small REGULAR line under the heading - no italics, no warning tone. */
-  subtitle: { fontSize: 12, lineHeight: 17, marginTop: 2, fontFamily: fonts.regular },
+  subtitle: { fontSize: TPL.meta, lineHeight: TPL.metaLine, marginTop: 2, fontFamily: fonts.regular },
   /**
    * The notice: the same fact as ONE quiet line - an outline glyph and the
    * message at caption size. No wash, no border, no box of its own.
    */
   notice: {
-    marginTop: 12,
+    marginTop: TPL.sectionGap,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    columnGap: 7,
+    columnGap: TPL.iconGap,
   },
-  noticeText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 18, fontFamily: fonts.regular },
+  noticeText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: TPL.meta,
+    lineHeight: TPL.metaLine,
+    fontFamily: fonts.regular,
+  },
+  /** The cards, all TEMPLATE_GUTTER apart; the first card the same under the notice. */
+  list: { marginTop: TEMPLATE_GUTTER, gap: TEMPLATE_GUTTER },
   /** Empty state: an icon in a soft tile, then the sentence, centred together. */
   emptyPanel: { alignItems: 'center', paddingVertical: 28, rowGap: 10 },
   emptyIcon: {
@@ -529,8 +557,7 @@ const styles = StyleSheet.create({
    * action row hold the 12 dp gutter, so the rules sit inside the frame.
    */
   card: {
-    marginTop: 12,
-    borderWidth: TPL.borderWidth,
+    borderWidth: TPL.border,
     borderRadius: TPL.cardRadius,
     overflow: 'hidden',
   },
@@ -538,21 +565,21 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    columnGap: TPL.headerGap,
+    columnGap: TPL.titleGap,
     padding: TPL.cardPadding,
   },
   /** 32 dp tile, 8 dp corners, a thin outline on the card's own surface. */
   tile: {
-    width: TPL.headerIcon,
-    height: TPL.headerIcon,
-    borderRadius: TPL.iconRadius,
-    borderWidth: TPL.borderWidth,
+    width: TPL.iconTile,
+    height: TPL.iconTile,
+    borderRadius: TPL.controlRadius,
+    borderWidth: TPL.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerText: { flex: 1, minWidth: 0 },
   name: {
-    fontSize: TPL.nameSize,
+    fontSize: TPL.pageName,
     lineHeight: 23,
     fontFamily: fonts.medium,
     letterSpacing: -0.2,
@@ -569,15 +596,15 @@ const styles = StyleSheet.create({
     rowGap: 3,
     marginTop: 3,
   },
-  metaText: { fontSize: TPL.metaSize, lineHeight: 16, fontFamily: fonts.regular, flexShrink: 1 },
+  metaText: { fontSize: TPL.meta, lineHeight: TPL.metaLine, fontFamily: fonts.regular, flexShrink: 1 },
   updated: { marginLeft: 'auto' },
   /** A 1 dp rule inset to the card's 12 dp gutter (never the frame itself). */
-  divider: { height: TPL.borderWidth, marginHorizontal: TPL.cardPadding },
+  divider: { height: TPL.border, marginHorizontal: TPL.cardPadding },
   /** "Meal preview": its own 48/44 dp target - label left, chevron right. */
   previewToggle: {
     flex: 1,
     minWidth: 0,
-    minHeight: TPL.previewMinHeight,
+    minHeight: TOUCH,
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: 6,
@@ -590,13 +617,13 @@ const styles = StyleSheet.create({
    * The expanded contents BELOW the action row: one top rule, then a thin inset
    * line between rows. The page's own scroll view scrolls it - no inner one.
    */
-  previewPanel: { borderTopWidth: TPL.borderWidth, paddingBottom: 4 },
+  previewPanel: { borderTopWidth: TPL.border, paddingBottom: 4 },
   /** One read-only meal: time | 28 dp glyph tile | title over its stored detail. */
   previewRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: TPL.rowGap,
-    minHeight: TPL.rowMinHeight,
+    columnGap: PREVIEW.rowGap,
+    minHeight: TOUCH,
     paddingHorizontal: TPL.cardPadding,
     paddingVertical: 8,
   },
@@ -604,13 +631,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     fontVariant: ['tabular-nums'],
-    minWidth: TPL.timeColumn,
+    minWidth: PREVIEW.timeColumn,
     flexShrink: 0,
   },
   previewIcon: {
-    width: TPL.categoryTile,
-    height: TPL.categoryTile,
-    borderRadius: TPL.categoryRadius,
+    width: PREVIEW.categoryTile,
+    height: PREVIEW.categoryTile,
+    borderRadius: PREVIEW.categoryRadius,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -619,23 +646,23 @@ const styles = StyleSheet.create({
   previewDetail: { fontSize: 11, lineHeight: 16, marginTop: 1, fontFamily: fonts.regular },
   /**
    * ONE compact action row under the header, split off by a single 1 dp rule:
-   * the preview target grows, the Apply target keeps its 140 dp minimum.
+   * the preview target grows, the Apply target keeps its 136 dp minimum. The row
+   * is the ONLY separator between the two actions - 8 dp of air, no vertical
+   * rule, so the pair reads as one quiet line of controls.
    */
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: TPL.actionGap,
     paddingHorizontal: TPL.cardPadding,
-    borderTopWidth: TPL.borderWidth,
-    minHeight: TPL.previewMinHeight,
+    borderTopWidth: TPL.border,
+    minHeight: TOUCH,
   },
   /** Narrow window / large text: the controls stack, Apply stays right aligned. */
   actionsStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: 2, paddingBottom: 4 },
-  /** The quiet rule between the two targets - horizontal layout only. */
-  actionDivider: { width: TPL.borderWidth, height: TPL.actionDivider },
   /** The real 48/44 dp target around the 36 dp visible button. */
   applyTarget: {
-    minHeight: TPL.applyMinHeight,
+    minHeight: TOUCH,
     minWidth: TPL.applyMinWidth,
     justifyContent: 'center',
   },
@@ -643,26 +670,27 @@ const styles = StyleSheet.create({
   /** Nothing to preview: the Apply control stays alone, right aligned. */
   applyTargetOnly: { marginLeft: 'auto' },
   /**
-   * The visible control: 36 dp tall, 8 dp corners, a thin neutral outline on the
-   * card's own surface, normal ink and a slate calendar glyph. Deliberately NOT
-   * an accent fill (a blue Apply button was rejected) and no shadow of its own.
+   * The visible control: 36 dp tall, 8 dp corners, the page's restrained BLUE
+   * outline over a pale blue surface (the colours come from `templateActionInk`,
+   * so card and popup agree). Never a solid blue slab and never a shadow.
    */
   apply: {
-    minHeight: TPL.applyVisibleHeight,
+    minHeight: TPL.visibleControl,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    columnGap: 6,
-    paddingHorizontal: 10,
+    columnGap: TPL.iconGap,
+    paddingHorizontal: TPL.controlPaddingX,
     paddingVertical: 5,
-    borderWidth: TPL.borderWidth,
-    borderRadius: TPL.applyRadius,
+    borderWidth: TPL.border,
+    borderRadius: TPL.controlRadius,
   },
   applyText: {
     flexShrink: 1,
-    fontSize: TPL.applyLabelSize,
+    fontSize: TPL.controlText,
+    lineHeight: TPL.controlLine,
     fontFamily: fonts.regular,
     textAlign: 'center',
   },
-  status: { fontSize: 13, fontFamily: fonts.medium, marginTop: 12 },
+  status: { fontSize: 13, fontFamily: fonts.medium, marginTop: TPL.sectionGap },
 });

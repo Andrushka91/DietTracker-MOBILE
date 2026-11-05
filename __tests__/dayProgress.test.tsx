@@ -1,17 +1,17 @@
-// The dashboard's day header, drawn the way the r3 reference draws it:
+// The dashboard's day header, drawn the way the v3 reference draws it:
 //
-//    ╭────────╮   ┌───────────────────────────────────────┐
-//    │  1/5   │   │ ✓ 1  │ ✕ 1  │ ◷ 3                  │
-//    │  Done  │   │ Done  │Missed│ Pending              │
-//    ╰────────╯   └───────────────────────────────────────┘
+//    ╭──────╮    ✓ 1  │ ✕ 1  │ ◷ 3
+//    │  1/5 │    Done │Missed│ Pending
+//    │ Done │
+//    ╰──────╯
 //
 // The ring is REAL vector geometry: one dashed `Circle` per state with a round
 // line cap, so the arcs are smooth, equally thick and rounded at both ends - not
 // a chain of dots or short strokes. These tests pin the geometry (each state's
 // exact share, equal gaps, one arc per state), the degenerate days (no slots, one
-// state), the three-column metrics strip with its rules, and the responsive
-// switch: one row on a phone, stacked rows on a narrow screen or at very large
-// text.
+// state), the three UNFRAMED columns with their short rules, and the responsive
+// switch: one row on a phone, a textual fraction plus stacked rows on a narrow
+// screen or at large text.
 
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
@@ -20,8 +20,9 @@ import { Circle } from 'react-native-svg';
 
 import { DayProgress, DAY_RING_SIZE, DAY_RING_THICKNESS } from '../src/ui/components/DayProgress';
 import { RING_GAP_RATIO, ringArcs } from '../src/ui/components/ProgressRing';
+import { homeCompact } from '../src/ui/homeCompact';
 import { t } from '../src/ui/strings';
-import { darkColors, fonts, lightColors, typeScale, type ThemeColors } from '../src/ui/theme';
+import { darkColors, fonts, lightColors, type ThemeColors } from '../src/ui/theme';
 
 /**
  * The strip's responsive thresholds are read from the window. RN's jest window
@@ -191,21 +192,24 @@ describe('the day progress block', () => {
     expect(fraction).toBeDefined();
     const fractionStyle = styleOf(fraction!);
     expect(fractionStyle.fontFamily).toBe(fonts.bold);
-    // 22 pt bold: the reference's fraction, tabular so days do not jiggle.
-    expect(fractionStyle.fontSize).toBe(typeScale.title2);
+    // 18 pt bold on a 24 pt line: tabular, so days do not jiggle.
+    expect(fractionStyle.fontSize).toBe(homeCompact.fractionSize);
+    expect(fractionStyle.lineHeight).toBe(homeCompact.fractionLine);
     expect(fractionStyle.fontVariant).toEqual(['tabular-nums']);
     // Chart text is the ONLY text capped, because it lives inside the circle.
     expect(fraction!.props.maxFontSizeMultiplier).toBe(1.4);
 
     const caption = texts.find(
-      (node) => node.props.children === t('Dashboard_CountDone') && styleOf(node).fontSize === 11,
+      (node) =>
+        node.props.children === t('Dashboard_CountDone') &&
+        styleOf(node).fontSize === homeCompact.ringCaptionSize,
     );
     expect(caption).toBeDefined();
     expect(styleOf(caption!).color).toBe(lightColors.textMuted);
     expect(caption!.props.maxFontSizeMultiplier).toBe(1.4);
   });
 
-  test('lists the three counts in the strip: glyph, bold number, label', () => {
+  test('lists the three counts: glyph, bold number, label', () => {
     const renderer = render();
     const glyph = (label: string): unknown =>
       renderer.root.findAll((node) => node.props?.accessibilityLabel === label)[0]?.props.color;
@@ -218,14 +222,17 @@ describe('the day progress block', () => {
     expect(numbers.map((node) => node.props.children)).toEqual([1, 1, 3]);
     for (const number of numbers) {
       expect(styleOf(number).fontFamily).toBe(fonts.bold);
-      // 22 pt, the same weight as the fraction: full size, never capped.
-      expect(styleOf(number).fontSize).toBe(typeScale.title2);
+      // 20 pt on a 26 pt line: full size, never capped.
+      expect(styleOf(number).fontSize).toBe(homeCompact.metricSize);
+      expect(styleOf(number).lineHeight).toBe(homeCompact.metricLine);
       expect(styleOf(number).color).toBe(lightColors.text);
       expect(number.props.maxFontSizeMultiplier).toBeUndefined();
     }
 
     const labels = texts.filter(
-      (node) => typeof node.props.children === 'string' && styleOf(node).fontSize === 12,
+      (node) =>
+        typeof node.props.children === 'string' &&
+        styleOf(node).fontSize === homeCompact.metricLabelSize,
     );
     expect(labels.map((node) => node.props.children)).toEqual([
       t('Dashboard_CountDone'),
@@ -251,69 +258,66 @@ describe('the day progress block', () => {
 });
 
 /**
- * The r3 strip: an 80 pt ring at the LEFT and, at its right, ONE tinted panel
- * with Done | Missed | Pending as three equal columns (icon + 22 pt value above a
- * 12 pt label, 1 pt rules between them). Narrow screens and very large text turn
- * the columns into full-width rows under a centred ring instead of shrinking.
+ * The v3 block: a 64 pt ring at the LEFT and, at its right, Done | Missed |
+ * Pending as three equal columns (icon + 20 pt value above a 12 pt label, short
+ * 24 pt rules between them) - all of it UNFRAMED, straight on the header card.
+ * Narrow screens and large text replace the ring with the same numbers as text
+ * and turn the columns into full-width rows instead of shrinking anything.
  */
-describe('the metrics strip layout', () => {
+describe('the metrics layout', () => {
   /** Host views only: composite wrappers would count every node twice. */
   function hosts(renderer: Renderer): TestRenderer.ReactTestInstance[] {
     return renderer.root.findAll((node) => typeof node.type === 'string');
   }
 
-  /** The OUTLINED panel: 64 pt floor, 12 pt corners, the card's own surface. */
-  function stripOf(renderer: Renderer): TestRenderer.ReactTestInstance {
-    const strip = hosts(renderer)
-      .filter(
-        (node) =>
-          styleOf(node).minHeight === 64 && styleOf(node).borderRadius === 12,
-      )
+  /** The metrics block: a 56 pt floor, and NO frame, fill or corner radius. */
+  function metricsOf(renderer: Renderer): TestRenderer.ReactTestInstance {
+    const found = hosts(renderer)
+      .filter((node) => styleOf(node).minHeight === homeCompact.metricMinHeight)
       .pop();
-    if (strip === undefined) {
-      throw new Error('no metrics strip');
+    if (found === undefined) {
+      throw new Error('no metrics block');
     }
-    return strip;
+    return found;
   }
 
-  test('is an 80 pt ring with an 8 pt stroke, and the strip fills the rest', () => {
-    expect(DAY_RING_SIZE).toBe(80);
-    expect(DAY_RING_THICKNESS).toBe(8);
+  test('is a 64 pt ring with a 6 pt stroke, and the metrics fill the rest', () => {
+    expect(DAY_RING_SIZE).toBe(64);
+    expect(DAY_RING_THICKNESS).toBe(6);
     for (const arc of arcsOf(render(undefined, lightColors))) {
-      expect(arc.props.strokeWidth).toBe(8);
-      expect(arc.props.r).toBeCloseTo((80 - 8) / 2, 6);
+      expect(arc.props.strokeWidth).toBe(6);
+      expect(arc.props.r).toBeCloseTo((64 - 6) / 2, 6);
     }
-    const strip = styleOf(stripOf(render(undefined, lightColors)));
-    expect(strip.flex).toBe(1);
-    // The SAME surface as the card it sits on: not a grey/blue inner panel.
-    expect(strip.backgroundColor).toBe(lightColors.cardFill);
-    // ...and the thin neutral frame the day's bulk buttons wear.
-    expect(strip.borderWidth).toBe(1);
-    expect(strip.borderColor).toBe(lightColors.cardDivider);
+    const metrics = styleOf(metricsOf(render(undefined, lightColors)));
+    expect(metrics.flex).toBe(1);
+    // UNFRAMED: no panel, no fill, no corners - the header IS the surface.
+    expect(metrics.backgroundColor).toBeUndefined();
+    expect(metrics.borderWidth).toBeUndefined();
+    expect(metrics.borderRadius).toBeUndefined();
   });
 
-  test('holds THREE equal columns in ONE row, split by two 1 pt rules', () => {
+  test('holds THREE equal columns in ONE row, split by two short rules', () => {
     const renderer = render();
-    const strip = stripOf(renderer);
-    expect(styleOf(strip).flexDirection).toBe('row');
+    const metrics = metricsOf(renderer);
+    expect(styleOf(metrics).flexDirection).toBe('row');
 
     // Three columns, each flexing equally, so the numbers share the width. (The
-    // strip itself is the fourth flexed node, hence the 4 pt column padding.)
-    const columns = strip.findAll(
+    // block itself is the fourth flexed node, hence the 4 pt column padding.)
+    const columns = metrics.findAll(
       (node) =>
         typeof node.type === 'string' &&
         styleOf(node).flex === 1 &&
         styleOf(node).minWidth === 0 &&
-        styleOf(node).paddingHorizontal === 4,
+        styleOf(node).paddingHorizontal === homeCompact.metricPaddingX,
     );
     expect(columns).toHaveLength(3);
 
-    // Two rules, 1 pt wide and 32 pt tall, in the card's border tone.
-    const rules = strip.findAll(
+    // Two rules, 1 pt wide and 24 pt tall, in the card's border tone.
+    const rules = metrics.findAll(
       (node) =>
         typeof node.type === 'string' &&
         styleOf(node).width === 1 &&
-        styleOf(node).height === 32,
+        styleOf(node).height === homeCompact.dividerHeight,
     );
     expect(rules).toHaveLength(2);
     for (const rule of rules) {
@@ -323,52 +327,62 @@ describe('the metrics strip layout', () => {
 
   test('keeps icon + value on one line above each label', () => {
     const renderer = render();
-    const strip = stripOf(renderer);
+    const metrics = metricsOf(renderer);
     // The three icon/value rows: a row, 4 pt apart, centred.
-    const tops = strip.findAll(
-      (node) => typeof node.type === 'string' && styleOf(node).columnGap === 4,
+    const tops = metrics.findAll(
+      (node) =>
+        typeof node.type === 'string' && styleOf(node).columnGap === homeCompact.metricGap,
     );
     expect(tops).toHaveLength(3);
     for (const top of tops) {
       expect(styleOf(top).flexDirection).toBe('row');
       expect(styleOf(top).justifyContent).toBe('center');
     }
-    // ...and each label sits beneath, centred in its column.
+    // ...and each label sits beneath it, centred in its column.
     const labels = renderer.root.findAllByType(Text).filter(
-      (node) => typeof node.props.children === 'string' && styleOf(node).fontSize === 12,
+      (node) =>
+        typeof node.props.children === 'string' &&
+        styleOf(node).fontSize === homeCompact.metricLabelSize,
     );
+    expect(labels).toHaveLength(3);
     for (const label of labels) {
       expect(styleOf(label).textAlign).toBe('center');
-      expect(styleOf(label).marginTop).toBe(3);
     }
   });
 
-  test('stacks into full-width rows below 340 dp, under a centred ring', () => {
+  test('replaces the ring with text and stacks the rows below 340 dp', () => {
     mockWindow.width = 320;
     const renderer = render();
-    // The block itself stacks: ring above, strip below.
+
+    // No ring at all on a narrow screen: the same numbers, as text.
+    expect(arcsOf(renderer)).toHaveLength(0);
+    expect(
+      renderer.root.findAllByType(Text).some((node) => node.props.children === '1/5'),
+    ).toBe(true);
+
+    // The block itself stacks: the summary above, the rows below.
     const block = hosts(renderer).find(
-      (node) => styleOf(node).columnGap === 12 && styleOf(node).marginTop === 8,
+      (node) =>
+        styleOf(node).rowGap === homeCompact.ringLegendGap &&
+        styleOf(node).marginTop === homeCompact.progressGapTop,
     );
     expect(block).toBeDefined();
     expect(styleOf(block!).flexDirection).toBe('column');
 
-    const strip = stripOf(renderer);
-    expect(styleOf(strip).flexDirection).toBe('column');
+    const metrics = metricsOf(renderer);
+    expect(styleOf(metrics).flexDirection).toBe('column');
 
-    // One 44 pt row per state: value and glyph lead, the label follows.
-    const rows = strip.findAll(
+    // One 44 pt row per state: glyph and value lead, the label follows.
+    const rows = metrics.findAll(
       (node) =>
         typeof node.type === 'string' &&
-        styleOf(node).minHeight === 44 &&
+        styleOf(node).minHeight === homeCompact.stackedMetricMinHeight &&
         styleOf(node).flexDirection === 'row',
     );
     expect(rows).toHaveLength(3);
-    for (const row of rows) {
-      expect(styleOf(row).justifyContent).toBe('flex-start');
-    }
-    // The rules turn horizontal: 1 pt tall, stretched across the strip.
-    const rules = strip.findAll(
+
+    // The rules turn horizontal: 1 pt tall, stretched across the block.
+    const rules = metrics.findAll(
       (node) => typeof node.type === 'string' && styleOf(node).height === 1,
     );
     expect(rules).toHaveLength(2);
@@ -377,27 +391,31 @@ describe('the metrics strip layout', () => {
     }
   });
 
-  test('stacks above a 1.4 font scale, and stays side by side at 1.2', () => {
+  test('stacks above a 1.2 font scale, and stays side by side at 1.2', () => {
     mockWindow.fontScale = 1.2;
-    expect(styleOf(stripOf(render())).flexDirection).toBe('row');
+    expect(styleOf(metricsOf(render())).flexDirection).toBe('row');
+    // The capped chart text is still inside its ring at 1.2.
+    expect(arcsOf(render())).toHaveLength(3);
 
-    mockWindow.fontScale = 1.5;
-    expect(styleOf(stripOf(render())).flexDirection).toBe('column');
+    mockWindow.fontScale = 1.3;
+    expect(styleOf(metricsOf(render())).flexDirection).toBe('column');
+    // ...and the ring is gone, so the fraction can grow without clipping.
+    expect(arcsOf(render())).toHaveLength(0);
   });
 
   test('keeps the app state colours in both themes', () => {
     for (const colors of [lightColors, darkColors]) {
-      const strip = styleOf(stripOf(render(undefined, colors)));
-      // The panel is an OUTLINE on the card's own surface in both themes - no
-      // wash, no hardcoded white, and the frame matches the bulk buttons.
-      expect(strip.backgroundColor).toBe(colors.cardFill);
-      expect(strip.borderWidth).toBe(1);
-      expect(strip.borderColor).toBe(colors.cardDivider);
-      const rules = render(undefined, colors).root.findAll(
+      const renderer = render(undefined, colors);
+      // Unframed in BOTH themes: no wash, no hardcoded white, no frame at all.
+      const metrics = styleOf(metricsOf(renderer));
+      expect(metrics.backgroundColor).toBeUndefined();
+      expect(metrics.borderWidth).toBeUndefined();
+      // The rules keep the card's own border tone.
+      const rules = renderer.root.findAll(
         (node) =>
           typeof node.type === 'string' &&
           styleOf(node).width === 1 &&
-          styleOf(node).height === 32,
+          styleOf(node).height === homeCompact.dividerHeight,
       );
       expect(rules.length).toBe(2);
       for (const rule of rules) {

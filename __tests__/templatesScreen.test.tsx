@@ -19,7 +19,8 @@ import { MealCategoryKey, SyncStatus } from '../src/domain/enums';
 import { MealTemplate, MealTemplateContent } from '../src/domain/models';
 import { formatDate } from '../src/domain/analytics';
 import { TemplatesScreen } from '../src/ui/screens/TemplatesScreen';
-import { formatMediumDate, t, tFmt } from '../src/ui/strings';
+import { formatLongDate, formatMediumDate, t, tFmt } from '../src/ui/strings';
+import { templateActionInk, templatesCalendarTokens } from '../src/ui/templatesCalendar';
 
 /** ONE stable app object, mutable per test (the theme). */
 const mockApp = {
@@ -181,8 +182,54 @@ function applyButtons(renderer: Renderer): TestRenderer.ReactTestInstance[] {
   );
 }
 
+/** The medium date an endpoint field shows for `iso` ("2 November 2026"). */
+function dateLabel(iso: string): string {
+  return formatMediumDate(iso);
+}
+
+/** One endpoint of the range sheet, by its accessible name. */
+function fieldValue(renderer: Renderer, label: string): string {
+  const control = renderer.root
+    .findAll(
+      (node) =>
+        node.props?.accessibilityLabel === label && typeof node.props?.onPress === 'function',
+    )
+    .pop();
+  return String(control?.props?.accessibilityValue?.text ?? '');
+}
+
+/** One day of the expanded calendar, by its full-date accessible name. */
+function dayCell(renderer: Renderer, iso: string): TestRenderer.ReactTestInstance {
+  const long = formatLongDate(iso);
+  const found = renderer.root
+    .findAll(
+      (node) =>
+        typeof node.props?.onPress === 'function' &&
+        typeof node.props?.accessibilityLabel === 'string' &&
+        (node.props.accessibilityLabel === long ||
+          (node.props.accessibilityLabel as string).startsWith(`${long},`)),
+    )
+    .pop();
+  if (found === undefined) {
+    throw new Error(`no calendar day for ${iso}`);
+  }
+  return found;
+}
+
+/**
+ * A day of THIS month. The calendar opens on the current month, so both these
+ * days are always on the grid that is already on screen - whatever today is.
+ */
+function thisMonthDay(day: number): string {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+    day,
+  ).padStart(2, '0')}`;
+}
+
 beforeEach(() => {
   applyMock.mockClear();
+  mockApp.notifyChanged.mockClear();
   mockApp.isDark = false;
 });
 
@@ -274,21 +321,24 @@ describe('the template card', () => {
     expect(printed).not.toContain(t('Rn_TemplateNoTime'));
   });
 
-  test('puts Apply in a real 48/44 pt target around a 36 pt neutral button', async () => {
+  test('puts Apply in a real 48/44 pt target around a 36 pt blue control', async () => {
     const renderer = await renderScreen();
     // The TARGET carries the platform touch height (44 in this iOS test window)
-    // and keeps the design's 140 dp minimum width.
+    // and keeps the design's 136 dp minimum width.
     const target = styleOf(applyButtons(renderer)[0]);
     expect(target.minHeight).toBeGreaterThanOrEqual(44);
-    expect(target.minWidth).toBe(140);
-    // The VISIBLE control inside that target is a 36 dp neutral outline: 8 dp
-    // corners, a thin frame on the card's own surface - no accent fill.
+    expect(target.minWidth).toBe(templatesCalendarTokens.applyMinWidth);
+    // The VISIBLE control inside that target is a 36 dp OUTLINED BLUE control:
+    // 8 dp corners, the page's pale blue surface - the SAME family the popup's
+    // "Apply template" wears, and never a solid slab.
     const visible = applyButtons(renderer)[0]
       .findAllByType(View)
       .map((node) => styleOf(node))
       .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
     expect(visible).toBeDefined();
     expect(visible?.minHeight).toBe(36);
+    expect(visible?.borderColor).toBe(templateActionInk.light.applyBorder);
+    expect(visible?.backgroundColor).toBe(templateActionInk.light.applyFill);
     expect(applyButtons(renderer)).toHaveLength(1);
 
     // Expanding the contents must neither move nor duplicate the control.
@@ -340,44 +390,95 @@ describe('the template card', () => {
 });
 
 describe('applying', () => {
-  test('opens the same validated date prompt, today first', async () => {
+  test('opens the range sheet with today on BOTH ends', async () => {
     const renderer = await renderScreen();
     act(() => applyButtons(renderer)[0].props.onPress());
-    const field = renderer.root.findByType(TextInput);
-    expect(field.props.value).toBe(formatDate(new Date()));
-    // The sheet's headline is the reference's "Apply template"...
+
+    // The sheet's headline and the real template summary are unchanged...
     expect(texts(renderer)).toContain(t('Rn_TemplateApplyTitle'));
-    // ...over the compact sheet's summary: the real template (a day-named one as
-    // a long date, exactly like the card) and its real meal count.
     expect(texts(renderer)).toContain(
       `${formatMediumDate(DAY_TEMPLATE.name)} · ${tFmt('Rn_TemplateMealCount', 5)}`,
     );
-    // ...and it labels the field it asks for. The format is no longer a second
-    // printed line: it lives on the field itself as its hint/placeholder.
-    expect(texts(renderer)).toContain(t('Rn_TemplateDateLabel'));
-    expect(field.props.accessibilityHint).toBe(t('Rn_TemplateDateFormatHint'));
+    // ...and it asks for two days, both starting on today.
+    const today = formatDate(new Date());
+    expect(fieldValue(renderer, t('Rn_TemplateStartDate'))).toBe(dateLabel(today));
+    expect(fieldValue(renderer, t('Rn_TemplateEndDate'))).toBe(dateLabel(today));
+    // The calendar is the only input - there is no typed field left.
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(0);
+    expect(texts(renderer)).not.toContain('Type date');
   });
 
-  test('writes the template into the typed date', async () => {
+  test('a calendar choice only fills a draft; the answer writes every day once', async () => {
     const renderer = await renderScreen();
     act(() => applyButtons(renderer)[0].props.onPress());
-    const field = renderer.root.findByType(TextInput);
-    act(() => field.props.onChangeText('2026-12-01'));
-    await act(async () => {
-      button(renderer, t('Rn_TemplateApplyConfirm')).props.onPress();
-    });
-    expect(applyMock).toHaveBeenCalledWith(DAY_TEMPLATE, '2026-12-01', null);
-  });
 
-  test('refuses an impossible date and applies nothing', async () => {
-    const renderer = await renderScreen();
-    act(() => applyButtons(renderer)[0].props.onPress());
-    const field = renderer.root.findByType(TextInput);
-    act(() => field.props.onChangeText('2026-02-31'));
-    await act(async () => {
-      button(renderer, t('Rn_TemplateApplyConfirm')).props.onPress();
-    });
+    act(() => button(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => dayCell(renderer, thisMonthDay(10)).props.onPress());
+    act(() => dayCell(renderer, thisMonthDay(12)).props.onPress());
+
+    // Three inclusive days are drafted and NOTHING has been written yet.
+    expect(fieldValue(renderer, t('Rn_TemplateEndDate'))).toBe(
+      dateLabel(thisMonthDay(12)),
+    );
     expect(applyMock).not.toHaveBeenCalled();
-    expect(texts(renderer)).toContain(t('Rn_TemplateDateImpossible'));
+    expect(mockApp.notifyChanged).not.toHaveBeenCalled();
+
+    await act(async () => {
+      button(renderer, tFmt('Rn_TemplateApplyRangeMany', 3)).props.onPress();
+    });
+
+    // One day at a time, in order, with the captured account...
+    expect(applyMock.mock.calls).toEqual([
+      [DAY_TEMPLATE, thisMonthDay(10), null],
+      [DAY_TEMPLATE, thisMonthDay(11), null],
+      [DAY_TEMPLATE, thisMonthDay(12), null],
+    ]);
+    // ...and ONE refresh for the whole range.
+    expect(mockApp.notifyChanged).toHaveBeenCalledTimes(1);
+    expect(texts(renderer)).toContain(tFmt('Rn_TemplateRangeAppliedMany', 3));
+  });
+
+  test('a partial failure stops, reports it, refreshes ONCE and keeps the sheet', async () => {
+    applyMock
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('the day could not be written'));
+    const renderer = await renderScreen();
+    act(() => applyButtons(renderer)[0].props.onPress());
+    act(() => button(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => dayCell(renderer, thisMonthDay(10)).props.onPress());
+    act(() => dayCell(renderer, thisMonthDay(12)).props.onPress());
+
+    await act(async () => {
+      button(renderer, tFmt('Rn_TemplateApplyRangeMany', 3)).props.onPress();
+    });
+
+    // Day 10 landed, day 11 threw, day 12 was never attempted and never retried.
+    expect(applyMock.mock.calls).toEqual([
+      [DAY_TEMPLATE, thisMonthDay(10), null],
+      [DAY_TEMPLATE, thisMonthDay(11), null],
+    ]);
+    expect(mockApp.notifyChanged).toHaveBeenCalledTimes(1);
+    // The sheet stays open with a truthful report: no target date, no meals.
+    const printed = texts(renderer);
+    expect(printed).toContain(tFmt('Rn_TemplateRangePartial', 1, 3));
+    expect(printed).toContain(
+      tFmt('Rn_TemplateRangePartialFailed', formatLongDate(thisMonthDay(11))),
+    );
+    expect(printed).toContain(tFmt('Rn_TemplateRangePartialUnattempted', 1));
+    expect(printed.join(' ')).not.toContain('the day could not be written');
+    expect(texts(renderer)).toContain(tFmt('Rn_TemplateRangeStopped', 1, 3));
+    // Close is the only way out - no second Apply and no retry.
+    act(() => button(renderer, t('Rn_TemplateRangeClose')).props.onPress());
+    expect(applyMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('cancelling the range sheet applies nothing', async () => {
+    const renderer = await renderScreen();
+    act(() => applyButtons(renderer)[0].props.onPress());
+    act(() => button(renderer, t('Rn_TemplateStartDate')).props.onPress());
+    act(() => button(renderer, t('Common_Cancel')).props.onPress());
+    expect(renderer.root.findAllByType(TextInput)).toHaveLength(0);
+    expect(applyMock).not.toHaveBeenCalled();
   });
 });
+

@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -54,20 +55,22 @@ import { t, tFmt, formatCompactDate, formatLongDate, mealNameKey } from '../stri
 import { clearMealRequest } from '../clearMealPrompt';
 import { readDateHandoff } from '../dates';
 import { TEMPLATE_NAME_START, templateNameProblem } from '../templateName';
-import { cardShadow, fonts, metrics, themeColors, type ThemeColors } from '../theme';
+import { cardShadow, fonts, themeColors, type ThemeColors } from '../theme';
+import { HOME_CARD_GUTTER, homeCompact, homeTodayInk } from '../homeCompact';
 import { Icon, type IconName } from '../components/icons';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 
 /**
- * The r3 reference's responsive thresholds for the day header:
- *
- *   - actions stack at full width below 350 dp or above a 1.2 font scale, so a
- *     two-word label is never squeezed into half a phone;
- *   - the ring's metrics strip stacks under the ring below 340 dp or above 1.4
- *     (that decision lives in `DayProgress`).
+ * The v3 reference's responsive threshold for the day header: the two actions
+ * stack at full width below 350 dp or above a 1.2 font scale, so a two-word
+ * label is never squeezed into half a phone. The progress block makes its own
+ * (slightly narrower) decision inside `DayProgress`.
  */
-const STACK_ACTIONS_WIDTH = 350;
-const STACK_ACTIONS_FONT_SCALE = 1.2;
+const STACK_ACTIONS_WIDTH = homeCompact.stackWidth;
+const STACK_ACTIONS_FONT_SCALE = homeCompact.stackFontScale;
+
+/** The platform's minimum touch target: 48 dp on Android, 44 pt on iOS. */
+const TOUCH_TARGET = Platform.OS === 'ios' ? homeCompact.touchIOS : homeCompact.touchAndroid;
 
 export function DashboardScreen({
   route,
@@ -124,8 +127,22 @@ export function DashboardScreen({
   /** Narrow screen or large text: the two bulk actions stack at full width. */
   const stackActions = width < STACK_ACTIONS_WIDTH || fontScale > STACK_ACTIONS_FONT_SCALE;
   const now = new Date();
-  /** "Sun 1 Nov" + "2026": the compact two-line date heading. */
+  /**
+   * The date heading is ONE phrase - "Sun 1 Nov 2026" - because the year is no
+   * longer a second, quieter line. The two fields come from the existing
+   * compact formatter and are joined here; a future locale formats the whole
+   * phrase in its own order instead of reordering these pieces.
+   */
   const compactDate = formatCompactDate(date);
+  const dateLabel = [compactDate.primary, compactDate.year].filter(Boolean).join(' ');
+  /**
+   * The browsed day IS the device-local today. `todayDate` is the screen's one
+   * clock (focus / resume / local midnight), so the caption follows it without
+   * any second subscription - and it never moves the browsed date.
+   */
+  const isToday = date === todayDate;
+  /** The "Today" caption's ink (a local value, not a new theme colour). */
+  const todayInk = app.isDark ? homeTodayInk.dark : homeTodayInk.light;
   // Two cards per row once the screen is wide enough (tablet / landscape),
   // otherwise one card per row - order is always preserved (spec 8.2).
   const twoColumns = width >= 600;
@@ -592,51 +609,54 @@ export function DashboardScreen({
         { paddingBottom: TAB_BAR_CONTENT_GAP },
       ]}>
       {/* The day header: a CARD holding the date navigation, the progress ring
-          with its outlined three-column metrics strip and the two day-wide
-          actions (spec 8.2, r3 reference). */}
+          with its three unframed metrics and the two day-wide actions (spec
+          8.2, v3 reference). It is a child of the same content container as the
+          meal grid, so the card and the meal cards share one outer width. */}
       <View
+        testID="day-header"
         style={[
           styles.header,
           cardShadow,
           { backgroundColor: colors.cardFill, borderColor: colors.border },
         ]}>
-        {/* Compact day navigation: previous day, the date centred between the
-            arrows, next day. The date is a plain HEADING, not a control - it
-            never opens the Calendar, carries no marker and no pill - so the two
-            44 pt arrows are the header's only date navigation. */}
+        {/* Compact day navigation: the previous-day arrow, the date centred
+            between two EQUAL arrows, the next-day arrow. The date is a plain
+            HEADING, not a control - it never opens the Calendar, carries no
+            marker and no pill. The only extra word is the "Today" caption
+            directly beneath it, and only while the browsed day IS today. */}
         <View style={styles.navRow}>
           <IconButton
             label={t('Dashboard_PreviousDay')}
             icon="chevron-back"
             onPress={() => setDate(addDays(date, -1))}
-            size={22}
+            size={homeCompact.arrowIcon}
+            touch={TOUCH_TARGET}
             tint={colors.textMuted}
             colors={colors}
           />
-          {/* The same typography on EVERY day: regular-weight neutral ink and a
-              muted year beneath. Nothing is highlighted, badged or tappable, so
-              the heading reads as plain text and never as a button. */}
-          <View style={styles.dateHeading}>
-            <Text
-              accessibilityRole="header"
-              accessibilityLabel={formatLongDate(date)}
-              style={[styles.datePrimary, { color: colors.text }]}
-              numberOfLines={1}>
-              {compactDate.primary}
-            </Text>
-            {compactDate.year !== '' && (
-              <Text
-                accessible={false}
-                style={[styles.dateYear, { color: colors.textMuted }]}>
-                {compactDate.year}
-              </Text>
+          {/* ONE phrase - "Sun 1 Nov 2026" - at 15 pt regular on a 20 pt line,
+              with the 11 pt "Today" caption 2 dp beneath it. The date and the
+              caption each fill the same centre column, so they share the
+              arrows' centreline. The caption is NOT a control and is not a
+              second focus stop: its word is appended to the heading's label. */}
+          <View
+            accessible
+            accessibilityRole="header"
+            accessibilityLabel={
+              isToday ? `${formatLongDate(date)}, ${t('Common_Today')}` : formatLongDate(date)
+            }
+            style={styles.dateHeading}>
+            <Text style={[styles.datePrimary, { color: colors.text }]}>{dateLabel}</Text>
+            {isToday && (
+              <Text style={[styles.todayLabel, { color: todayInk }]}>{t('Common_Today')}</Text>
             )}
           </View>
           <IconButton
             label={t('Dashboard_NextDay')}
             icon="chevron-forward"
             onPress={() => setDate(addDays(date, 1))}
-            size={22}
+            size={homeCompact.arrowIcon}
+            touch={TOUCH_TARGET}
             tint={colors.textMuted}
             colors={colors}
           />
@@ -687,11 +707,10 @@ export function DashboardScreen({
         {status !== null && <Text style={[styles.caption, { color: colors.textMuted }]}>{status}</Text>}
       </View>
 
-      {/* A quiet section caption groups the five cards (and separates them from
-          the day header) without wrapping them in another container. */}
-      <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('Rn_Meals')}</Text>
-
-      {/* five permanent cards - order always preserved */}
+      {/* Five permanent cards - order always preserved. The grid's own top
+          margin IS the header-to-first-card gap (the same 8 dp as the page
+          edges and the gaps between cards), so no caption or spacer sits
+          between the header and the first card. */}
       <View style={styles.grid}>
         {meals.map((meal) => {
           const category = categories.find((c) => c.fixedCategoryKey === meal.mealCategoryKey);
@@ -829,13 +848,16 @@ export function DashboardScreen({
 }
 
 /**
- * One day-wide action: an OUTLINED neutral button - card fill, 1 pt frame, the
- * state glyph in its own colour, a neutral label - so neither "all done" nor
- * "all missed" paints a solid red/green slab over the header. Disabled is a
- * truthful dimmed control (the whole button fades), never a washed primary.
+ * One day-wide action: a REAL 48 dp (44 pt on iOS) touch target around a small
+ * 32 dp OUTLINED control - card fill, 1 pt frame, 8 pt corners, the state glyph
+ * in its own colour and a neutral label - so neither "all done" nor "all
+ * missed" paints a solid red/green slab over the header. Disabled is a truthful
+ * dimmed control (the whole target fades once), never a washed primary.
  *
  * The two share one equal-width row and stack at full width when the screen is
- * narrow or the text large, so a two-word label is never squeezed.
+ * narrow or the text large, so a two-word label is never squeezed. Adjacent
+ * targets stay 8 dp apart with all of their own padding, so no overlapping
+ * hitSlop is needed to press either of them.
  */
 function BulkButton(props: {
   label: string;
@@ -854,19 +876,25 @@ function BulkButton(props: {
       accessibilityState={{ disabled: props.disabled }}
       disabled={props.disabled}
       onPress={props.onPress}
-      hitSlop={4}
-      style={({ pressed }) => [
-        styles.bulkButton,
-        props.stacked ? styles.bulkButtonStacked : styles.bulkButtonWide,
-        {
-          borderColor: colors.cardDivider,
-          backgroundColor:
-            pressed && !props.disabled ? colors.surfaceVariant : colors.cardFill,
-          opacity: props.disabled ? 0.45 : 1,
-        },
+      style={[
+        styles.bulkTarget,
+        props.stacked ? styles.bulkTargetStacked : styles.bulkTargetWide,
+        props.disabled && styles.bulkDisabled,
       ]}>
-      <Icon name={props.icon} size={18} color={props.iconColor} />
-      <Text style={[styles.bulkLabel, { color: colors.text }]}>{props.label}</Text>
+      {({ pressed }) => (
+        <View
+          style={[
+            styles.bulkButton,
+            {
+              borderColor: colors.cardDivider,
+              backgroundColor:
+                pressed && !props.disabled ? colors.surfaceVariant : colors.cardFill,
+            },
+          ]}>
+          <Icon name={props.icon} size={homeCompact.controlIcon} color={props.iconColor} />
+          <Text style={[styles.bulkLabel, { color: colors.text }]}>{props.label}</Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -874,69 +902,112 @@ function BulkButton(props: {
 const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   /**
-   * Page frame: the cards keep a small 8 px margin on each side so they do not
-   * stretch edge to edge, while staying tighter than the other pages.
+   * Page frame: ONE 8 dp gutter for the left edge, the right edge and the top
+   * (the top one comes AFTER the navigator's safe area, never inside the status
+   * bar). The meal grid repeats the very same number, so every card - the day
+   * header included - keeps an identical outer width and an identical gap.
    */
   content: {
-    paddingHorizontal: metrics.pagePadding,
-    paddingTop: 6,
+    paddingHorizontal: homeCompact.pagePaddingX,
+    paddingTop: homeCompact.pagePaddingTop,
   },
   /**
-   * The day header is a CARD (the r3 reference): the same fill, 1 pt frame and
-   * lift as a content card, with the reference's 14 pt inset - tight enough that
-   * an 80 pt ring and its metrics strip share one row on a phone.
+   * The day header is a CARD: the same fill, 1 pt frame and lift as a meal card,
+   * with a 16 dp radius and a 10 x 6 dp inset that keeps the ring's row tight
+   * while the date gets the header's full centre column.
    */
   header: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 14,
+    width: '100%',
+    alignSelf: 'stretch',
+    borderRadius: homeCompact.headerRadius,
+    borderWidth: homeCompact.border,
+    paddingHorizontal: homeCompact.paddingX,
+    paddingVertical: homeCompact.paddingY,
   },
   /**
-   * The date is a plain HEADING between two 44 pt arrows: 20 pt regular neutral
-   * ink with an 11 pt muted year under it. It is not a control, so it carries no
-   * press state, badge, dot or highlight - and its words are the same on every
-   * day, so the header keeps one height whatever day is open.
+   * The date is a plain HEADING between two equal arrows: ONE 15 pt regular
+   * phrase with the year in it, on a 20 pt line. It is not a control, so it
+   * carries no press state, badge, dot or highlight - and, on the current day
+   * only, an 11 pt "Today" caption sits 2 dp beneath it.
    */
   datePrimary: {
-    fontSize: 20,
+    width: '100%',
+    fontSize: homeCompact.dateSize,
+    lineHeight: homeCompact.dateLine,
     fontFamily: fonts.regular,
     textAlign: 'center',
-    flexShrink: 1,
   },
-  dateYear: { fontSize: 11, fontFamily: fonts.regular, textAlign: 'center', marginTop: 1 },
+  /** The caption under the date: plain text, no badge, no background, no dot. */
+  todayLabel: {
+    width: '100%',
+    fontSize: homeCompact.todaySize,
+    lineHeight: homeCompact.todayLine,
+    fontFamily: fonts.medium,
+    textAlign: 'center',
+  },
   /** Previous / date / next on one row; the date fills the centre. */
-  navRow: { flexDirection: 'row', alignItems: 'center', minHeight: 44 },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: homeCompact.dateMinHeight,
+  },
+  /**
+   * The flexible centre column. Date and caption each span all of it and centre
+   * their text, and the two arrows are the same width, so both lines share the
+   * header's exact centreline. 20 + 2 + 16 = 38 dp fits the 48 dp row.
+   */
   dateHeading: {
     flex: 1,
     minWidth: 0,
-    minHeight: 44,
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: homeCompact.dateCaptionGap,
   },
   /** The two bulk actions share one equal-width row (or stack at full width). */
   dayActions: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: homeCompact.actionsGap,
+    marginTop: homeCompact.actionsGapTop,
   },
   dayActionsStacked: { flexDirection: 'column' },
-  /** Outlined neutral button: 44 pt floor, 12 pt corners, card fill. */
+  /**
+   * The REAL touch target: 48 dp on Android / 44 pt on iOS, holding the smaller
+   * visible control in its middle. It carries no frame of its own, so the two
+   * outlines stay 8 dp apart and neither needs a hitSlop.
+   */
+  bulkTarget: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  bulkTargetWide: { flex: 1, minWidth: 0 },
+  bulkTargetStacked: { flex: 0, width: '100%' },
+  /** Busy or disabled: the whole target fades once, never a washed fill. */
+  bulkDisabled: { opacity: homeCompact.disabledOpacity },
+  /** The visible outline: 32 dp floor, 1 pt frame, 8 pt corners, card fill. */
   bulkButton: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    minHeight: homeCompact.controlVisibleMinHeight,
+    borderWidth: homeCompact.border,
+    borderRadius: homeCompact.controlRadius,
+    paddingHorizontal: homeCompact.controlPaddingX,
+    paddingVertical: homeCompact.controlPaddingY,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    columnGap: 7,
+    columnGap: homeCompact.controlIconGap,
   },
-  bulkButtonWide: { flex: 1, minWidth: 0 },
-  bulkButtonStacked: { width: '100%' },
-  bulkLabel: { fontFamily: fonts.regular, fontSize: 14, flexShrink: 1, textAlign: 'center' },
+  bulkLabel: {
+    fontFamily: fonts.regular,
+    fontSize: homeCompact.controlLabelSize,
+    lineHeight: homeCompact.controlLabelLine,
+    flexShrink: 1,
+    textAlign: 'center',
+  },
   /** Day-level template action under the list: centred accent text, no chrome. */
-  templateRow: { alignItems: 'center', marginTop: 12 },
+  templateRow: { alignItems: 'center', marginTop: HOME_CARD_GUTTER },
   templateButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -946,21 +1017,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   templateLabel: { fontSize: 12, fontFamily: fonts.medium },
-  caption: { marginTop: 8, fontSize: 12 },
-  /** Small caps section caption between the day header and the meal cards. */
-  sectionLabel: {
-    fontSize: 11,
-    lineHeight: 18,
-    fontFamily: fonts.medium,
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
-    // These two margins ARE the day-header-to-MEALS and MEALS-to-first-card
-    // spacing: 8 pt of air above, 6 pt below, with no extra spacer in between.
-    marginTop: 8,
-    marginBottom: 6,
-    marginLeft: 2,
+  /** The one-line result of the last action (saved, template, photo error). */
+  caption: {
+    marginTop: homeCompact.footerGap,
+    fontSize: homeCompact.noteSize,
+    lineHeight: homeCompact.noteLine,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: metrics.gridGap },
+  /**
+   * The meal grid. Its TOP MARGIN is the header-to-first-card gap and its `gap`
+   * is the distance between two cards - both the SAME 8 dp as the page's left
+   * and right edges, so the header card and the five meal cards form one column
+   * of equally wide cards on a phone. (Two columns stay a tablet/landscape
+   * relaxation, unchanged.)
+   */
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: homeCompact.mealGap,
+    marginTop: homeCompact.listGapTop,
+  },
   cell: { flexBasis: '48.5%', flexGrow: 1 },
   spanFull: { flexBasis: '100%', flexGrow: 1 },
 });

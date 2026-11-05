@@ -27,7 +27,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
   type TextInputProps,
 } from 'react-native';
@@ -43,7 +42,15 @@ import {
   type ThemeColors,
 } from '../theme';
 import { useApp } from '../appContext';
+import { formatDate } from '../../domain/analytics';
+import {
+  templateRangeDays,
+  type TemplateDateRange,
+  type TemplateRangeResult,
+} from '../../services/applyTemplateRange';
+import { isCalendarDate } from '../dates';
 import { t } from '../strings';
+import { ApplyTemplateDateForm, type RangeEndpoint } from './ApplyTemplateDateForm';
 import {
   Icon,
   FeatherIcon,
@@ -908,20 +915,30 @@ export interface PromptDialogRequest {
    * Opt-in presentation of THIS form. `default` is the shared question sheet
    * (the template NAME prompt and every other caller keep it untouched).
    * `template-date` is the compact Apply-template sheet: the REAL template
-   * (name · meal count) above a 20 pt "Apply template" title, one small labelled
-   * date field, then two outlined answers (Cancel, Apply). It is the SAME
-   * value/error state, mask, validation and callbacks - only the chrome differs.
+   * (name · meal count) above a 20 pt "Apply template" title, the inclusive
+   * Start/End range chosen on the calendar, then two outlined answers
+   * (Cancel, Apply to N days).
    */
   layout?: 'default' | 'template-date';
   /** `template-date`: the real template name and meal count above the title. */
   contextLabel?: string;
-  /** `template-date`: the visible label above the date field. */
-  fieldLabel?: string;
   /**
-   * `template-date`: the ISO format. It is not printed as a second line - the
-   * field's placeholder and its accessibility hint carry it.
+   * `template-date`: the RANGE this sheet asks for. It is opted into explicitly,
+   * so every other prompt keeps its single string value and its own callbacks.
+   *
+   * `initialEndValue` starts beside the start draft (today, by default), so a
+   * one-day apply is two taps away. `onConfirmRange` is called ONCE with the
+   * validated inclusive range; it writes the days and resolves with a structured
+   * result, reporting completed days through `onProgress`. A rejection means the
+   * range never started - a partly written range comes back as a result instead.
    */
-  formatHint?: string;
+  templateRange?: {
+    initialEndValue: string;
+    onConfirmRange: (
+      range: TemplateDateRange,
+      onProgress: (completedDays: number, totalDays: number) => void,
+    ) => Promise<TemplateRangeResult>;
+  };
   /** Returns an error message, or null when the value is acceptable. */
   validate: (value: string) => string | null;
   onCancel: () => void;
@@ -930,6 +947,15 @@ export interface PromptDialogRequest {
 
 /** Default ceiling for a prompt's text: a template NAME is the longest question. */
 const PROMPT_MAX_LENGTH = 120;
+
+/**
+ * The month the date form's calendar opens on: the month of a VALID ISO draft,
+ * else the month of the caller's initial value or the local day. Opening the
+ * calendar therefore never rewrites an invalid draft - it only decides the grid.
+ */
+function monthOf(value: string, fallback: string): string {
+  return (isCalendarDate(value) ? value : fallback).slice(0, 7);
+}
 
 export function PromptDialog({
   request,
@@ -941,29 +967,105 @@ export function PromptDialog({
   const colors = themeColors(isDark);
   const [value, setValue] = useState(request.initialValue);
   const [error, setError] = useState<string | null>(null);
-  const field = useRef<React.ElementRef<typeof TextInput>>(null);
-  const { width, fontScale } = useWindowDimensions();
   const dateForm = request.layout === 'template-date';
-  /**
-   * Narrow screens and enlarged text stack the date row and the two answers at
-   * full width. The answers themselves are CONTENT-SIZED (64 / 136 dp minimums),
-   * so there is no width arithmetic left to do here.
-   */
-  const stacked = width < 350 || fontScale > 1.15;
   /**
    * The caller's "Today" shortcut (label + ISO value). Captured once so the
    * pressable's render callback keeps the narrowing that JSX alone loses.
    */
   const today = request.today;
+  /**
+   * The Apply-template RANGE state. `value` is the START draft (the request's
+   * existing single value), `endValue` the END. Everything else here only decides
+   * what is drawn: which endpoint's calendar is open, which month it shows, which
+   * field an error belongs to, and the run's progress/result. No second hidden
+   * draft exists - a day can only be written through these two setters.
+   */
+  const todayIso = today?.value ?? formatDate(new Date());
+  const range = request.templateRange;
+  const [endValue, setEndValue] = useState<string>(
+    range?.initialEndValue ?? request.initialValue,
+  );
+  const [openEndpoint, setOpenEndpoint] = useState<RangeEndpoint | null>(null);
+  const [errorEndpoint, setErrorEndpoint] = useState<RangeEndpoint | null>(null);
+  const [viewedMonth, setViewedMonth] = useState<string>(() =>
+    monthOf(request.initialValue, todayIso),
+  );
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [result, setResult] = useState<TemplateRangeResult | null>(null);
+  /** Synchronous guard: a second tap cannot start another range. */
+  const running = useRef(false);
+
+  /**
+   * Runs the chosen range ONCE. The caller walks the days sequentially and
+   * resolves with what actually happened; a rejection means nothing was written.
+   */
+  const startRange = (chosen: TemplateDateRange): void => {
+    if (range === undefined || running.current) {
+      return;
+    }
+    running.current = true;
+    setBusy(true);
+    setError(null);
+    setErrorEndpoint(null);
+    // The grid goes away while the days are written: nothing is editable then.
+    setOpenEndpoint(null);
+    setProgress({ done: 0, total: templateRangeDays(chosen) });
+    void range
+      .onConfirmRange(chosen, (done, total) => setProgress({ done, total }))
+      .then((outcome) => {
+        setResult(outcome);
+        if (outcome.kind === 'complete') {
+          // The caller has already reported the days and refreshed the app: the
+          // sheet closes through the existing dismiss callback, after the work.
+          request.onCancel();
+        }
+      })
+      .catch((cause: unknown) => {
+        // Validation ran first, so this is "the range never started". Nothing is
+        // claimed about the data and no raw exception reaches the user.
+        console.warn('[templates] the range could not be started', cause);
+        setError(t('Settings_SaveFailed'));
+      })
+      .finally(() => {
+        running.current = false;
+        setBusy(false);
+      });
+  };
 
   const confirm = (): void => {
+    if (dateForm && range !== undefined) {
+      if (running.current) {
+        return;
+      }
+      // BOTH endpoints must be real days before any write can happen.
+      const startFailure = request.validate(value);
+      if (startFailure !== null) {
+        setError(startFailure);
+        setErrorEndpoint('start');
+        setOpenEndpoint('start');
+        return;
+      }
+      const endFailure = request.validate(endValue);
+      if (endFailure !== null) {
+        setError(endFailure);
+        setErrorEndpoint('end');
+        setOpenEndpoint('end');
+        return;
+      }
+      if (endValue < value) {
+        setError(t('Rn_TemplateRangeOrder'));
+        setErrorEndpoint('end');
+        setOpenEndpoint('end');
+        return;
+      }
+      startRange({ startDate: value, endDate: endValue });
+      return;
+    }
     const failure = request.validate(value);
     if (failure !== null) {
       // The form stays open: the typed value is still there to correct.
       setError(failure);
-      if (dateForm) {
-        field.current?.focus();
-      }
       return;
     }
     request.onConfirm(value.trim());
@@ -984,6 +1086,55 @@ export function PromptDialog({
     setError(null);
   };
 
+  /** A month arrow changes NOTHING but the grid - never a draft, never the day. */
+  const shiftMonth = (delta: number): void => {
+    const year = Number(viewedMonth.slice(0, 4));
+    const next = new Date(year, Number(viewedMonth.slice(5, 7)) - 1 + delta, 1);
+    setViewedMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`);
+  };
+
+  /** Opening an endpoint's calendar shows the month of ITS draft, never another's. */
+  const openField = (endpoint: RangeEndpoint): void => {
+    if (running.current) {
+      return;
+    }
+    setError(null);
+    setErrorEndpoint(null);
+    setViewedMonth(monthOf(endpoint === 'start' ? value : endValue, todayIso));
+    setOpenEndpoint(endpoint);
+  };
+
+  /**
+   * Choosing a day writes ONE endpoint and moves on: Start activates End, End
+   * collapses the calendar. A reversed End is an ERROR the user corrects (the End
+   * calendar stays open) - nothing is swapped, extended or applied here.
+   */
+  const chooseDate = (iso: string): void => {
+    if (running.current) {
+      return;
+    }
+    setError(null);
+    setErrorEndpoint(null);
+    if (openEndpoint === 'start') {
+      setValue(iso);
+      setOpenEndpoint('end');
+      setViewedMonth(monthOf(endValue, todayIso));
+      if (isCalendarDate(endValue) && endValue < iso) {
+        setError(t('Rn_TemplateRangeOrder'));
+        setErrorEndpoint('end');
+      }
+      return;
+    }
+    setEndValue(iso);
+    if (iso < value) {
+      setError(t('Rn_TemplateRangeOrder'));
+      setErrorEndpoint('end');
+      setOpenEndpoint('end');
+      return;
+    }
+    setOpenEndpoint(null);
+  };
+
   if (dateForm) {
     return (
       <Sheet
@@ -992,107 +1143,29 @@ export function PromptDialog({
         title={request.title}
         caption={request.contextLabel}
         isDark={isDark}
-        onDismiss={request.onCancel}>
-        <View style={styles.dateBody}>
-          {/* A visible label, then the editable masked date itself: no Today
-              shortcut, no second format line and no decorative calendar glyph.
-              The expected shape stays on the field as its accessibility hint. */}
-          <Text style={[styles.dateLabel, { color: colors.text }]}>
-            {request.fieldLabel ?? request.message}
-          </Text>
-          <View
-            style={[
-              styles.dateField,
-              {
-                backgroundColor: colors.surface,
-                borderColor: error !== null ? colors.error : colors.border,
-              },
-            ]}>
-            <TextInput
-              ref={field}
-              accessibilityLabel={request.fieldLabel ?? request.message}
-              accessibilityHint={request.formatHint}
-              style={[styles.dateInput, { color: colors.text }]}
-              value={value}
-              onChangeText={changeText}
-              placeholder={request.formatHint ?? request.initialValue}
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType={request.keyboardType}
-              maxLength={request.maxLength ?? PROMPT_MAX_LENGTH}
-              returnKeyType="done"
-              onSubmitEditing={confirm}
-            />
-          </View>
-          {/* An invalid date explains itself BELOW the field and keeps the draft
-              and the label on screen. */}
-          {error !== null && (
-            <Text
-              testID="prompt-dialog-error"
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-              style={[styles.dateHint, { color: colors.error }]}>
-              {error}
-            </Text>
-          )}
-        </View>
-        <View style={[styles.dateDivider, { backgroundColor: colors.cardDivider }]} />
-        {/* Quiet Cancel beside ONE neutral outlined Apply: right aligned, both in
-            real 48/44 dp targets around 36 dp visible buttons. No blue fill and
-            no check glyph - "Apply template" already says what it does. */}
-        <View style={[styles.dateActions, stacked && styles.dateActionsStacked]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={request.cancelText}
-            onPress={request.onCancel}
-            style={[styles.dateButtonTarget, stacked && styles.dateButtonStacked]}>
-            {({ pressed }) => (
-              <View
-                style={[
-                  styles.dateButton,
-                  styles.dateCancel,
-                  stacked && styles.dateButtonStacked,
-                  // Two outlined answers: Cancel wears the quieter frame, Apply
-                  // the stronger slate one. Both sit on the card's own surface.
-                  {
-                    backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
-                    borderColor: colors.border,
-                  },
-                ]}>
-                <Text
-                  style={[styles.dateButtonText, { color: colors.textMuted }]}
-                  numberOfLines={2}>
-                  {request.cancelText}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={request.confirmText}
-            onPress={confirm}
-            style={[styles.dateButtonTarget, stacked && styles.dateButtonStacked]}>
-            {({ pressed }) => (
-              <View
-                style={[
-                  styles.dateButton,
-                  styles.dateApply,
-                  stacked && styles.dateButtonStacked,
-                  {
-                    backgroundColor: pressed ? colors.surfaceVariant : colors.surface,
-                    borderColor: colors.textMuted,
-                  },
-                ]}>
-                <Text
-                  style={[styles.dateButtonText, styles.dateApplyText, { color: colors.text }]}
-                  numberOfLines={2}>
-                  {request.confirmText}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
+        // Back/X/scrim are inert while the days are being written: there is no
+        // Cancel that could pretend to undo a range already applied.
+        onDismiss={busy ? () => undefined : request.onCancel}>
+        <ApplyTemplateDateForm
+          dark={isDark}
+          openEndpoint={openEndpoint}
+          startValue={value}
+          endValue={endValue}
+          today={todayIso}
+          error={error}
+          errorEndpoint={errorEndpoint}
+          month={viewedMonth}
+          busy={busy}
+          progress={progress}
+          result={result}
+          cancelText={request.cancelText}
+          onOpenEndpoint={openField}
+          onChooseDate={chooseDate}
+          onPreviousMonth={() => shiftMonth(-1)}
+          onNextMonth={() => shiftMonth(1)}
+          onCancel={busy ? () => undefined : request.onCancel}
+          onConfirm={confirm}
+        />
       </Sheet>
     );
   }
@@ -1251,66 +1324,10 @@ const styles = StyleSheet.create({
   sheetCaptionDate: { fontSize: 12, lineHeight: 17, marginBottom: 2 },
   sheetScroll: { flexShrink: 1 },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
-  /** The date form's body: the label, then the compact date field. */
-  dateBody: { paddingHorizontal: 16, marginTop: 10 },
-  dateLabel: { fontFamily: fonts.regular, fontSize: 12, marginBottom: 6 },
   /**
-   * A COMPACT field: content-sized (not a full-width bar) and 40 dp tall, on the
-   * card's own surface with 8 dp corners. No Today shortcut beside it.
+   * The date form's own body/footer styles live with the form that draws them
+   * (components/ApplyTemplateDateForm.tsx): the sheet above only owns the chrome.
    */
-  dateField: {
-    alignSelf: 'flex-start',
-    minWidth: 150,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderRadius: 8,
-  },
-  dateInput: {
-    minHeight: 40,
-    minWidth: 0,
-    paddingVertical: 6,
-    paddingHorizontal: 0,
-    fontFamily: fonts.regular,
-    fontSize: 16,
-    fontVariant: ['tabular-nums'],
-  },
-  dateHint: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, marginTop: 6 },
-  /** ONE 1 pt inset rule before the answers. */
-  dateDivider: { height: 1, marginHorizontal: 16, marginTop: 12 },
-  /** Right-aligned answers, 8 dp apart, 6 dp under the rule. */
-  dateActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    columnGap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 6,
-  },
-  dateActionsStacked: { flexDirection: 'column' },
-  /** The real 48/44 dp target under each visible 36 dp button. */
-  dateButtonTarget: { minHeight: TOUCH, justifyContent: 'center' },
-  dateButton: {
-    minHeight: 36,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-  },
-  /** Content-driven minimum widths - never the old fixed 1 : 1.8 split. */
-  dateCancel: { minWidth: 64 },
-  dateApply: { minWidth: 136 },
-  dateButtonStacked: { width: '100%' },
-  dateButtonText: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    flexShrink: 1,
-    textAlign: 'center',
-  },
-  /** "Apply template" carries the semibold weight; Cancel stays quiet. */
-  dateApplyText: { fontFamily: fonts.medium },
   /** Content between the caption and the rows (input fields, errors). */
   body: { paddingHorizontal: 16, paddingTop: 14 },
   rows: { marginTop: 12 },

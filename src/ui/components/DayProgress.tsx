@@ -1,47 +1,48 @@
-// The day header's progress block, drawn the way the r3 reference draws it:
+// The day header's progress block, drawn the way the v3 reference draws it:
 //
-//    ╭────────╮   ┌───────────────────────────────────────┐
-//    │  1/5   │   │ ✓ 1  │ ✕ 1  │ ◷ 3                  │
-//    │  Done  │   │ Done  │Missed│ Pending              │
-//    ╰────────╯   └───────────────────────────────────────┘
+//    ╭──────╮    ✓ 1  │ ✕ 1  │ ◷ 3
+//    │  1/5 │    Done │Missed│ Pending
+//    │ Done │
+//    ╰──────╯
 //
-// An 80 pt three-colour ring - done green, missed red, pending grey - with the
-// day's fraction INSIDE it, then ONE OUTLINED strip holding the three counts as
-// three EQUAL COLUMNS: the state glyph and its bold number on top, the label
-// beneath, with a 1 pt rule between the columns. The strip shares the card's own
-// surface and wears the same thin neutral frame as the day's bulk buttons, so it
-// reads as part of the header instead of a grey panel inside it. It replaces the
-// three stacked rows: side by side the three states are read in one glance instead
-// of as a list to scan, and the header gets shorter while saying the same thing.
+// A 64 pt three-colour ring - done green, missed red, pending grey, 6 pt thick -
+// with the day's fraction INSIDE it, then the three counts as three EQUAL
+// COLUMNS: the state glyph and its bold number on top, the label beneath, with a
+// short 24 pt rule between the columns. The metrics are deliberately UNFRAMED:
+// no panel, no inner border, no shadow - they sit on the header's own surface, so
+// the header reads as ONE card instead of a card holding another one.
 //
-// Small widths / large text: below 340 dp or above a 1.4 font scale the strip
-// becomes full-width rows (glyph + value + label on one line) under a centred
-// ring, separated by horizontal rules - nothing shrinks below a readable size.
+// Narrow width / large text (below 340 dp or above a 1.2 font scale): the ring is
+// replaced by the same information in TEXT - the day's fraction over its "Done"
+// caption - and the three counts become full-width rows split by horizontal
+// rules. Nothing shrinks below a readable size, and a 64 pt circle can never clip
+// the text it is meant to hold.
 //
-// Only the CHART text (the fraction and its caption) is capped at 1.4x, because
-// it has to stay inside the circle; the counters beside it always scale fully.
+// Only the CHART text (the fraction and its caption) is capped at 1.4x; the
+// counters beside it always scale fully.
 
 import React from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { t, tFmt } from '../strings';
-import { fonts, typeScale, type ThemeColors } from '../theme';
+import { fonts, type ThemeColors } from '../theme';
+import { homeCompact } from '../homeCompact';
 import { Icon, type IconName } from './icons';
 import { ProgressRing } from './ProgressRing';
 
-/** Ring geometry, measured off the reference: an 80 pt circle, 8 pt thick. */
-export const DAY_RING_SIZE = 80;
-export const DAY_RING_THICKNESS = 8;
+/** Ring geometry, from the Home tokens: a 64 pt circle, 6 pt thick. */
+export const DAY_RING_SIZE = homeCompact.ringSize;
+export const DAY_RING_THICKNESS = homeCompact.ringStroke;
 
-/** The state marks in the metrics strip: 16 pt, the app's three state glyphs. */
-const METRIC_GLYPH_SIZE = 16;
+/** The state marks in the metrics: 16 pt, the app's three state glyphs. */
+const METRIC_GLYPH_SIZE = homeCompact.metricIcon;
 
 /** Chart text stops growing at 1.4x so it stays inside the ring. */
 export const DAY_CHART_FONT_MAX_SCALE = 1.4;
 
-/** Below this width - or above this font scale - the strip stacks under the ring. */
+/** Below this width - or above this font scale - the block stacks (text, not a ring). */
 export const DAY_PROGRESS_STACK_WIDTH = 340;
-export const DAY_PROGRESS_STACK_FONT_SCALE = 1.4;
+export const DAY_PROGRESS_STACK_FONT_SCALE = homeCompact.stackFontScale;
 
 export function DayProgress(props: {
   /** Slots marked done today. */
@@ -55,17 +56,18 @@ export function DayProgress(props: {
 }): React.JSX.Element {
   const { colors } = props;
   const { width, fontScale } = useWindowDimensions();
-  /** Narrow screen or very large text: the strip moves UNDER the ring. */
+  /**
+   * Narrow screen or large text: the block stacks, and the ring gives way to the
+   * same numbers as TEXT (so the circle never clips them).
+   */
   const stacked =
     width < DAY_PROGRESS_STACK_WIDTH || fontScale > DAY_PROGRESS_STACK_FONT_SCALE;
+  /** The day's own fraction - drawn inside the ring, or as the stacked summary. */
+  const fraction = tFmt('Rn_DayDoneOfTotal', props.completed, props.totalSlots);
 
   const metric = (icon: IconName, value: number, label: string, color: string): React.JSX.Element => (
-    <View
-      style={[
-        styles.metric,
-        stacked ? styles.metricStacked : styles.metricWide,
-      ]}>
-      <View style={[styles.metricTop, stacked && styles.metricTopStacked]}>
+    <View style={[styles.metric, stacked && styles.metricStacked]}>
+      <View style={styles.metricTop}>
         <Icon name={icon} size={METRIC_GLYPH_SIZE} color={color} />
         <Text style={[styles.metricValue, { color: colors.text }]}>{value}</Text>
       </View>
@@ -94,7 +96,16 @@ export function DayProgress(props: {
 
   return (
     <View style={[styles.row, stacked && styles.rowStacked]}>
-      <View style={stacked ? styles.ringCentred : undefined}>
+      {stacked ? (
+        /* The textual stand-in for the ring: the same fraction, the same caption,
+           free to wrap - nothing is capped and nothing can be clipped. */
+        <View style={styles.summary}>
+          <Text style={[styles.summaryValue, { color: colors.text }]}>{fraction}</Text>
+          <Text style={[styles.summaryCaption, { color: colors.textMuted }]}>
+            {t('Dashboard_CountDone')}
+          </Text>
+        </View>
+      ) : (
         <ProgressRing
           size={DAY_RING_SIZE}
           thickness={DAY_RING_THICKNESS}
@@ -110,7 +121,7 @@ export function DayProgress(props: {
             // Chart labels: they have to stay INSIDE the ring, so a very large
             // system text size grows them only to the point the circle can hold.
             maxFontSizeMultiplier={DAY_CHART_FONT_MAX_SCALE}>
-            {tFmt('Rn_DayDoneOfTotal', props.completed, props.totalSlots)}
+            {fraction}
           </Text>
           <Text
             style={[styles.fractionLabel, { color: colors.textMuted }]}
@@ -118,13 +129,8 @@ export function DayProgress(props: {
             {t('Dashboard_CountDone')}
           </Text>
         </ProgressRing>
-      </View>
-      <View
-        style={[
-          styles.metrics,
-          stacked ? styles.metricsStacked : styles.metricsWide,
-          { backgroundColor: colors.cardFill, borderColor: colors.cardDivider },
-        ]}>
+      )}
+      <View style={[styles.metrics, stacked && styles.metricsStacked]}>
         {metric('checkmark', props.completed, t('Dashboard_CountDone'), colors.done)}
         {divider()}
         {metric('close', props.missed, t('Dashboard_CountMissed'), colors.missed)}
@@ -136,80 +142,99 @@ export function DayProgress(props: {
 }
 
 const styles = StyleSheet.create({
-  /** Ring at the LEFT, the three-column strip filling the rest. */
+  /** Ring at the LEFT, the three-column metrics filling the rest, 8 dp apart. */
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: 12,
-    marginTop: 8,
+    columnGap: homeCompact.ringLegendGap,
+    marginTop: homeCompact.progressGapTop,
   },
-  /** Stacked: a centred ring over one full-width strip. */
-  rowStacked: { flexDirection: 'column', alignItems: 'stretch', rowGap: 12 },
-  ringCentred: { alignSelf: 'center' },
-  /** The fraction inside the ring: the loudest number of the header. */
-  fraction: {
-    fontSize: typeScale.title2,
-    lineHeight: 27,
-    fontFamily: fonts.bold,
-    letterSpacing: -0.3,
+  /** Stacked: the textual fraction over one full-width column of rows. */
+  rowStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    rowGap: homeCompact.ringLegendGap,
+  },
+  /** The stack's textual stand-in for the ring, on the card's left edge. */
+  summary: { alignItems: 'flex-start' },
+  summaryValue: {
+    fontFamily: fonts.medium,
+    fontSize: homeCompact.metricSize,
+    lineHeight: homeCompact.metricLine,
     fontVariant: ['tabular-nums'],
   },
-  fractionLabel: { fontSize: typeScale.caption2, lineHeight: 14, marginTop: 1 },
+  summaryCaption: {
+    fontFamily: fonts.regular,
+    fontSize: homeCompact.metricLabelSize,
+    lineHeight: homeCompact.metricLabelLine,
+  },
+  /** The fraction inside the ring: the loudest number of the header. */
+  fraction: {
+    fontSize: homeCompact.fractionSize,
+    lineHeight: homeCompact.fractionLine,
+    fontFamily: fonts.bold,
+    fontVariant: ['tabular-nums'],
+  },
+  fractionLabel: {
+    fontSize: homeCompact.ringCaptionSize,
+    lineHeight: homeCompact.ringCaptionLine,
+  },
   /**
-   * The metrics strip: the SAME surface as the card it sits on, 1 pt of the
-   * neutral frame the bulk buttons wear (never a grey/blue fill or an inner
-   * shadow), 64 pt minimum, 12 pt corners and 10 pt of vertical air around three
-   * equal columns.
+   * The metrics: NO frame, NO fill, NO corner radius - they sit straight on the
+   * header's own surface, 56 pt minimum, around three equal columns.
    */
   metrics: {
-    minHeight: 64,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 10,
+    flex: 1,
+    minWidth: 0,
+    minHeight: homeCompact.metricMinHeight,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  metricsWide: { flex: 1, minWidth: 0 },
-  /** The strip becomes the rows: full width, one row per state. */
-  metricsStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  /** The metrics become the rows: full width, one row per state. */
+  metricsStacked: { flex: 0, flexDirection: 'column', alignItems: 'stretch' },
   /** One state: icon + bold value on top, its label beneath, centred. */
-  metric: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  metricWide: { flex: 1, minWidth: 0 },
+  metric: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: homeCompact.metricPaddingX,
+  },
+  /** Stacked: glyph + value + label become ONE row that may wrap. */
   metricStacked: {
-    minHeight: 44,
+    flex: 0,
+    minHeight: homeCompact.stackedMetricMinHeight,
     flexDirection: 'row',
-    justifyContent: 'flex-start',
-    columnGap: 10,
-    paddingHorizontal: 12,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: homeCompact.ringLegendGap,
   },
   metricTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    columnGap: 4,
+    columnGap: homeCompact.metricGap,
   },
-  metricTopStacked: { minWidth: 60, justifyContent: 'flex-start' },
   /** The number is the state's answer: bold ink, tabular so columns line up. */
   metricValue: {
     fontFamily: fonts.bold,
-    fontSize: typeScale.title2,
+    fontSize: homeCompact.metricSize,
+    lineHeight: homeCompact.metricLine,
     fontVariant: ['tabular-nums'],
   },
   metricLabel: {
-    fontSize: typeScale.caption,
+    fontSize: homeCompact.metricLabelSize,
+    lineHeight: homeCompact.metricLabelLine,
     textAlign: 'center',
-    marginTop: 3,
     alignSelf: 'stretch',
   },
-  metricLabelStacked: {
-    flex: 1,
-    fontSize: 14,
-    textAlign: 'left',
-    marginTop: 0,
+  metricLabelStacked: { flexShrink: 1, textAlign: 'left', alignSelf: 'center' },
+  /** The rule between two columns: 1 pt wide, 24 pt tall, centred. */
+  divider: {
+    width: homeCompact.border,
+    height: homeCompact.dividerHeight,
     alignSelf: 'center',
   },
-  /** The rule between two columns: 1 pt wide, 32 pt tall, centred. */
-  divider: { width: 1, height: 32, alignSelf: 'center' },
-  /** ...and between two rows: 1 pt tall, the strip's full width minus 12 pt. */
-  dividerStacked: { width: 'auto', height: 1, alignSelf: 'stretch', marginHorizontal: 12 },
+  /** ...and between two rows: 1 pt tall, the block's full width. */
+  dividerStacked: { width: '100%', height: homeCompact.border, alignSelf: 'stretch' },
 });
