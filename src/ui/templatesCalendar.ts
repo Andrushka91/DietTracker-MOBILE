@@ -5,14 +5,17 @@
 // this module adds the ONE page gutter, the dimensions of the two surfaces and
 // the two -- and only two -- coloured action families the design introduces:
 //
-//   apply   the restrained blue of "Apply to date" on a card AND of
-//           "Apply template" in the popup, so the action keeps one identity.
-//   cancel  the outlined red of the popup's Cancel. It CANCELS, it never
-//           deletes anything, so there is no destructive dialog and no solid
-//           red slab - just a complete outline.
+//   apply   the restrained blue of calendar endpoints (selected day border/ink
+//           and in-range fill) inside the popup picker. These are NOT the app's
+//           accent actions; they stay here so the calendar palette is stable.
+//   cancel  the outlined red of the popup's Cancel and, via `accentActions`,
+//           the same red outlined treatment on the Home editor's Cancel. It
+//           CANCELS, it never deletes anything, so there is no destructive dialog
+//           and no solid red slab - just a complete outline.
 //
-// Nothing here restyles the shared buttons: a template action is not the app's
-// accent action.
+// Nothing here restyles the shared accent actions: those are driven by the theme
+// accent through `src/ui/accentActions.ts` (Save on the meal editor card, Apply
+// to date on every template card, and the final Apply in the popup).
 
 /**
  * ONE page gutter, matching the approved Home `HOME_CARD_GUTTER`: left edge,

@@ -20,7 +20,9 @@ import { MealTemplate, MealTemplateContent } from '../src/domain/models';
 import { formatDate } from '../src/domain/analytics';
 import { TemplatesScreen } from '../src/ui/screens/TemplatesScreen';
 import { formatLongDate, formatMediumDate, t, tFmt } from '../src/ui/strings';
-import { templateActionInk, templatesCalendarTokens } from '../src/ui/templatesCalendar';
+import { lightColors } from '../src/ui/theme';
+import { selectedAccentFill } from '../src/ui/accentActions';
+import { templatesCalendarTokens } from '../src/ui/templatesCalendar';
 
 /** ONE stable app object, mutable per test (the theme). */
 const mockApp = {
@@ -328,8 +330,8 @@ describe('the template card', () => {
     const target = styleOf(applyButtons(renderer)[0]);
     expect(target.minHeight).toBeGreaterThanOrEqual(44);
     expect(target.minWidth).toBe(templatesCalendarTokens.applyMinWidth);
-    // The VISIBLE control inside that target is a 36 dp OUTLINED BLUE control:
-    // 8 dp corners, the page's pale blue surface - the SAME family the popup's
+    // The VISIBLE control inside that target is a 36 dp OUTLINED accent control:
+    // 8 dp corners, the page's pale accent wash — the same family the popup's
     // "Apply template" wears, and never a solid slab.
     const visible = applyButtons(renderer)[0]
       .findAllByType(View)
@@ -337,8 +339,8 @@ describe('the template card', () => {
       .find((style) => style.borderRadius === 8 && style.borderWidth === 1);
     expect(visible).toBeDefined();
     expect(visible?.minHeight).toBe(36);
-    expect(visible?.borderColor).toBe(templateActionInk.light.applyBorder);
-    expect(visible?.backgroundColor).toBe(templateActionInk.light.applyFill);
+    expect(visible?.borderColor).toBe(lightColors.accent);
+    expect(visible?.backgroundColor).toBe(selectedAccentFill(lightColors));
     expect(applyButtons(renderer)).toHaveLength(1);
 
     // Expanding the contents must neither move nor duplicate the control.

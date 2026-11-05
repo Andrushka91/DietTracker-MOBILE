@@ -43,6 +43,7 @@ import { isFutureMeal } from '../../domain/rules/completionRules';
 import { hasMealText, hasUserContent } from '../../domain/rules/mealContentRules';
 import { MAX_PHOTOS_PER_MEAL } from '../../domain/rules/photoRules';
 import { validateMealEntry } from '../../domain/validation';
+import { accentActionColors, cancelActionColors } from '../accentActions';
 import { formatTime, mealNameKey, t } from '../strings';
 import { argb, fonts, metrics, softPillColors, themeColors, tintAlpha } from '../theme';
 import { localizedCode } from './buttons';
@@ -784,20 +785,23 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                   styles.cancelTarget,
                   saving && styles.subdued,
                 ]}>
-                {({ pressed }) => (
-                  <View
-                    style={[
-                      styles.control,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: pressed ? colors.surfaceVariant : colors.cardFill,
-                      },
-                    ]}>
-                    <Text style={[styles.controlLabel, { color: colors.text }]} numberOfLines={1}>
-                      {t('Common_Cancel')}
-                    </Text>
-                  </View>
-                )}
+                {({ pressed }) => {
+                  const cancel = cancelActionColors(colors, pressed);
+                  return (
+                    <View
+                      style={[
+                        styles.control,
+                        {
+                          borderColor: cancel.border,
+                          backgroundColor: cancel.fill,
+                        },
+                      ]}>
+                      <Text style={[styles.controlLabel, { color: cancel.foreground }]} numberOfLines={1}>
+                        {t('Common_Cancel')}
+                      </Text>
+                    </View>
+                  );
+                }}
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -810,20 +814,23 @@ export function MealCard(props: MealCardProps): React.JSX.Element {
                   styles.saveTarget,
                   saving && styles.subdued,
                 ]}>
-                {({ pressed }) => (
-                  <View
-                    style={[
-                      styles.control,
-                      {
-                        borderColor: colors.border,
-                        backgroundColor: pressed ? colors.surfaceVariant : colors.cardFill,
-                      },
-                    ]}>
-                    <Text style={[styles.controlLabel, { color: colors.text }]} numberOfLines={1}>
-                      {t('Common_Save')}
-                    </Text>
-                  </View>
-                )}
+                {({ pressed }) => {
+                  const action = accentActionColors(colors, pressed);
+                  return (
+                    <View
+                      style={[
+                        styles.control,
+                        {
+                          borderColor: action.border,
+                          backgroundColor: action.fill,
+                        },
+                      ]}>
+                      <Text style={[styles.controlLabel, { color: action.foreground }]} numberOfLines={1}>
+                        {t('Common_Save')}
+                      </Text>
+                    </View>
+                  );
+                }}
               </Pressable>
             </View>
           </View>

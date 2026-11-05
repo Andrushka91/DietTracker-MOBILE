@@ -37,7 +37,8 @@ import {
   TAB_LABEL_GAP,
   TAB_LABEL_LINE_HEIGHT,
 } from '../tabBar';
-import { fonts, tintAlpha, type ThemeColors } from '../theme';
+import { selectedAccentFill } from '../accentActions';
+import { fonts, type ThemeColors } from '../theme';
 
 /** Caption type size (the mockups' 11 pt caption). */
 export const TAB_LABEL_FONT_SIZE = 11;
@@ -48,7 +49,7 @@ export const TAB_LABEL_FONT_SIZE = 11;
  * near-black surface while the same 18 % would look heavy on white.
  */
 export function tabActiveChipFill(colors: ThemeColors): string {
-  return tintAlpha(colors.accent, colors.dark ? '2E' : '1A');
+  return selectedAccentFill(colors);
 }
 
 /**

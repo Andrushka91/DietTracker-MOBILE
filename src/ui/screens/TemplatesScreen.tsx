@@ -48,7 +48,8 @@ import { PromptDialog } from '../components/dialogs';
 import { Icon, MaterialIcon } from '../components/icons';
 import { mealCategoryGlyph } from '../mealGlyphs';
 import { fonts, themeColors } from '../theme';
-import { TEMPLATE_GUTTER, templateActionInk, templatesCalendarTokens as TPL } from '../templatesCalendar';
+import { accentActionColors } from '../accentActions';
+import { TEMPLATE_GUTTER, templatesCalendarTokens as TPL } from '../templatesCalendar';
 import { TAB_BAR_CONTENT_GAP } from '../tabBar';
 import { formatMediumDate, formatTime, mealNameKey, t, tFmt } from '../strings';
 import { dateInputProblem, isCalendarDate } from '../dates';
@@ -103,8 +104,6 @@ function formatUpdated(value: string, sameDay: boolean): string {
 export function TemplatesScreen(): React.JSX.Element {
   const app = useApp();
   const colors = themeColors(app.isDark);
-  /** The two coloured actions this page owns (see templatesCalendar.ts). */
-  const ink = templateActionInk[app.isDark ? 'dark' : 'light'];
   const { width, fontScale } = useWindowDimensions();
   /** Large text or a narrow window: the card head stacks instead of squeezing. */
   const stacked = fontScale > TPL.stackFont || width < TPL.stackWidth;
@@ -362,25 +361,27 @@ export function TemplatesScreen(): React.JSX.Element {
                   contents.length === 0 && styles.applyTargetOnly,
                 ]}>
                 {/* A real 48/44 dp target around a 36 dp visible control: 8 dp
-                    corners, the page's restrained BLUE outline and pale surface,
-                    the same blue the popup's "Apply template" wears. It is a low
-                    emphasis action repeated on every card - never a solid slab,
-                    never a shadow. */}
-                {({ pressed }) => (
-                  <View
-                    style={[
-                      styles.apply,
-                      {
-                        borderColor: ink.applyBorder,
-                        backgroundColor: pressed ? ink.applyPressed : ink.applyFill,
-                      },
-                    ]}>
-                    <MaterialIcon name="calendar-month-outline" size={TPL.icon} color={ink.apply} />
-                    <Text style={[styles.applyText, { color: ink.apply }]} numberOfLines={1}>
-                      {t('Template_Apply')}
-                    </Text>
-                  </View>
-                )}
+                    corners, the accent outline and pale wash from the shared helper.
+                    It is a low-emphasis action repeated on every card — never a solid
+                    slab, never a shadow. */}
+                {({ pressed }) => {
+                  const action = accentActionColors(colors, pressed);
+                  return (
+                    <View
+                      style={[
+                        styles.apply,
+                        {
+                          borderColor: action.border,
+                          backgroundColor: action.fill,
+                        },
+                      ]}>
+                      <MaterialIcon name="calendar-month-outline" size={TPL.icon} color={action.foreground} />
+                      <Text style={[styles.applyText, { color: action.foreground }]} numberOfLines={1}>
+                        {t('Template_Apply')}
+                      </Text>
+                    </View>
+                  );
+                }}
               </Pressable>
             </View>
             {/* Expanded contents sit BELOW the action row, inside the same card:
@@ -670,9 +671,8 @@ const styles = StyleSheet.create({
   /** Nothing to preview: the Apply control stays alone, right aligned. */
   applyTargetOnly: { marginLeft: 'auto' },
   /**
-   * The visible control: 36 dp tall, 8 dp corners, the page's restrained BLUE
-   * outline over a pale blue surface (the colours come from `templateActionInk`,
-   * so card and popup agree). Never a solid blue slab and never a shadow.
+   * The visible control: 36 dp tall, 8 dp corners, the accent outline and pale
+   * wash from the shared helper. Never a solid slab and never a shadow.
    */
   apply: {
     minHeight: TPL.visibleControl,

@@ -32,6 +32,7 @@ import {
 
 import { monthGrid } from '../calendarGrid';
 import { isCalendarDate } from '../dates';
+import { accentActionColors } from '../accentActions';
 import { templateRangeDays, type TemplateRangeResult } from '../../services/applyTemplateRange';
 import { fonts, themeColors } from '../theme';
 import { formatLongDate, formatMediumDate, formatMonthLabel, t, tFmt } from '../strings';
@@ -441,24 +442,27 @@ export function ApplyTemplateDateForm(props: ApplyTemplateDateFormProps): React.
                 { minHeight: target },
                 props.busy && styles.subdued,
               ]}>
-              {({ pressed }) => (
-                <View
-                  style={[
-                    styles.button,
-                    styles.applyVisible,
-                    stacked && styles.buttonStacked,
-                    {
-                      borderColor: ink.applyBorder,
-                      backgroundColor: pressed ? ink.applyPressed : ink.applyFill,
-                    },
-                  ]}>
-                  <Text
-                    style={[styles.buttonText, styles.applyText, { color: ink.apply }]}
-                    numberOfLines={2}>
-                    {applyLabel}
-                  </Text>
-                </View>
-              )}
+              {({ pressed }) => {
+                const action = accentActionColors(colors, pressed);
+                return (
+                  <View
+                    style={[
+                      styles.button,
+                      styles.applyVisible,
+                      stacked && styles.buttonStacked,
+                      {
+                        borderColor: action.border,
+                        backgroundColor: action.fill,
+                      },
+                    ]}>
+                    <Text
+                      style={[styles.buttonText, styles.applyText, { color: action.foreground }]}
+                      numberOfLines={2}>
+                      {applyLabel}
+                    </Text>
+                  </View>
+                );
+              }}
             </Pressable>
           </>
         )}
