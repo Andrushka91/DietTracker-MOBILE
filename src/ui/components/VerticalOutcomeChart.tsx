@@ -34,7 +34,7 @@ import {
 } from 'react-native';
 
 import { chartScaleMax, outcomeSegments } from '../statisticsChart';
-import { monthColumnLayout } from '../statisticsMonthLayout';
+import { monthColumnLayout, yearColumnLayout } from '../statisticsMonthLayout';
 import { statisticsVerticalTokens as TPL } from '../statisticsVertical';
 import type { Counts, Mode } from '../statisticsBreakdown';
 import { t } from '../strings';
@@ -104,7 +104,14 @@ export function VerticalOutcomeChart(props: {
    * hiding behind the edge. The other periods keep their own fixed widths.
    */
   const monthLayout =
-    props.mode === 'monthly' ? monthColumnLayout(viewportWidth, props.rows.length, fontScale) : null;
+    props.mode === 'monthly'
+      ? monthColumnLayout(viewportWidth, props.rows.length, fontScale)
+      : props.mode === 'yearly'
+        ? // Year: twelve months, but an INTEGER number of COMPLETE columns fills
+          // the measured viewport at rest (after the fixed y-axis), so no month
+          // is clipped at the right edge; the remaining months scroll.
+          yearColumnLayout(viewportWidth, props.rows.length, fontScale)
+        : null;
   const baseWidth = props.mode === 'daily' ? CHART.mealColumnWidth : CHART.columnWidth;
   const columnWidth =
     monthLayout?.columnWidth ?? Math.ceil(baseWidth * Math.max(1, fontScale));
@@ -141,8 +148,15 @@ export function VerticalOutcomeChart(props: {
           showsHorizontalScrollIndicator={overflowing}
           keyboardShouldPersistTaps="handled"
           // A REAL gutter on the scroll content (never on the viewport), so the
-          // last column and its label can be scrolled fully into view.
-          contentContainerStyle={monthLayout?.edgePadding ? styles.monthEdges : undefined}
+          // first and last columns' value, label and selection border sit clear
+          // of the viewport edges - including December at maximum scroll, which
+          // keeps an 8 dp trailing gutter. The same gutters are counted in the
+          // layout's contentWidth used for the overflow hint.
+          contentContainerStyle={
+            (monthLayout?.edgePadding ?? 0) > 0
+              ? styles.monthEdges
+              : undefined
+          }
           accessibilityHint={t('Rn_StatChartScrollHint')}
           onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}>
           <View style={[styles.columns, monthLayout !== null && styles.columnsMonth]}>
@@ -185,7 +199,7 @@ export function VerticalOutcomeChart(props: {
                     {/* The plot's two rules: the scale maximum and zero. */}
                     <View style={[styles.gridTop, { backgroundColor: colors.border }]} />
                     <View style={[styles.gridBottom, { backgroundColor: colors.border }]} />
-                    <View style={[styles.bar, { backgroundColor: colors.surfaceVariant }]}>
+                    <View style={styles.bar}>
                       {outcomeSegments(row.counts, scaleMax, CHART.plotHeight)
                         .filter((segment) => segment.height > 0)
                         .map((segment) => (

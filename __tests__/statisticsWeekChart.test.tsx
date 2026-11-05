@@ -25,6 +25,7 @@ import {
 import {
   compactMonthBucketLabel,
   monthColumnLayout,
+  yearColumnLayout,
 } from '../src/ui/statisticsMonthLayout';
 import { statisticsVerticalTokens as TPL } from '../src/ui/statisticsVertical';
 import type { Mode } from '../src/ui/statisticsBreakdown';
@@ -377,5 +378,101 @@ describe('the month column layout', () => {
     const [, , pending] = outcomeSegments(NOVEMBER[0].counts, scale, CHART.plotHeight);
     expect(pending.height).toBeCloseTo((CHART.plotHeight * 5) / 35, 6);
     expect(pending.height).toBeLessThan(CHART.plotHeight / 2);
+  });
+});
+
+describe('the year column layout', () => {
+  /** Twelve months of one year, keyed like the app's yearly rows. */
+  const YEAR: OutcomeColumn[] = Array.from({ length: 12 }, (_unused, index) =>
+    row(`2026-${String(index + 1).padStart(2, '0')}-01`, `M${index + 1}`, 0, 0, 35, true),
+  );
+
+  test('distributes all twelve months edge-to-edge when they fit', () => {
+    const viewport = 700;
+    const layout = yearColumnLayout(viewport, 12, 1);
+    expect(layout.overflowing).toBe(false);
+    expect(layout.edgePadding).toBe(0);
+    expect(layout.contentWidth).toBe(viewport);
+    // Twelve columns + eleven gaps fill the viewport exactly, no leading spacer.
+    expect(layout.columnWidth * 12 + TPL.monthColumnGap * 11).toBeCloseTo(viewport, 6);
+    // Each column stays above the 48 dp touch floor.
+    expect(layout.columnWidth).toBeGreaterThanOrEqual(TPL.monthColumnMinWidth);
+  });
+
+  test('sizes an INTEGER number of COMPLETE columns to fill the viewport at rest', () => {
+    const viewport = 400;
+    const layout = yearColumnLayout(viewport, 12, 1);
+    expect(layout.overflowing).toBe(true);
+    expect(layout.edgePadding).toBe(TPL.monthEdgePadding);
+    // Columns are WIDER than the minimum so no half month is clipped at rest.
+    expect(layout.columnWidth).toBeGreaterThan(TPL.monthColumnMinWidth);
+    // The leading 8 dp gutter + the whole visible columns + their gaps fill the
+    // viewport EXACTLY, so the last visible column's right edge lands on the edge.
+    const fitCount = Math.floor(
+      (viewport - TPL.monthEdgePadding + TPL.monthColumnGap) /
+        (TPL.monthColumnMinWidth + TPL.monthColumnGap),
+    );
+    expect(fitCount).toBeGreaterThanOrEqual(1);
+    expect(fitCount).toBeLessThan(12);
+    const restWidth =
+      TPL.monthEdgePadding +
+      layout.columnWidth * fitCount +
+      TPL.monthColumnGap * (fitCount - 1);
+    expect(restWidth).toBeCloseTo(viewport, 6);
+  });
+
+  test('scroll content carries both gutters, every width and gap; December ends 8 dp short', () => {
+    const viewport = 400;
+    const layout = yearColumnLayout(viewport, 12, 1);
+    // The overflow hint uses the SAME geometry actually rendered.
+    const expectedContent =
+      TPL.monthEdgePadding * 2 +
+      layout.columnWidth * 12 +
+      TPL.monthColumnGap * 11;
+    expect(layout.contentWidth).toBeCloseTo(expectedContent, 6);
+    expect(layout.contentWidth).toBeGreaterThan(viewport);
+    // December (the 12th, last column) ends exactly one trailing gutter before
+    // the content's right edge, so at maximum scroll it is fully visible with the
+    // 8 dp trailing gutter beside it.
+    const decemberRight =
+      TPL.monthEdgePadding +
+      layout.columnWidth * 12 +
+      TPL.monthColumnGap * 11;
+    expect(layout.contentWidth - decemberRight).toBeCloseTo(TPL.monthEdgePadding, 6);
+  });
+
+  test('keeps the minimum target at narrow widths and large text', () => {
+    const layout = yearColumnLayout(320, 12, 2);
+    expect(layout.overflowing).toBe(true);
+    // A 2x text scale raises the touch floor to 96 dp; the columns never shrink
+    // below it, they scroll instead.
+    expect(layout.columnWidth).toBeGreaterThanOrEqual(2 * TPL.monthColumnMinWidth - 1e-9);
+  });
+
+  test('year renders all twelve columns with labels and values', () => {
+    const renderer = render({ rows: YEAR, mode: 'yearly' });
+    expect(columns(renderer)).toHaveLength(12);
+    const printed = renderer.root.findAllByType(Text).map((node) => node.props.children);
+    // Every month keeps its label and value.
+    for (let i = 0; i < 12; i++) {
+      expect(printed).toContain(`M${i + 1}`);
+      expect(printed).toContain(`0 / 35`);
+    }
+  });
+
+  test('shorter month stacks leave the area above them transparent', () => {
+    // February with 140 planned vs March with 155 — scale max is 155, so Feb's
+    // stack is 140/155 of plot (shorter), March's fills the plot (it is the max).
+    const feb = row('2026-02-01', 'Feb', 0, 0, 140);
+    const mar = row('2026-03-01', 'Mar', 0, 0, 155);
+    const scale = chartScaleMax([feb, mar]);
+    const [, , febPending] = outcomeSegments(feb.counts, scale, CHART.plotHeight);
+    const [, , marPending] = outcomeSegments(mar.counts, scale, CHART.plotHeight);
+    // March fills the plot (it is the scale max).
+    expect(marPending.height).toBeCloseTo(CHART.plotHeight, 6);
+    // Feb's pending band is shorter — proof the stack is proportional, not a
+    // full-height backdrop.
+    expect(febPending.height).toBeLessThan(CHART.plotHeight);
+    expect(febPending.height).toBeCloseTo((CHART.plotHeight * 140) / 155, 6);
   });
 });

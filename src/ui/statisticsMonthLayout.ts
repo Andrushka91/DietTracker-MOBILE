@@ -71,6 +71,66 @@ export function monthColumnLayout(
 }
 
 /**
+ * Year layout: twelve WHOLE months in order, but the column width is chosen so
+ * that an integer number of COMPLETE columns fills the viewport at rest - no
+ * half month (e.g. July) is ever clipped at the right edge of the initial view.
+ *
+ * It reuses the month tokens and the same fit/overflow shape, so nothing else
+ * changes:
+ *
+ *   * everything fits: distribute edge to edge, first column at the plot's left
+ *     edge, last at its right edge, NO end gutter - identical to the month fit;
+ *   * otherwise: keep a real 8 dp gutter at BOTH ends of the scroll content and
+ *     size the columns WIDER than the 48 dp minimum so that exactly `fitCount`
+ *     whole columns fill the viewport at rest (leading gutter + the columns'
+ *     widths + their gaps == viewportWidth). The remaining months scroll, and at
+ *     maximum scroll December ends 8 dp short of the content's right edge, so its
+ *     value, label and selection border are fully clear of the edge.
+ *
+ * The touch target never drops below `ceil(48 * fontScale)` because `fitCount`
+ * is the largest integer that keeps every column at or above that minimum.
+ */
+export function yearColumnLayout(
+  viewportWidth: number,
+  columnCount: number,
+  fontScale: number,
+): MonthColumnLayout {
+  const scale = Math.max(1, fontScale);
+  const minimumTarget = Math.ceil(TPL.monthColumnMinWidth * scale);
+  const columnGap = TPL.monthColumnGap;
+  const edge = TPL.monthEdgePadding;
+  if (columnCount <= 0) {
+    return { columnWidth: minimumTarget, columnGap, edgePadding: 0, contentWidth: 0, overflowing: false };
+  }
+  if (viewportWidth <= 0) {
+    // Not measured yet: minimum targets so nothing collapses on the first frame.
+    const contentWidth = edge * 2 + minimumTarget * columnCount + columnGap * (columnCount - 1);
+    return { columnWidth: minimumTarget, columnGap, edgePadding: edge, contentWidth, overflowing: false };
+  }
+  const minimumTargets = minimumTarget * columnCount + columnGap * (columnCount - 1);
+  if (viewportWidth >= minimumTargets) {
+    // Fitted: no end spacer - the targets fill the plot edge to edge.
+    const columnWidth = (viewportWidth - columnGap * (columnCount - 1)) / columnCount;
+    return { columnWidth, columnGap, edgePadding: 0, contentWidth: viewportWidth, overflowing: false };
+  }
+  // Overflowing: the largest integer number of COMPLETE columns that fit beside
+  // the leading 8 dp gutter without dropping below the minimum target.
+  const fitCount = Math.max(
+    1,
+    Math.floor((viewportWidth - edge + columnGap) / (minimumTarget + columnGap)),
+  );
+  // Widen the columns so those whole columns fill the viewport exactly at rest.
+  const columnWidth = Math.max(
+    minimumTarget,
+    (viewportWidth - edge - columnGap * (fitCount - 1)) / fitCount,
+  );
+  // The scroll content carries BOTH end gutters plus every width and gap, so the
+  // width used for the overflow hint is the width actually rendered and scrolled.
+  const contentWidth = edge * 2 + columnWidth * columnCount + columnGap * (columnCount - 1);
+  return { columnWidth, columnGap, edgePadding: edge, contentWidth, overflowing: true };
+}
+
+/**
  * The month column's two-line label: "1\nNov", "2–8\nNov", ... built from the
  * row's own from/to and the app's EXISTING short-month name. A bucket that
  * crosses a month boundary keeps the full row label instead of inventing a
